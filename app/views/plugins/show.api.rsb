@@ -1,0 +1,14 @@
+api.plugin do
+  api.id @plugin.id.to_s
+  api.name @plugin.name
+  api.description @plugin.description
+  api.version @plugin.version
+  api.author @plugin.author
+  api.author_url @plugin.author_url
+  api.url @plugin.url
+  if @plugin.configurable?
+    api.settings Setting["plugin_#{@plugin.id}"].to_json
+  else
+    api.settings nil
+  end
+end

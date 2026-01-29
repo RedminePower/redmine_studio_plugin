@@ -1,0 +1,20 @@
+api.array :plugins, api_meta(:total_count => @plugins.count) do
+  @plugins.each do |plugin|
+    api.plugin do
+      api.id plugin.id.to_s
+      api.name plugin.name
+      api.description plugin.description
+      api.version plugin.version
+      api.author plugin.author
+      api.author_url plugin.author_url
+      api.url plugin.url
+      if include_in_api_response?('settings')
+        if plugin.configurable?
+          api.settings Setting["plugin_#{plugin.id}"].to_json
+        else
+          api.settings nil
+        end
+      end
+    end
+  end
+end
