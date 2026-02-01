@@ -4,11 +4,14 @@
 
 This plugin provides features for [Redmine Studio](https://www.redmine-power.com/) (Windows client application provided by Redmine Power).
 
+### Prerequisites
+
+Enable "Enable REST web service" in "Administration" → "Settings" → "API".
+
 ## Features
 
-- API to retrieve information about installed plugins
-  - Get plugin list
-  - Get single plugin information (including settings)
+- **Reply Button** - Adds a "Reply" button to tickets
+- **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 
 ## Supported Redmine
 
@@ -17,22 +20,45 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 
 ## Installation
 
-Run the following commands in the Redmine plugins folder and restart Redmine.
+### 1. Deploy the plugin
 
+Run the following commands in the Redmine plugins folder.
+
+```bash
+cd /path/to/redmine/plugins
+git clone https://github.com/RedminePower/redmine_studio_plugin.git
 ```
-$ cd /var/lib/redmine/plugins
-$ git clone https://github.com/RedminePower/redmine_studio_plugin.git
+
+### 2. Setup
+
+Run the following command. This will remove integrated plugins.
+
+```bash
+cd /path/to/redmine
+bundle exec rake redmine_studio_plugin:setup RAILS_ENV=production
 ```
 
-## Usage
+### 3. Restart Redmine
 
-### Prerequisites
+Restart Redmine to apply the changes.
 
-- Enable "Enable REST web service" in Administration > Settings > API.
+## Reply Button
 
-### API Endpoints
+A feature that adds a "Reply" button to tickets.
 
-This plugin provides the following APIs. They are used by Redmine Studio.
+- Clicking the "Reply" button automatically sets the last commenter as the assignee
+- If there are no comments, the ticket author is set as the assignee
+- Enables email-like exchanges on tickets, convenient for ticket-driven development
+
+### Activation
+
+This feature can be enabled or disabled per project.
+The "Reply" button will not appear unless the following settings are configured.
+
+1. Go to project "Settings"
+2. In the "Project" tab, check "Reply button" under "Modules" and save
+
+## Plugin API
 
 | Endpoint | Description |
 |----------|-------------|
@@ -43,9 +69,9 @@ This plugin provides the following APIs. They are used by Redmine Studio.
 
 Remove the plugin folder.
 
-```
-$ cd /var/lib/redmine/plugins
-$ rm -rf redmine_studio_plugin
+```bash
+cd /path/to/redmine/plugins
+rm -rf redmine_studio_plugin
 ```
 
 ## License
