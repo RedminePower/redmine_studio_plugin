@@ -19,7 +19,7 @@
 |------|-----|
 | ファイル | `lib/tasks/setup.rake` |
 | タスク名 | `redmine_studio_plugin:setup` |
-| 統合済みプラグイン | `redmine_reply_button`, `redmine_teams_button` |
+| 統合済みプラグイン | `config/integrated_plugins.yml` を参照 |
 
 ### 処理フロー
 
@@ -63,7 +63,11 @@ Rake タスクは `reenable` / `invoke` で再実行可能なため、コンテ�
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
 $backupDir = "$redmineRoot\test_backup"
-$integratedPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# 統合済みプラグインリストを config/integrated_plugins.yml から取得
+$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
+$configContent = Get-Content $configPath -Raw
+$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 # バックアップフォルダ作成
 if (-not (Test-Path $backupDir)) {
@@ -102,7 +106,11 @@ foreach ($plugin in $integratedPlugins) {
 ```powershell
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
-$integratedPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# 統合済みプラグインリストを config/integrated_plugins.yml から取得
+$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
+$configContent = Get-Content $configPath -Raw
+$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 foreach ($plugin in $integratedPlugins) {
     $pluginPath = "$pluginsDir\$plugin"
@@ -125,7 +133,11 @@ foreach ($plugin in $integratedPlugins) {
 ```powershell
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
-$integratedPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# 統合済みプラグインリストを config/integrated_plugins.yml から取得
+$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
+$configContent = Get-Content $configPath -Raw
+$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 foreach ($plugin in $integratedPlugins) {
     $pluginPath = "$pluginsDir\$plugin"
@@ -143,7 +155,11 @@ foreach ($plugin in $integratedPlugins) {
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
 $backupDir = "$redmineRoot\test_backup"
-$integratedPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# 統合済みプラグインリストを config/integrated_plugins.yml から取得
+$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
+$configContent = Get-Content $configPath -Raw
+$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 foreach ($plugin in $integratedPlugins) {
     $pluginPath = "$pluginsDir\$plugin"

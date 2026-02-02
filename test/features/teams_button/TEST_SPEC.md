@@ -36,7 +36,11 @@ redmine_studio_plugin の Teams Button 機能のテスト仕様。チケット�
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
 $backupDir = "$redmineRoot\test_backup"
-$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# 競合プラグインリストを config/integrated_plugins.yml から取得
+$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
+$configContent = Get-Content $configPath -Raw
+$conflictingPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 # バックアップフォルダ作成
 if (-not (Test-Path $backupDir)) {
@@ -83,7 +87,11 @@ foreach ($plugin in $conflictingPlugins) {
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
 $backupDir = "$redmineRoot\test_backup"
-$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# 競合プラグインリストを config/integrated_plugins.yml から取得
+$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
+$configContent = Get-Content $configPath -Raw
+$conflictingPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 # 競合プラグインを復元
 foreach ($plugin in $conflictingPlugins) {

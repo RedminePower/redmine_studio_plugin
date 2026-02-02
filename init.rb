@@ -1,10 +1,17 @@
 # frozen_string_literal: true
 
+require 'yaml'
+
 Rails.logger.info 'Starting Redmine Studio Plugin'
+
+# Load integrated plugins list from config
+plugin_root = File.dirname(__FILE__)
+config_path = File.join(plugin_root, 'config', 'integrated_plugins.yml')
+config = YAML.load_file(config_path)
+integrated_plugins = config['integrated_plugins'] || []
 
 # Check for conflicting plugins (integrated plugins that still exist)
 plugins_dir = Rails.root.join('plugins')
-integrated_plugins = ['redmine_reply_button', 'redmine_teams_button']
 conflicting_plugins = integrated_plugins.select do |plugin|
   plugin_path = plugins_dir.join(plugin)
   # Check if plugin folder exists AND contains init.rb (valid plugin)

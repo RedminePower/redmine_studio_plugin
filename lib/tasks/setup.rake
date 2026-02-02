@@ -1,10 +1,17 @@
+require 'yaml'
+
 namespace :redmine_studio_plugin do
   desc 'Setup: remove integrated plugins'
   task :setup => :environment do
     Rails.logger.info "[redmine_studio_plugin] Setup task started"
 
+    # Load integrated plugins list from config
+    plugin_root = Rails.root.join('plugins', 'redmine_studio_plugin')
+    config_path = plugin_root.join('config', 'integrated_plugins.yml')
+    config = YAML.load_file(config_path)
+    integrated_plugins = config['integrated_plugins'] || []
+
     plugins_dir = Rails.root.join('plugins')
-    integrated_plugins = ['redmine_reply_button', 'redmine_teams_button']
 
     removed_plugins = []
     integrated_plugins.each do |plugin|
