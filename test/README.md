@@ -10,6 +10,7 @@
 | `conflict_detection/TEST_SPEC.md` | 競合プラグイン検出テスト |
 | `features/plugin_api/TEST_SPEC.md` | プラグイン情報 API テスト |
 | `features/reply_button/TEST_SPEC.md` | Reply Button テスト |
+| `features/teams_button/TEST_SPEC.md` | Teams Button テスト |
 
 ## テストの種類
 
@@ -39,3 +40,4 @@ Claude に以下のように依頼してください:
 - `conflict_detection のテストを実行してください`
 - `plugin_api のテストを実行してください`
 - `reply_button のテストを実行してください`
+- `teams_button のテストを実行してください`

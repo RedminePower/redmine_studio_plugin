@@ -11,6 +11,7 @@ Enable "Enable REST web service" in "Administration" → "Settings" → "API".
 ## Features
 
 - **Reply Button** - Adds a "Reply" button to tickets
+- **Teams Button** - Adds a "Teams" button to usernames to start a chat
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 
 ## Supported Redmine
@@ -57,6 +58,26 @@ The "Reply" button will not appear unless the following settings are configured.
 
 1. Go to project "Settings"
 2. In the "Project" tab, check "Reply button" under "Modules" and save
+
+## Teams Button
+
+A feature that adds a "Teams" button next to usernames, allowing you to start a chat with one click.
+
+- Clicking the "Teams" button opens a Teams chat with that user
+- The chat is pre-filled with ticket information (title, URL, ticket number)
+
+### Supported Client
+
+- Must be using Office365 (Tested on Windows10, Android)
+  - Because the DeepLink function is used to launch Teams
+
+### Activation
+
+This feature can be enabled or disabled per project.
+The "Teams" button will not appear unless the following settings are configured.
+
+1. Go to project "Settings"
+2. In the "Project" tab, check "Teams button" under "Modules" and save
 
 ## Plugin API
 

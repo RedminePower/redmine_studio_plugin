@@ -29,24 +29,151 @@ redmine_studio_plugin が統合する各機能と、元となるプラグイン�
 
 ---
 
-## 1. rails runner テスト
+## テスト実行フロー
 
-**実行方法:**
-```bash
-docker exec {Container} rails runner plugins/redmine_studio_plugin/test/conflict_detection/runner_test.rb
+競合検出はプラグイン読み込み時（Rails 起動時）に行われるため、フェーズ間でコンテナの再起動が必要。
+
+### フェーズ 1: 事前処理（退避）
+
+既存の競合プラグインを退避する。
+
+**Windows PowerShell で実行:**
+```powershell
+$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$pluginsDir = "$redmineRoot\plugins"
+$backupDir = "$redmineRoot\test_backup"
+$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# バックアップフォルダ作成
+if (-not (Test-Path $backupDir)) {
+    New-Item -ItemType Directory -Path $backupDir | Out-Null
+}
+
+# 競合プラグインを退避
+foreach ($plugin in $conflictingPlugins) {
+    $pluginPath = "$pluginsDir\$plugin"
+    $backupPath = "$backupDir\$plugin"
+    if (Test-Path $pluginPath) {
+        $items = Get-ChildItem -Path $pluginPath -Force
+        if ($items.Count -gt 0) {
+            Move-Item -Path $pluginPath -Destination $backupPath -Force
+            Write-Host "Backed up: $plugin"
+        } else {
+            # 空フォルダは削除
+            Remove-Item -Path $pluginPath -Force
+            Write-Host "Removed empty folder: $plugin"
+        }
+    }
+}
 ```
+
+### フェーズ 2: 競合なしテスト
+
+1. コンテナを再起動
+2. [1-1], [2-1] を実行（競合プラグインなし → 警告なし、モジュール登録あり）
+
+### フェーズ 3: 競合ありテスト
+
+1. ダミーの競合プラグインを作成
+
+**Windows PowerShell で実行:**
+```powershell
+$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$pluginsDir = "$redmineRoot\plugins"
+$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+foreach ($plugin in $conflictingPlugins) {
+    $pluginPath = "$pluginsDir\$plugin"
+    if (-not (Test-Path $pluginPath)) {
+        New-Item -ItemType Directory -Path $pluginPath | Out-Null
+    }
+    New-Item -ItemType File -Path "$pluginPath\init.rb" -Force | Out-Null
+    Write-Host "Created dummy: $plugin"
+}
+```
+
+2. コンテナを再起動
+3. [1-2], [2-2] を実行（競合プラグインあり → 警告表示、モジュール登録なし）
+
+### フェーズ 4: 空フォルダテスト
+
+1. ダミーの init.rb を削除（フォルダは残す）
+
+**Windows PowerShell で実行:**
+```powershell
+$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$pluginsDir = "$redmineRoot\plugins"
+$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+foreach ($plugin in $conflictingPlugins) {
+    $initPath = "$pluginsDir\$plugin\init.rb"
+    if (Test-Path $initPath) {
+        Remove-Item -Path $initPath -Force
+        Write-Host "Removed init.rb: $plugin"
+    }
+}
+```
+
+2. コンテナを再起動
+3. [1-3], [2-3] を実行（空フォルダのみ → 競合とみなさない）
+
+### フェーズ 5: 事後処理（復元）
+
+1. ダミーフォルダを削除
+
+**Windows PowerShell で実行:**
+```powershell
+$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$pluginsDir = "$redmineRoot\plugins"
+$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+foreach ($plugin in $conflictingPlugins) {
+    $pluginPath = "$pluginsDir\$plugin"
+    if (Test-Path $pluginPath) {
+        Remove-Item -Path $pluginPath -Recurse -Force
+        Write-Host "Removed dummy: $plugin"
+    }
+}
+```
+
+2. 退避したプラグインを復元
+
+**Windows PowerShell で実行:**
+```powershell
+$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$pluginsDir = "$redmineRoot\plugins"
+$backupDir = "$redmineRoot\test_backup"
+$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+foreach ($plugin in $conflictingPlugins) {
+    $pluginPath = "$pluginsDir\$plugin"
+    $backupPath = "$backupDir\$plugin"
+    if (Test-Path $backupPath) {
+        Move-Item -Path $backupPath -Destination $pluginPath -Force
+        Write-Host "Restored: $plugin"
+    }
+}
+
+# バックアップフォルダ削除
+if (Test-Path $backupDir) {
+    Remove-Item -Path $backupDir -Recurse -Force
+}
+```
+
+3. コンテナを再起動（元の状態に戻す）
+
+---
+
+## 1. rails runner テスト
 
 ### Reply Button の競合検出
 
 #### [1-1] 競合プラグインなし → 警告なし、モジュール登録あり
 
-**事前条件:**
-- `plugins/redmine_reply_button/init.rb` が存在しない
-
 **確認方法:**
 ```ruby
 plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING") && plugin.description.include?("reply_button")
+has_warning = plugin.description.include?("WARNING")
 permissions = Redmine::AccessControl.permissions.select { |p| p.project_module == :reply_button }
 ```
 
@@ -54,20 +181,14 @@ permissions = Redmine::AccessControl.permissions.select { |p| p.project_module =
 - `has_warning` が false
 - `permissions.any?` が true
 
-**スキップ条件:**
-- `plugins/redmine_reply_button/init.rb` が存在する場合
-
 ---
 
 #### [1-2] 競合プラグインあり → 警告表示、モジュール登録なし
 
-**事前条件:**
-- `plugins/redmine_reply_button/init.rb` が存在する
-
 **確認方法:**
 ```ruby
 plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING") && plugin.description.include?("reply_button")
+has_warning = plugin.description.include?("WARNING")
 permissions = Redmine::AccessControl.permissions.select { |p| p.project_module == :reply_button }
 ```
 
@@ -75,15 +196,9 @@ permissions = Redmine::AccessControl.permissions.select { |p| p.project_module =
 - `has_warning` が true
 - `permissions.empty?` が true
 
-**スキップ条件:**
-- `plugins/redmine_reply_button/init.rb` が存在しない場合
-
 ---
 
 #### [1-3] 空フォルダのみ（init.rb なし）→ 競合とみなさない
-
-**事前条件:**
-- `plugins/redmine_reply_button/` フォルダは存在するが `init.rb` がない
 
 **確認方法:**
 ```ruby
@@ -91,16 +206,13 @@ plugins_dir = Rails.root.join('plugins')
 folder_exists = File.directory?(plugins_dir.join('redmine_reply_button'))
 init_exists = File.exist?(plugins_dir.join('redmine_reply_button', 'init.rb'))
 plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING") && plugin.description.include?("reply_button")
+has_warning = plugin.description.include?("WARNING")
 ```
 
 **期待結果:**
 - `folder_exists` が true
 - `init_exists` が false
 - `has_warning` が false
-
-**スキップ条件:**
-- フォルダが存在しない、または init.rb が存在する場合
 
 ---
 
@@ -108,13 +220,10 @@ has_warning = plugin.description.include?("WARNING") && plugin.description.inclu
 
 #### [2-1] 競合プラグインなし → 警告なし、モジュール登録あり
 
-**事前条件:**
-- `plugins/redmine_teams_button/init.rb` が存在しない
-
 **確認方法:**
 ```ruby
 plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING") && plugin.description.include?("teams_button")
+has_warning = plugin.description.include?("WARNING")
 permissions = Redmine::AccessControl.permissions.select { |p| p.project_module == :teams_button }
 ```
 
@@ -122,21 +231,14 @@ permissions = Redmine::AccessControl.permissions.select { |p| p.project_module =
 - `has_warning` が false
 - `permissions.any?` が true
 
-**スキップ条件:**
-- `plugins/redmine_teams_button/init.rb` が存在する場合
-- Teams Button 機能が未実装の場合
-
 ---
 
 #### [2-2] 競合プラグインあり → 警告表示、モジュール登録なし
 
-**事前条件:**
-- `plugins/redmine_teams_button/init.rb` が存在する
-
 **確認方法:**
 ```ruby
 plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING") && plugin.description.include?("teams_button")
+has_warning = plugin.description.include?("WARNING")
 permissions = Redmine::AccessControl.permissions.select { |p| p.project_module == :teams_button }
 ```
 
@@ -144,16 +246,9 @@ permissions = Redmine::AccessControl.permissions.select { |p| p.project_module =
 - `has_warning` が true
 - `permissions.empty?` が true
 
-**スキップ条件:**
-- `plugins/redmine_teams_button/init.rb` が存在しない場合
-- Teams Button 機能が未実装の場合
-
 ---
 
 #### [2-3] 空フォルダのみ（init.rb なし）→ 競合とみなさない
-
-**事前条件:**
-- `plugins/redmine_teams_button/` フォルダは存在するが `init.rb` がない
 
 **確認方法:**
 ```ruby
@@ -161,7 +256,7 @@ plugins_dir = Rails.root.join('plugins')
 folder_exists = File.directory?(plugins_dir.join('redmine_teams_button'))
 init_exists = File.exist?(plugins_dir.join('redmine_teams_button', 'init.rb'))
 plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING") && plugin.description.include?("teams_button")
+has_warning = plugin.description.include?("WARNING")
 ```
 
 **期待結果:**
@@ -169,16 +264,14 @@ has_warning = plugin.description.include?("WARNING") && plugin.description.inclu
 - `init_exists` が false
 - `has_warning` が false
 
-**スキップ条件:**
-- フォルダが存在しない、または init.rb が存在する場合
-- Teams Button 機能が未実装の場合
-
 ---
 
 ## テスト実行方法
 
-Claude が TEST_SPEC.md の仕様に基づいてコマンドを実行し、結果を報告する。
+Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-**注意事項:**
-- 競合プラグインの有無によってテスト結果が変わるため、環境の状態を確認してからテストを実行する
-- 競合プラグインをインストール/アンインストールした場合は、コンテナの再起動が必要
+1. フェーズ 1: 既存の競合プラグインを退避
+2. フェーズ 2: コンテナ再起動 → 競合なしテスト実行
+3. フェーズ 3: ダミー競合プラグイン作成 → コンテナ再起動 → 競合ありテスト実行
+4. フェーズ 4: init.rb 削除 → コンテナ再起動 → 空フォルダテスト実行
+5. フェーズ 5: クリーンアップ・復元 → コンテナ再起動

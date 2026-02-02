@@ -4,7 +4,7 @@ namespace :redmine_studio_plugin do
     Rails.logger.info "[redmine_studio_plugin] Setup task started"
 
     plugins_dir = Rails.root.join('plugins')
-    integrated_plugins = ['redmine_reply_button']
+    integrated_plugins = ['redmine_reply_button', 'redmine_teams_button']
 
     removed_plugins = []
     integrated_plugins.each do |plugin|

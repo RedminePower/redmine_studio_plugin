@@ -38,6 +38,88 @@ Reply Button 機能のテスト仕様。この文書から runner_test.rb, http_
 
 ---
 
+## テスト実行フロー
+
+### フェーズ 1: 事前処理（退避）
+
+競合プラグインが存在する場合、テスト前に**すべて**退避する。
+（redmine_studio_plugin は競合プラグインが1つでも存在すると警告が出るため）
+
+**Windows PowerShell で実行:**
+```powershell
+$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$pluginsDir = "$redmineRoot\plugins"
+$backupDir = "$redmineRoot\test_backup"
+$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# バックアップフォルダ作成
+if (-not (Test-Path $backupDir)) {
+    New-Item -ItemType Directory -Path $backupDir | Out-Null
+}
+
+# 競合プラグインを退避
+foreach ($plugin in $conflictingPlugins) {
+    $pluginPath = "$pluginsDir\$plugin"
+    $backupPath = "$backupDir\$plugin"
+    if (Test-Path $pluginPath) {
+        $items = Get-ChildItem -Path $pluginPath -Force
+        if ($items.Count -gt 0) {
+            Move-Item -Path $pluginPath -Destination $backupPath -Force
+            Write-Host "Backed up: $plugin"
+        }
+    }
+}
+```
+
+**注意:** 退避後はコンテナの再起動が必要（競合検出は Rails 起動時に行われるため）。
+
+### フェーズ 2: Runner テスト
+
+1. [1-1] ～ [1-4] を実行
+
+### フェーズ 3: HTTP テスト
+
+1. [2-1] ～ [2-5] を実行
+
+### フェーズ 4: ブラウザテスト
+
+1. セットアップスクリプトを実行
+2. [3-1] ～ [3-6] を対話形式で実行
+
+### フェーズ 5: 事後処理（復元）
+
+**復元タイミング:**
+- ブラウザテストが完了した時点
+- ブラウザテストがキャンセルされた時点
+
+**Windows PowerShell で実行:**
+```powershell
+$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$pluginsDir = "$redmineRoot\plugins"
+$backupDir = "$redmineRoot\test_backup"
+$conflictingPlugins = @("redmine_reply_button", "redmine_teams_button")
+
+# 競合プラグインを復元
+foreach ($plugin in $conflictingPlugins) {
+    $pluginPath = "$pluginsDir\$plugin"
+    $backupPath = "$backupDir\$plugin"
+    if (Test-Path $backupPath) {
+        if (Test-Path $pluginPath) {
+            Remove-Item -Path $pluginPath -Recurse -Force
+        }
+        Move-Item -Path $backupPath -Destination $pluginPath -Force
+        Write-Host "Restored: $plugin"
+    }
+}
+
+# バックアップフォルダ削除
+if (Test-Path $backupDir) {
+    Remove-Item -Path $backupDir -Recurse -Force
+}
+```
+
+---
+
 ## 1. rails runner テスト
 
 **実行方法:**
@@ -201,6 +283,9 @@ User.find_by_login('admin').pref.update(comments_sorting: 'asc')
    - ユーザーが結果（PASS/FAIL）を回答
    - 次のテストへ進む
 
+3. **テスト終了時に復元**
+   - すべてのテストが完了、またはキャンセルされた時点で競合プラグインを復元
+
 ### 前提条件
 
 - admin ユーザーが存在すること（ログイン: admin / パスワード: password123）
@@ -348,13 +433,13 @@ JSON 形式で各テストの情報を出力:
 
 ## テスト実行方法
 
-### runner テスト・HTTP テスト
-Claude が TEST_SPEC.md の仕様に基づいてコマンドを実行し、結果を報告する。
+Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-### ブラウザテスト
-1. Claude が TEST_SPEC.md のセットアップ仕様からスクリプトを生成・実行
-2. Claude が対話形式でユーザーをガイド
-3. ユーザーがブラウザで確認し、結果を回答
+1. フェーズ 1: 競合プラグインを退避 → コンテナ再起動
+2. フェーズ 2: Runner テスト実行
+3. フェーズ 3: HTTP テスト実行
+4. フェーズ 4: ブラウザテスト実行
+5. フェーズ 5: 競合プラグインを復元（ブラウザテスト完了またはキャンセル時）
 
 ## 参考ファイル（保守対象外）
 
