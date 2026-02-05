@@ -21,7 +21,7 @@ end
 if conflicting_plugins.any?
   # Warning message for console and log
   message = "WARNING: Setup is not complete. " \
-            "Run 'bundle exec rake redmine_studio_plugin:setup RAILS_ENV=production' to complete setup."
+            "Run 'bundle exec rake redmine_studio_plugin:install RAILS_ENV=production' to complete setup."
   Rails.logger.warn message
   puts message
 
@@ -30,7 +30,7 @@ if conflicting_plugins.any?
     name 'Redmine Studio plugin'
     author 'Redmine Power'
     description "WARNING: Setup is not complete. " \
-                "Run 'bundle exec rake redmine_studio_plugin:setup RAILS_ENV=production'. " \
+                "Run 'bundle exec rake redmine_studio_plugin:install RAILS_ENV=production'. " \
                 "Until then, integrated features are disabled to prevent conflicts."
     version '0.1.0'
     url 'https://github.com/RedminePower/redmine_studio_plugin'
@@ -55,9 +55,25 @@ else
     project_module :teams_button do
       permission :teams_button, :teams_button => [:index]
     end
+
+    # Auto Close - admin menu
+    menu :admin_menu, :auto_closes,
+         { controller: 'auto_closes', action: 'index' },
+         caption: :label_auto_close,
+         html: { class: 'icon icon-auto_close' },
+         if: proc { User.current.admin? }
   end
 
   # Load hooks only when no conflicts
   require_relative 'lib/redmine_studio_plugin/reply_button/hooks'
   require_relative 'lib/redmine_studio_plugin/teams_button/hooks'
+
+  # Load Auto Close
+  require_relative 'lib/redmine_studio_plugin/auto_close/hooks'
+  require_relative 'lib/redmine_studio_plugin/auto_close/auto_close_service'
+  require_relative 'lib/redmine_studio_plugin/auto_close/issue_patch'
+
+  Rails.application.config.after_initialize do
+    Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
+  end
 end

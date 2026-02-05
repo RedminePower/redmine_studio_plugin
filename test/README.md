@@ -6,11 +6,12 @@
 
 | ファイル | 説明 |
 |---------|------|
-| `setup_task/TEST_SPEC.md` | Setup タスクテスト |
+| `install_task/TEST_SPEC.md` | Install タスクテスト |
 | `conflict_detection/TEST_SPEC.md` | 競合プラグイン検出テスト |
 | `features/plugin_api/TEST_SPEC.md` | プラグイン情報 API テスト |
 | `features/reply_button/TEST_SPEC.md` | Reply Button テスト |
 | `features/teams_button/TEST_SPEC.md` | Teams Button テスト |
+| `features/auto_close/TEST_SPEC.md` | Auto Close テスト |
 
 ## テストの種類
 
@@ -36,8 +37,9 @@ Claude に以下のように依頼してください:
 - `テストを実行してください`
 
 **個別実行:**
-- `setup_task のテストを実行してください`
+- `install_task のテストを実行してください`
 - `conflict_detection のテストを実行してください`
 - `plugin_api のテストを実行してください`
 - `reply_button のテストを実行してください`
 - `teams_button のテストを実行してください`
+- `auto_close のテストを実行してください`

@@ -5,4 +5,7 @@ Rails.application.routes.draw do
 
   # Teams Button
   get 'teams_button/user_email/:id', to: 'teams_button#user_email'
+
+  # Auto Close
+  resources :auto_closes
 end

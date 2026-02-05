@@ -1,9 +1,16 @@
-# Setup Task テスト仕様書
+# Install Task テスト仕様書
 
 ## 概要
 
-`rake redmine_studio_plugin:setup` タスクのテスト仕様。
-このタスクはプラグインインストール後に実行され、統合済みプラグインの削除を行う。
+`rake redmine_studio_plugin:install` タスクのテスト仕様。
+このタスクは以下の 3 つの処理を一括で行う:
+
+1. 統合済みプラグインの削除（旧スタンドアロン版）
+2. DB マイグレーション
+3. cron 登録
+
+本テストでは主に「統合済みプラグインの削除」機能を検証する。
+DB マイグレーションと cron 登録のテストは `features/auto_close/TEST_SPEC.md` の [2-I] セクションを参照。
 
 ## 環境パラメータ
 
@@ -17,17 +24,17 @@
 
 | 項目 | 値 |
 |------|-----|
-| ファイル | `lib/tasks/setup.rake` |
-| タスク名 | `redmine_studio_plugin:setup` |
+| ファイル | `lib/tasks/install.rake` |
+| タスク名 | `redmine_studio_plugin:install` |
 | 統合済みプラグイン | `config/integrated_plugins.yml` を参照 |
 
 ### 処理フロー
 
-1. ログ出力: `[redmine_studio_plugin] Setup task started`
-2. 統合済みプラグインのフォルダを確認
-3. 存在すれば削除、なければスキップ
-4. 結果をログ出力
-5. ログ出力: `[redmine_studio_plugin] Setup task completed`
+1. ログ出力: `[redmine_studio_plugin] Install task started`
+2. [1/3] 統合済みプラグインのフォルダを確認・削除
+3. [2/3] DB マイグレーション実行
+4. [3/3] cron 登録
+5. ログ出力: `[redmine_studio_plugin] Install task completed`
 
 ### 出力メッセージ
 
@@ -37,16 +44,15 @@
 | プラグインなし | `{plugin} not found (already removed or not installed).` |
 | 削除あり | `{N} plugin(s) removed.` |
 | 削除なし | `No plugins to remove.` |
-| 常に | `Setup completed. Please restart Redmine to apply changes.` |
+| 常に | `=== Install completed ===` → `Please restart Redmine to apply changes.` |
 
 ### ログ出力
 
 | 条件 | ログメッセージ |
 |------|---------------|
-| 開始時 | `[redmine_studio_plugin] Setup task started` |
+| 開始時 | `[redmine_studio_plugin] Install task started` |
 | 削除あり | `[redmine_studio_plugin] Removed plugins: {plugin1}, {plugin2}` |
-| 削除なし | `[redmine_studio_plugin] No plugins to remove` |
-| 完了時 | `[redmine_studio_plugin] Setup task completed` |
+| 完了時 | `[redmine_studio_plugin] Install task completed` |
 
 ---
 
@@ -182,7 +188,7 @@ if (Test-Path $backupDir) {
 
 **実行方法:**
 ```bash
-docker exec {Container} rails runner plugins/redmine_studio_plugin/test/setup_task/runner_test.rb
+docker exec {Container} rails runner plugins/redmine_studio_plugin/test/install_task/runner_test.rb
 ```
 
 ### [1-1] 統合済みプラグインが存在しない場合 → エラーなくスキップ
@@ -190,11 +196,14 @@ docker exec {Container} rails runner plugins/redmine_studio_plugin/test/setup_ta
 **事前条件:**
 - `plugins/redmine_reply_button/` フォルダが存在しない
 - `plugins/redmine_teams_button/` フォルダが存在しない
+- `plugins/redmine_auto_close/` フォルダが存在しない
 
 **確認方法:**
 ```ruby
 plugins_dir = Rails.root.join('plugins')
-integrated_plugins = ['redmine_reply_button', 'redmine_teams_button']
+config_path = Rails.root.join('plugins', 'redmine_studio_plugin', 'config', 'integrated_plugins.yml')
+config = YAML.load_file(config_path)
+integrated_plugins = config['integrated_plugins'] || []
 
 # フォルダがないことを確認
 integrated_plugins.each do |plugin|
@@ -203,8 +212,9 @@ integrated_plugins.each do |plugin|
 end
 
 # タスク実行（エラーが発生しないこと）
-Rake::Task['redmine_studio_plugin:setup'].reenable
-Rake::Task['redmine_studio_plugin:setup'].invoke
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
 ```
 
 **期待結果:**
@@ -217,13 +227,14 @@ Rake::Task['redmine_studio_plugin:setup'].invoke
 ### [1-2] 統合済みプラグインが存在する場合 → 削除される
 
 **事前条件:**
-- `plugins/redmine_reply_button/` フォルダを作成（ダミー）
-- `plugins/redmine_teams_button/` フォルダを作成（ダミー）
+- 統合済みプラグインのダミーフォルダを作成（`init.rb` 付き）
 
 **確認方法:**
 ```ruby
 plugins_dir = Rails.root.join('plugins')
-integrated_plugins = ['redmine_reply_button', 'redmine_teams_button']
+config_path = Rails.root.join('plugins', 'redmine_studio_plugin', 'config', 'integrated_plugins.yml')
+config = YAML.load_file(config_path)
+integrated_plugins = config['integrated_plugins'] || []
 
 # ダミーフォルダ作成
 integrated_plugins.each do |plugin|
@@ -233,20 +244,21 @@ integrated_plugins.each do |plugin|
 end
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:setup'].reenable
-Rake::Task['redmine_studio_plugin:setup'].invoke
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
 
 # 確認
 results = integrated_plugins.map do |plugin|
   plugin_path = plugins_dir.join(plugin)
-  !File.directory?(plugin_path)
+  (File.directory?(plugin_path) == false)
 end
 results.all?
 ```
 
 **期待結果:**
 - 各プラグインフォルダが削除されている（`File.directory?(plugin_path)` が false）
-- 出力に `2 plugin(s) removed.` が含まれる
+- 出力に `3 plugin(s) removed.` が含まれる
 
 ---
 
@@ -261,15 +273,16 @@ log_file = Rails.root.join('log', "#{Rails.env}.log")
 log_size_before = File.size(log_file)
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:setup'].reenable
-Rake::Task['redmine_studio_plugin:setup'].invoke
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
 
 # ログの新規部分を読み取り
 File.open(log_file) do |f|
   f.seek(log_size_before)
   new_log = f.read
-  new_log.include?('[redmine_studio_plugin] Setup task started') &&
-  new_log.include?('[redmine_studio_plugin] Setup task completed')
+  new_log.include?('[redmine_studio_plugin] Install task started') &&
+  new_log.include?('[redmine_studio_plugin] Install task completed')
 end
 ```
 
@@ -279,13 +292,13 @@ Docker 環境ではログがファイルではなく stdout に出力される�
 その場合、タスク実行時のコンソール出力で以下のログを目視確認する:
 
 ```
-I, [2026-02-01T...] INFO -- : [redmine_studio_plugin] Setup task started
-I, [2026-02-01T...] INFO -- : [redmine_studio_plugin] Setup task completed
+I, [2026-02-05T...] INFO -- : [redmine_studio_plugin] Install task started
+I, [2026-02-05T...] INFO -- : [redmine_studio_plugin] Install task completed
 ```
 
 **期待結果:**
-- ログに `[redmine_studio_plugin] Setup task started` が含まれる
-- ログに `[redmine_studio_plugin] Setup task completed` が含まれる
+- ログに `[redmine_studio_plugin] Install task started` が含まれる
+- ログに `[redmine_studio_plugin] Install task completed` が含まれる
 
 ---
 
@@ -297,9 +310,12 @@ Rake タスクは一度実行すると「実行済み」としてマークされ
 テストで複数回実行する場合は `reenable` を呼ぶ必要がある:
 
 ```ruby
-Rake::Task['redmine_studio_plugin:setup'].reenable
-Rake::Task['redmine_studio_plugin:setup'].invoke
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
 ```
+
+`redmine:plugins:migrate` も `reenable` が必要（install タスク内で呼び出されるため）。
 
 ---
 

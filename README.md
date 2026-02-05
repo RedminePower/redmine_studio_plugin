@@ -12,6 +12,7 @@
 
 - **Reply Button** - チケットに「返答」ボタンを追加
 - **Teams Button** - ユーザー名にチャットを開始する「Teams」ボタンを追加
+- **Auto Close** - 条件に基づいてチケットを自動クローズ
 - **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
 
 ## 対応 Redmine
@@ -30,13 +31,13 @@ cd /path/to/redmine/plugins
 git clone https://github.com/RedminePower/redmine_studio_plugin.git
 ```
 
-### 2. セットアップ
+### 2. インストール
 
-以下のコマンドを実行します。このコマンドは統合済みプラグインの削除を行います。
+以下のコマンドを実行します。このコマンドは旧プラグインの削除、DB マイグレーション、cron 登録を一括で行います。
 
 ```bash
 cd /path/to/redmine
-bundle exec rake redmine_studio_plugin:setup RAILS_ENV=production
+bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 ```
 
 ### 3. Redmine の再起動
@@ -79,6 +80,26 @@ Redmine を再起動して変更を反映してください。
 1. プロジェクトの「設定」を開く
 2. 「プロジェクト」タブ内の「モジュール」で「Teams button」にチェックを入れて保存
 
+## Auto Close
+
+条件に基づいてチケットを自動的にクローズ（ステータス変更・担当者変更・コメント追加）する機能です。
+
+- 全子チケット終了時に親チケットを自動クローズ
+- 期限切れチケットを定期的に自動クローズ（cron で毎日 3:00 に実行）
+- プロジェクト、トラッカー、ステータス、カスタムフィールドなど柔軟な条件設定が可能
+
+### 管理画面
+
+管理者メニューの「自動クローズ」からルールの作成・編集・削除ができます。
+
+### 期限切れチケットの手動実行
+
+期限切れトリガーは cron で自動実行されますが、手動で実行する場合は以下のコマンドを使用します。
+
+```bash
+bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production
+```
+
 ## Plugin API
 
 | エンドポイント | 説明 |
@@ -87,6 +108,17 @@ Redmine を再起動して変更を反映してください。
 | `GET /plugins/:id.json` | 単体プラグイン情報の取得 |
 
 ## アンインストール
+
+### 1. アンインストールコマンドの実行
+
+cron 解除と DB ロールバックを行います。
+
+```bash
+cd /path/to/redmine
+bundle exec rake redmine_studio_plugin:uninstall RAILS_ENV=production
+```
+
+### 2. プラグインの削除
 
 プラグインのフォルダを削除してください。
 

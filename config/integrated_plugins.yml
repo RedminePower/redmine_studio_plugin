@@ -4,9 +4,10 @@
 #
 # When adding a new integrated plugin:
 # 1. Add the plugin name to this list
-# 2. The conflict detection (init.rb) and setup task (setup.rake) will automatically use this list
+# 2. The conflict detection (init.rb) and install task (install.rake) will automatically use this list
 # 3. Update TEST_SPEC.md files to reference this configuration
 
 integrated_plugins:
   - redmine_reply_button
   - redmine_teams_button
+  - redmine_auto_close

@@ -12,6 +12,7 @@ Enable "Enable REST web service" in "Administration" → "Settings" → "API".
 
 - **Reply Button** - Adds a "Reply" button to tickets
 - **Teams Button** - Adds a "Teams" button to usernames to start a chat
+- **Auto Close** - Automatically closes issues based on conditions
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 
 ## Supported Redmine
@@ -30,13 +31,13 @@ cd /path/to/redmine/plugins
 git clone https://github.com/RedminePower/redmine_studio_plugin.git
 ```
 
-### 2. Setup
+### 2. Install
 
-Run the following command. This will remove integrated plugins.
+Run the following command. This command removes old plugins, runs DB migration, and registers cron in one step.
 
 ```bash
 cd /path/to/redmine
-bundle exec rake redmine_studio_plugin:setup RAILS_ENV=production
+bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 ```
 
 ### 3. Restart Redmine
@@ -79,6 +80,26 @@ The "Teams" button will not appear unless the following settings are configured.
 1. Go to project "Settings"
 2. In the "Project" tab, check "Teams button" under "Modules" and save
 
+## Auto Close
+
+A feature that automatically closes issues (status change, assignee change, comment addition) based on conditions.
+
+- Automatically closes parent issues when all child issues are closed
+- Periodically closes expired issues (executed via cron daily at 3:00)
+- Flexible condition settings including project, tracker, status, and custom fields
+
+### Administration
+
+Rules can be created, edited, and deleted from the "Auto close" menu in the administration panel.
+
+### Manual execution of expired issues
+
+The expired trigger is automatically executed by cron, but you can manually execute it with the following command.
+
+```bash
+bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production
+```
+
 ## Plugin API
 
 | Endpoint | Description |
@@ -87,6 +108,17 @@ The "Teams" button will not appear unless the following settings are configured.
 | `GET /plugins/:id.json` | Get single plugin information |
 
 ## Uninstall
+
+### 1. Run the uninstall command
+
+Removes cron job and rolls back DB migration.
+
+```bash
+cd /path/to/redmine
+bundle exec rake redmine_studio_plugin:uninstall RAILS_ENV=production
+```
+
+### 2. Remove the plugin
 
 Remove the plugin folder.
 
