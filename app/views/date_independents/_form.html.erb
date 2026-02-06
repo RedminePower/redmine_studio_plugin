@@ -1,0 +1,57 @@
+
+<%= error_messages_for 'date_independent' %>
+
+<div class="box tabular">
+  <%# タイトル %>
+  <p>
+    <%= form.text_field :title,
+        :label => l(:di_field_title),
+        :size => 100,
+        :required => true,
+        :disabled => (disabled || false)  %>
+    <em class="info">
+      <%= l(:di_text_title_info) %>
+    </em>
+  </p>
+  <%# 有効 %>
+  <p>
+    <%= form.check_box :is_enabled,
+        :label => l(:di_field_is_enabled),
+        :disabled => (disabled || false) %>
+  </p>
+  <%# 対象プロジェクト %>
+  <p>
+    <%= form.select :project_ids,
+          options_for_select(
+            Project.all.map{|t| [t.name, t.id]},
+            :selected => @date_independent.project_ids),
+          {
+            :label => l(:di_field_target_project),
+            :required => true
+          },
+          :size => (Project.all.size < 10 ? Project.all.size + 1 : 10),
+          :required => true,
+          :multiple => true,
+          :disabled => (disabled || false) %>
+    <em class="info">
+      <%= l(:di_text_project_info) %><br />
+    </em>
+  </p>
+  <%# 適用しないステータス %>
+  <p>
+    <%= form.select :calculate_status_ids,
+          options_for_select(
+            [""] + IssueStatus.all.map{|t| [t.name, t.id]},
+            :selected => @date_independent.calculate_status_ids),
+          {
+            :label => l(:di_field_calculate_status)
+          },
+          :size => (IssueStatus.all.size < 10 ? IssueStatus.all.size + 1 : 10),
+          :multiple => true,
+          :disabled => (disabled || false) %>
+    <em class="info">
+      <%= l(:di_text_calculate_status_info) %><br />
+    </em>
+  </p>
+
+</div>

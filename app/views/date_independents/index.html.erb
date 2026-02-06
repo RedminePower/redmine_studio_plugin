@@ -1,0 +1,35 @@
+<div class="contextual">
+  <%= link_to l(:di_label_date_independent_new),
+      new_date_independent_path, :class => 'icon icon-add' %>
+</div>
+
+<%= title l(:di_label_date_independent_plural) %>
+
+<% if (@date_independents.blank?) %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% else %>
+
+<table class="list date_independent">
+  <thead>
+    <tr>
+      <%= sort_header_tag('id', :caption => '#') %>
+      <%= sort_header_tag('is_enabled', :caption => l(:di_field_is_enabled)) %>
+      <%= sort_header_tag('title', :caption => l(:di_field_title)) %>
+      <th><%= l(:di_field_target_project) %></th>
+      <th><%= l(:di_field_calculate_status) %></th>
+    </tr>
+  </thead>
+  <tbody>
+    <% @date_independents.each do |date_independent| %>
+    <tr class="<%= cycle('odd', 'even') %><%= ' disable' unless date_independent.is_enabled %>">
+      <td class="id"><%= link_to date_independent.id, date_independent_path(date_independent.id) %></td>
+      <td class="is_enabled"><%=h date_independent.is_enabled ? l(:general_text_yes) : l(:general_text_no) %></td>
+      <td class="title"><%=h date_independent.title%></td>
+      <td class="project_ids"><%=h date_independent.project_ids_label%></td>
+      <td class="calculate_status_ids"><%=h date_independent.calculate_status_ids_label%></td>
+    </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<% end %>

@@ -62,6 +62,13 @@ else
          caption: :label_auto_close,
          html: { class: 'icon icon-auto_close' },
          if: proc { User.current.admin? }
+
+    # Date Independent - admin menu
+    menu :admin_menu, :date_independents,
+         { controller: 'date_independents', action: 'index' },
+         caption: :di_label_date_independent,
+         html: { class: 'icon icon-date_independent' },
+         if: proc { User.current.admin? }
   end
 
   # Load hooks only when no conflicts
@@ -73,7 +80,12 @@ else
   require_relative 'lib/redmine_studio_plugin/auto_close/auto_close_service'
   require_relative 'lib/redmine_studio_plugin/auto_close/issue_patch'
 
+  # Load Date Independent
+  require_relative 'lib/redmine_studio_plugin/date_independent/hooks'
+  require_relative 'lib/redmine_studio_plugin/date_independent/issue_patch'
+
   Rails.application.config.after_initialize do
     Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
+    Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
   end
 end

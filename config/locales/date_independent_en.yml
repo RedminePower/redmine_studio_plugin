@@ -1,0 +1,11 @@
+en:
+  di_label_date_independent: "Independent of start date/due date"
+  di_label_date_independent_new: "New independent of start date/due date"
+  di_label_date_independent_plural: "Independent of start date/due date"
+  di_field_title: "Title"
+  di_field_is_enabled: "Enabled"
+  di_field_target_project: "Target Projects"
+  di_field_calculate_status: "Not applied status"
+  di_text_title_info: "Please enter a clear name to manage."
+  di_text_project_info: "Please specify projects."
+  di_text_calculate_status_info: "Please specify status without applying this setting."

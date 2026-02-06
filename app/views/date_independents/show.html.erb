@@ -1,0 +1,19 @@
+<%= stylesheet_link_tag "scm" %>
+
+<div class="contextual">
+<%= link_to(l(:button_edit),
+               {:action => 'edit', :id => @date_independent.id},
+               :class => 'icon icon-edit') %>
+<%= link_to(l(:button_delete),
+               {:action => 'destroy', :id => @date_independent.id},
+               :data => {:confirm => l(:text_are_you_sure)}, :method => :delete,
+               :class => 'icon icon-del') %>
+</div>
+
+<%= title [l(:di_label_date_independent_plural), date_independents_path], @date_independent.id %>
+
+<%= labelled_form_for :date_independent, @date_independent,
+        :url => date_independents_path,
+        :html => {:multipart => true, :id => 'date_independent-form'} do |f| %>
+    <%= render :partial => 'date_independents/form', :locals => {:form => f, :disabled => true} %>
+<% end %>

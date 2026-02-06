@@ -30,40 +30,26 @@ redmine_studio_plugin が統合する各機能と、元となるプラグイン�
 
 競合検出はプラグイン読み込み時（Rails 起動時）に行われるため、フェーズ間でコンテナの再起動が必要。
 
-### フェーズ 1: 事前処理（退避）
+### フェーズ 1: 事前処理（無効化）
 
-既存の競合プラグインを退避する。
+既存の競合プラグインを無効化する（init.rb → init.rb.bak）。
 
 **Windows PowerShell で実行:**
 ```powershell
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
-$backupDir = "$redmineRoot\test_backup"
 
 # 競合プラグインリストを config/integrated_plugins.yml から取得
 $configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
 $configContent = Get-Content $configPath -Raw
 $conflictingPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
-# バックアップフォルダ作成
-if (-not (Test-Path $backupDir)) {
-    New-Item -ItemType Directory -Path $backupDir | Out-Null
-}
-
-# 競合プラグインを退避
+# 競合プラグインを無効化（init.rb → init.rb.bak）
 foreach ($plugin in $conflictingPlugins) {
-    $pluginPath = "$pluginsDir\$plugin"
-    $backupPath = "$backupDir\$plugin"
-    if (Test-Path $pluginPath) {
-        $items = Get-ChildItem -Path $pluginPath -Force
-        if ($items.Count -gt 0) {
-            Move-Item -Path $pluginPath -Destination $backupPath -Force
-            Write-Host "Backed up: $plugin"
-        } else {
-            # 空フォルダは削除
-            Remove-Item -Path $pluginPath -Force
-            Write-Host "Removed empty folder: $plugin"
-        }
+    $initPath = "$pluginsDir\$plugin\init.rb"
+    if (Test-Path $initPath) {
+        Rename-Item -Path $initPath -NewName "init.rb.bak" -Force
+        Write-Host "Disabled: $plugin"
     }
 }
 ```
@@ -75,7 +61,9 @@ foreach ($plugin in $conflictingPlugins) {
 
 ### フェーズ 3: 競合ありテスト
 
-1. ダミーの競合プラグインを作成
+1. 競合プラグインを有効化または作成
+   - init.rb.bak があれば init.rb に戻す
+   - なければダミーフォルダと init.rb を作成
 
 **Windows PowerShell で実行:**
 ```powershell
@@ -89,46 +77,30 @@ $conflictingPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multili
 
 foreach ($plugin in $conflictingPlugins) {
     $pluginPath = "$pluginsDir\$plugin"
-    if (-not (Test-Path $pluginPath)) {
-        New-Item -ItemType Directory -Path $pluginPath | Out-Null
+    $initPath = "$pluginPath\init.rb"
+    $initBakPath = "$pluginPath\init.rb.bak"
+
+    if (Test-Path $initBakPath) {
+        # init.rb.bak があれば init.rb に戻す
+        Rename-Item -Path $initBakPath -NewName "init.rb" -Force
+        Write-Host "Restored: $plugin"
+    } else {
+        # なければダミーフォルダと init.rb を作成
+        if (-not (Test-Path $pluginPath)) {
+            New-Item -ItemType Directory -Path $pluginPath | Out-Null
+        }
+        New-Item -ItemType File -Path $initPath -Force | Out-Null
+        Write-Host "Created dummy: $plugin"
     }
-    New-Item -ItemType File -Path "$pluginPath\init.rb" -Force | Out-Null
-    Write-Host "Created dummy: $plugin"
 }
 ```
 
 2. コンテナを再起動
 3. [1-2], [2-2] を実行（競合プラグインあり → 警告表示、モジュール登録なし）
 
-### フェーズ 4: 空フォルダテスト
+### フェーズ 4: 事後処理（復元）
 
-1. ダミーの init.rb を削除（フォルダは残す）
-
-**Windows PowerShell で実行:**
-```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
-$pluginsDir = "$redmineRoot\plugins"
-
-# 競合プラグインリストを config/integrated_plugins.yml から取得
-$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
-$configContent = Get-Content $configPath -Raw
-$conflictingPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
-
-foreach ($plugin in $conflictingPlugins) {
-    $initPath = "$pluginsDir\$plugin\init.rb"
-    if (Test-Path $initPath) {
-        Remove-Item -Path $initPath -Force
-        Write-Host "Removed init.rb: $plugin"
-    }
-}
-```
-
-2. コンテナを再起動
-3. [1-3], [2-3] を実行（空フォルダのみ → 競合とみなさない）
-
-### フェーズ 5: 事後処理（復元）
-
-1. ダミーフォルダを削除
+1. ダミーフォルダを削除し、元のプラグインを有効化
 
 **Windows PowerShell で実行:**
 ```powershell
@@ -142,42 +114,21 @@ $conflictingPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multili
 
 foreach ($plugin in $conflictingPlugins) {
     $pluginPath = "$pluginsDir\$plugin"
-    if (Test-Path $pluginPath) {
+    $initBakPath = "$pluginPath\init.rb.bak"
+
+    if (Test-Path $initBakPath) {
+        # init.rb.bak があれば init.rb に戻す（元のプラグインを有効化）
+        Rename-Item -Path $initBakPath -NewName "init.rb" -Force
+        Write-Host "Enabled: $plugin"
+    } elseif (Test-Path $pluginPath) {
+        # init.rb.bak がなければダミーフォルダを削除
         Remove-Item -Path $pluginPath -Recurse -Force
         Write-Host "Removed dummy: $plugin"
     }
 }
 ```
 
-2. 退避したプラグインを復元
-
-**Windows PowerShell で実行:**
-```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
-$pluginsDir = "$redmineRoot\plugins"
-$backupDir = "$redmineRoot\test_backup"
-
-# 競合プラグインリストを config/integrated_plugins.yml から取得
-$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
-$configContent = Get-Content $configPath -Raw
-$conflictingPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
-
-foreach ($plugin in $conflictingPlugins) {
-    $pluginPath = "$pluginsDir\$plugin"
-    $backupPath = "$backupDir\$plugin"
-    if (Test-Path $backupPath) {
-        Move-Item -Path $backupPath -Destination $pluginPath -Force
-        Write-Host "Restored: $plugin"
-    }
-}
-
-# バックアップフォルダ削除
-if (Test-Path $backupDir) {
-    Remove-Item -Path $backupDir -Recurse -Force
-}
-```
-
-3. コンテナを再起動（元の状態に戻す）
+2. コンテナを再起動（元の状態に戻す）
 
 ---
 
@@ -215,24 +166,6 @@ permissions = Redmine::AccessControl.permissions.select { |p| p.project_module =
 
 ---
 
-#### [1-3] 空フォルダのみ（init.rb なし）→ 競合とみなさない
-
-**確認方法:**
-```ruby
-plugins_dir = Rails.root.join('plugins')
-folder_exists = File.directory?(plugins_dir.join('redmine_reply_button'))
-init_exists = File.exist?(plugins_dir.join('redmine_reply_button', 'init.rb'))
-plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING")
-```
-
-**期待結果:**
-- `folder_exists` が true
-- `init_exists` が false
-- `has_warning` が false
-
----
-
 ### Teams Button の競合検出
 
 #### [2-1] 競合プラグインなし → 警告なし、モジュール登録あり
@@ -265,30 +198,11 @@ permissions = Redmine::AccessControl.permissions.select { |p| p.project_module =
 
 ---
 
-#### [2-3] 空フォルダのみ（init.rb なし）→ 競合とみなさない
-
-**確認方法:**
-```ruby
-plugins_dir = Rails.root.join('plugins')
-folder_exists = File.directory?(plugins_dir.join('redmine_teams_button'))
-init_exists = File.exist?(plugins_dir.join('redmine_teams_button', 'init.rb'))
-plugin = Redmine::Plugin.find(:redmine_studio_plugin)
-has_warning = plugin.description.include?("WARNING")
-```
-
-**期待結果:**
-- `folder_exists` が true
-- `init_exists` が false
-- `has_warning` が false
-
----
-
 ## テスト実行方法
 
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-1. フェーズ 1: 既存の競合プラグインを退避
+1. フェーズ 1: 既存の競合プラグインを無効化（init.rb → init.rb.bak）
 2. フェーズ 2: コンテナ再起動 → 競合なしテスト実行
-3. フェーズ 3: ダミー競合プラグイン作成 → コンテナ再起動 → 競合ありテスト実行
-4. フェーズ 4: init.rb 削除 → コンテナ再起動 → 空フォルダテスト実行
-5. フェーズ 5: クリーンアップ・復元 → コンテナ再起動
+3. フェーズ 3: 競合プラグイン有効化またはダミー作成 → コンテナ再起動 → 競合ありテスト実行
+4. フェーズ 4: ダミー削除・元のプラグイン有効化 → コンテナ再起動

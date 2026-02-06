@@ -1,0 +1,9 @@
+<%= title [l(:di_label_date_independent_plural), date_independents_path], @date_independent.id %>
+
+<%= labelled_form_for :date_independent, @date_independent,
+        :url => date_independent_path,
+        :html => {:multipart => true, :id => 'date_independent-form'} do |f| %>
+    <%= render :partial => 'date_independents/form', :locals => {:form => f, :disabled => false} %>
+    <%= f.submit l(:button_save) %>
+    <%= link_to l(:button_cancel), :controller => 'date_independents', :action => 'show', :id => @date_independent.id %>
+<% end %>

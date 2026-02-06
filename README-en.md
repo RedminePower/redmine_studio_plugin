@@ -13,6 +13,7 @@ Enable "Enable REST web service" in "Administration" → "Settings" → "API".
 - **Reply Button** - Adds a "Reply" button to tickets
 - **Teams Button** - Adds a "Teams" button to usernames to start a chat
 - **Auto Close** - Automatically closes issues based on conditions
+- **Date Independent** - Makes parent issue dates independent from child issues
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 
 ## Supported Redmine
@@ -99,6 +100,20 @@ The expired trigger is automatically executed by cron, but you can manually exec
 ```bash
 bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production
 ```
+
+## Date Independent
+
+A feature that makes parent issue start dates and due dates independent from child issues.
+
+In Redmine, when the "Derive from child issues" setting is enabled, parent issue dates are automatically calculated from child issues.
+This feature allows you to control this behavior based on project and status.
+
+- Make parent issue dates independent for specific projects
+- Maintain synchronization for specific statuses (e.g., Closed)
+
+### Administration
+
+Rules can be created, edited, and deleted from the "Date independent" menu in the administration panel.
 
 ## Plugin API
 

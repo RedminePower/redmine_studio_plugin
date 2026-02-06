@@ -62,43 +62,27 @@ Rake タスクは `reenable` / `invoke` で再実行可能なため、コンテ�
 
 ### フェーズ 1: 事前処理（退避）
 
-既存の統合済みプラグインを退避する。
+既存の統合済みプラグインを無効化する（init.rb をリネーム）。
 
 **Windows PowerShell で実行:**
 ```powershell
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
-$backupDir = "$redmineRoot\test_backup"
 
 # 統合済みプラグインリストを config/integrated_plugins.yml から取得
 $configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
 $configContent = Get-Content $configPath -Raw
 $integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
-# バックアップフォルダ作成
-if (-not (Test-Path $backupDir)) {
-    New-Item -ItemType Directory -Path $backupDir | Out-Null
-}
-
-# 統合済みプラグインを退避
+# 統合済みプラグインを無効化（init.rb → init.rb.bak）
 foreach ($plugin in $integratedPlugins) {
-    $pluginPath = "$pluginsDir\$plugin"
-    $backupPath = "$backupDir\$plugin"
-    if (Test-Path $pluginPath) {
-        $items = Get-ChildItem -Path $pluginPath -Force
-        if ($items.Count -gt 0) {
-            Move-Item -Path $pluginPath -Destination $backupPath -Force
-            Write-Host "Backed up: $plugin"
-        } else {
-            # 空フォルダは削除
-            Remove-Item -Path $pluginPath -Force
-            Write-Host "Removed empty folder: $plugin"
-        }
+    $initPath = "$pluginsDir\$plugin\init.rb"
+    if (Test-Path $initPath) {
+        Rename-Item -Path $initPath -NewName "init.rb.bak" -Force
+        Write-Host "Disabled: $plugin"
     }
 }
 ```
-
-**注意:** 空フォルダは退避対象外とする。
 
 ### フェーズ 2: 削除対象なしテスト
 
@@ -154,13 +138,12 @@ foreach ($plugin in $integratedPlugins) {
 }
 ```
 
-2. 退避したプラグインを復元
+2. 退避したプラグインを有効化（init.rb.bak → init.rb）
 
 **Windows PowerShell で実行:**
 ```powershell
 $redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
 $pluginsDir = "$redmineRoot\plugins"
-$backupDir = "$redmineRoot\test_backup"
 
 # 統合済みプラグインリストを config/integrated_plugins.yml から取得
 $configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
@@ -168,17 +151,11 @@ $configContent = Get-Content $configPath -Raw
 $integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 foreach ($plugin in $integratedPlugins) {
-    $pluginPath = "$pluginsDir\$plugin"
-    $backupPath = "$backupDir\$plugin"
-    if (Test-Path $backupPath) {
-        Move-Item -Path $backupPath -Destination $pluginPath -Force
-        Write-Host "Restored: $plugin"
+    $initBakPath = "$pluginsDir\$plugin\init.rb.bak"
+    if (Test-Path $initBakPath) {
+        Rename-Item -Path $initBakPath -NewName "init.rb" -Force
+        Write-Host "Enabled: $plugin"
     }
-}
-
-# バックアップフォルダ削除
-if (Test-Path $backupDir) {
-    Remove-Item -Path $backupDir -Recurse -Force
 }
 ```
 
@@ -194,9 +171,7 @@ docker exec {Container} rails runner plugins/redmine_studio_plugin/test/install_
 ### [1-1] 統合済みプラグインが存在しない場合 → エラーなくスキップ
 
 **事前条件:**
-- `plugins/redmine_reply_button/` フォルダが存在しない
-- `plugins/redmine_teams_button/` フォルダが存在しない
-- `plugins/redmine_auto_close/` フォルダが存在しない
+- 統合済みプラグイン（`config/integrated_plugins.yml` 参照）のフォルダが存在しない
 
 **確認方法:**
 ```ruby
@@ -258,7 +233,7 @@ results.all?
 
 **期待結果:**
 - 各プラグインフォルダが削除されている（`File.directory?(plugin_path)` が false）
-- 出力に `3 plugin(s) removed.` が含まれる
+- 出力に `{統合済みプラグイン数} plugin(s) removed.` が含まれる
 
 ---
 
@@ -323,7 +298,7 @@ Rake::Task['redmine_studio_plugin:install'].invoke
 
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-1. フェーズ 1: 既存の統合済みプラグインを退避
+1. フェーズ 1: 既存の統合済みプラグインを無効化（init.rb → init.rb.bak）
 2. フェーズ 2: 削除対象なしテスト実行
 3. フェーズ 3: ダミープラグイン作成 → 削除対象ありテスト実行
-4. フェーズ 4: クリーンアップ・復元
+4. フェーズ 4: クリーンアップ・有効化（init.rb.bak → init.rb）

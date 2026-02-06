@@ -8,4 +8,7 @@ Rails.application.routes.draw do
 
   # Auto Close
   resources :auto_closes
+
+  # Date Independent
+  resources :date_independents
 end

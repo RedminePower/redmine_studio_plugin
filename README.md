@@ -13,6 +13,7 @@
 - **Reply Button** - チケットに「返答」ボタンを追加
 - **Teams Button** - ユーザー名にチャットを開始する「Teams」ボタンを追加
 - **Auto Close** - 条件に基づいてチケットを自動クローズ
+- **Date Independent** - 親チケットの日付を子チケットから独立させる
 - **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
 
 ## 対応 Redmine
@@ -99,6 +100,20 @@ Redmine を再起動して変更を反映してください。
 ```bash
 bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production
 ```
+
+## Date Independent
+
+親チケットの開始日・期日を子チケットから独立させる機能です。
+
+Redmine では「子チケットの値から算出」設定を有効にすると、親チケットの日付が子チケットから自動計算されます。
+本機能を使うと、プロジェクトやステータスに応じてこの動作を制御できます。
+
+- 特定のプロジェクトで親チケットの日付を独立させる
+- 特定のステータス（例：終了）の場合は連動を維持する
+
+### 管理画面
+
+管理者メニューの「開始日/期日の独立」からルールの作成・編集・削除ができます。
 
 ## Plugin API
 

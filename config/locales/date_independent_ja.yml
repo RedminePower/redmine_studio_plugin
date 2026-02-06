@@ -1,0 +1,11 @@
+ja:
+  di_label_date_independent: "開始日/期日の独立"
+  di_label_date_independent_new: "新しい開始日/期日の独立"
+  di_label_date_independent_plural: "開始日/期日の独立"
+  di_field_title: "タイトル"
+  di_field_is_enabled: "有効"
+  di_field_target_project: "対象プロジェクト"
+  di_field_calculate_status: "適用しないステータス"
+  di_text_title_info: "管理する上でわかりやすい名前を入力してください。"
+  di_text_project_info: "適用するプロジェクトを指定してください。"
+  di_text_calculate_status_info: "本設定を適用せずに連動を行うステータスを指定してください。"

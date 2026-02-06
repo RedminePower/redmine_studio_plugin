@@ -11,3 +11,4 @@ integrated_plugins:
   - redmine_reply_button
   - redmine_teams_button
   - redmine_auto_close
+  - redmine_date_independent
