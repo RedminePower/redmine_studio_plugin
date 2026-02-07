@@ -84,6 +84,12 @@ else
   require_relative 'lib/redmine_studio_plugin/date_independent/hooks'
   require_relative 'lib/redmine_studio_plugin/date_independent/issue_patch'
 
+  # Load Wiki Lists macros
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/wiki_list'
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/issue_name_link'
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/ref_issues/parser'
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/ref_issues'
+
   Rails.application.config.after_initialize do
     Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
     Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch

@@ -13,6 +13,7 @@
 | `features/teams_button/TEST_SPEC.md` | Teams Button テスト |
 | `features/auto_close/TEST_SPEC.md` | Auto Close テスト |
 | `features/date_independent/TEST_SPEC.md` | Date Independent テスト |
+| `features/wiki_lists/TEST_SPEC.md` | Wiki Lists テスト |
 
 ## テストの種類
 
@@ -84,3 +85,4 @@ Claude に以下のように依頼してください:
 - `teams_button のテストを実行してください`
 - `auto_close のテストを実行してください`
 - `date_independent のテストを実行してください`
+- `wiki_lists のテストを実行してください`

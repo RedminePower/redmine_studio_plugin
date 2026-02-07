@@ -169,22 +169,28 @@ puts hooks.any? { |h| h.is_a?(RedmineStudioPlugin::TeamsButton::Hooks) }
 
 **確認方法:**
 ```powershell
+$BaseUrl = "http://localhost:{Port}"
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-$loginResponse = Invoke-WebRequest -Uri "http://localhost:3051/login" -SessionVariable session
-$token = [regex]::Match($loginResponse.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
-Invoke-WebRequest -Uri "http://localhost:3051/login" -Method POST -Body @{username="admin"; password="password123"; authenticity_token=$token} -WebSession $session
-$response = Invoke-RestMethod -Uri "http://localhost:3051/teams_button/user_email/1" -WebSession $session
+$loginPage = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable session -UseBasicParsing
+$csrfMatch = [regex]::Match($loginPage.Content, 'name="authenticity_token" value="([^"]+)"')
+$csrfToken = $csrfMatch.Groups[1].Value
+$body = "authenticity_token=$([System.Web.HttpUtility]::UrlEncode($csrfToken))&username=admin&password=password123"
+Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded"
+$response = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/1" -WebSession $session
 $response.email
 ```
 
 **期待結果:** admin ユーザーのメールアドレスが返される
 
+**備考:**
+- このエンドポイントは API キー認証に対応していないため、セッション認証が必須
+
 ### [2-2] 存在しないユーザー
 
 **確認方法:**
 ```powershell
-# 上記セッションを使用
-$response = Invoke-RestMethod -Uri "http://localhost:3051/teams_button/user_email/99999" -WebSession $session
+# [2-1] と同じセッションを使用
+$response = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/99999" -WebSession $session
 $response.email -eq $null
 ```
 
@@ -194,7 +200,7 @@ $response.email -eq $null
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/teams_button/user_email/1" -MaximumRedirection 0 -ErrorAction SilentlyContinue
+$response = Invoke-WebRequest -Uri "$BaseUrl/teams_button/user_email/1" -MaximumRedirection 0 -ErrorAction SilentlyContinue
 $response.StatusCode
 ```
 

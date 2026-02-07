@@ -14,6 +14,7 @@ Enable "Enable REST web service" in "Administration" → "Settings" → "API".
 - **Teams Button** - Adds a "Teams" button to usernames to start a chat
 - **Auto Close** - Automatically closes issues based on conditions
 - **Date Independent** - Makes parent issue dates independent from child issues
+- **Wiki Lists** - Macros to display wiki pages and issue lists
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 
 ## Supported Redmine
@@ -115,6 +116,16 @@ This feature allows you to control this behavior based on project and status.
 
 Rules can be created, edited, and deleted from the "Date independent" menu in the administration panel.
 
+## Wiki Lists
+
+Provides macros to display issue and page lists on Wiki pages.
+
+- `{{wiki_list}}` - Displays a list of wiki pages in table format
+- `{{issue_name_link}}` - Creates a link from issue subject
+- `{{ref_issues}}` - Displays a list of referenced issues
+
+For detailed options, see [redmine_wiki_lists](https://github.com/RedminePower/redmine_wiki_lists).
+
 ## Plugin API
 
 | Endpoint | Description |
@@ -144,4 +155,4 @@ rm -rf redmine_studio_plugin
 
 ## License
 
-MIT License
+GPL v2 License

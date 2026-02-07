@@ -1,0 +1,2 @@
+ja:
+  ref_issues_display_limit_reached: "※ 表示件数が上限(%{limit}件)に達しました。全 %{total} 件。-n=件数 で上限を変更できます。"

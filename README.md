@@ -14,6 +14,7 @@
 - **Teams Button** - ユーザー名にチャットを開始する「Teams」ボタンを追加
 - **Auto Close** - 条件に基づいてチケットを自動クローズ
 - **Date Independent** - 親チケットの日付を子チケットから独立させる
+- **Wiki Lists** - Wikiページやチケットの一覧を表示するマクロ
 - **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
 
 ## 対応 Redmine
@@ -115,6 +116,16 @@ Redmine では「子チケットの値から算出」設定を有効にすると
 
 管理者メニューの「開始日/期日の独立」からルールの作成・編集・削除ができます。
 
+## Wiki Lists
+
+Wikiページにチケットやページの一覧を表示するマクロを提供します。
+
+- `{{wiki_list}}` - Wikiページの一覧を表形式で表示
+- `{{issue_name_link}}` - チケット名からリンクを生成
+- `{{ref_issues}}` - 参照チケットの一覧を表示
+
+詳細なオプションは [redmine_wiki_lists](https://github.com/RedminePower/redmine_wiki_lists) を参照してください。
+
 ## Plugin API
 
 | エンドポイント | 説明 |
@@ -144,4 +155,4 @@ rm -rf redmine_studio_plugin
 
 ## ライセンス
 
-MIT License
+GPL v2 License

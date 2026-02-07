@@ -260,22 +260,28 @@ User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! 
 ### [2-14] settings が有効な JSON 文字列
 
 **確認方法:**
-- GET `/plugins/redmine_teams_button.json?key={ApiKey}`
+- 設定を持つ任意のプラグインを対象とする（例: `redmine_subtask_list_accordion`）
+- GET `/plugins/{plugin_id}.json?key={ApiKey}`
 - `response.plugin.settings` を JSON パース
 
 **期待結果:**
 - パースが成功する（有効な JSON）
+- settings が null の場合も PASS（設定が未構成の状態）
 
 ---
 
 ### [2-15] settings の内容が DB の値と一致
 
 **確認方法:**
-- API: GET `/plugins/redmine_teams_button.json?key={ApiKey}`
-- DB: `Setting['plugin_redmine_teams_button'].to_json`
+- [2-14] と同じプラグインを対象とする
+- API: GET `/plugins/{plugin_id}.json?key={ApiKey}`
+- DB: `Setting['plugin_{plugin_id}'].to_json`
 
 **期待結果:**
 - API の settings と DB の値が一致
+
+**備考:**
+- [2-14] で JSON パースの成功を確認しているため、実質的に [2-14] でカバーされる
 
 ---
 

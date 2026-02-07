@@ -1,0 +1,2 @@
+en:
+  ref_issues_display_limit_reached: "* Display limit (%{limit} issues) reached. Total: %{total} issues. Use -n=NUMBER to change the limit."

@@ -252,10 +252,13 @@ User.find_by_login('admin').pref.update(comments_sorting: 'desc')
 ```
 
 **確認方法:**
-- GET `/issues/{id}` のレスポンス HTML
+- セッション認証でログイン後、GET `/issues/{id}` のレスポンス HTML を取得
 
 **期待結果:**
 - HTML に `var reverseOrder = true` が含まれる
+
+**備考:**
+- API キー認証ではユーザー設定（comments_sorting）が適用されないため、セッション認証が必須
 
 ---
 
@@ -267,10 +270,13 @@ User.find_by_login('admin').pref.update(comments_sorting: 'asc')
 ```
 
 **確認方法:**
-- GET `/issues/{id}` のレスポンス HTML
+- セッション認証でログイン後、GET `/issues/{id}` のレスポンス HTML を取得
 
 **期待結果:**
 - HTML に `var reverseOrder = false` が含まれる
+
+**備考:**
+- API キー認証ではユーザー設定（comments_sorting）が適用されないため、セッション認証が必須
 
 ---
 
