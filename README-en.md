@@ -4,10 +4,6 @@
 
 This plugin provides features for [Redmine Studio](https://www.redmine-power.com/) (Windows client application provided by Redmine Power).
 
-### Prerequisites
-
-Enable "Enable REST web service" in "Administration" → "Settings" → "API".
-
 ## Features
 
 - **Reply Button** - Adds a "Reply" button to tickets
@@ -24,21 +20,32 @@ Enable "Enable REST web service" in "Administration" → "Settings" → "API".
 
 ## Installation
 
+The Redmine installation path varies depending on your environment.
+The following instructions use `/var/lib/redmine`.
+Please adjust according to your environment.
+
+| Environment | Redmine Path |
+|-------------|--------------|
+| apt (Debian/Ubuntu) | `/var/lib/redmine` |
+| Docker (Official Image) | `/usr/src/redmine` |
+| Bitnami | `/opt/bitnami/redmine` |
+
 ### 1. Deploy the plugin
 
 Run the following commands in the Redmine plugins folder.
 
 ```bash
-cd /path/to/redmine/plugins
+cd /var/lib/redmine/plugins
 git clone https://github.com/RedminePower/redmine_studio_plugin.git
 ```
 
 ### 2. Install
 
 Run the following command. This command removes old plugins, runs DB migration, and registers cron in one step.
+Make sure to run this command in the Redmine installation folder.
 
 ```bash
-cd /path/to/redmine
+cd /var/lib/redmine
 bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 ```
 
@@ -120,11 +127,82 @@ Rules can be created, edited, and deleted from the "Date independent" menu in th
 
 Provides macros to display issue and page lists on Wiki pages.
 
-- `{{wiki_list}}` - Displays a list of wiki pages in table format
-- `{{issue_name_link}}` - Creates a link from issue subject
-- `{{ref_issues}}` - Displays a list of referenced issues
+### wiki_list macro
 
-For detailed options, see [redmine_wiki_lists](https://github.com/RedminePower/redmine_wiki_lists).
+Displays a list of wiki pages in table format.
+
+**Basic syntax:** `{{wiki_list(options, columns...)}}`
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-p` | Show only pages in current project |
+| `-p=identifier` | Show only pages in specified project |
+| `-c` | Show only child pages |
+| `-w=width` | Set table width (e.g., `-w=80%`) |
+
+**Columns:**
+
+| Column | Description |
+|--------|-------------|
+| `+title` | Page title (link) |
+| `+alias` | Page alias |
+| `+project` | Project name |
+| `keyword:` | Extract text after keyword in page |
+| `keyword:\delimiter` | Extract text from keyword to delimiter |
+
+**Examples:**
+```
+{{wiki_list(-p, +title)}}
+{{wiki_list(-p, +title, Author:)}}
+{{wiki_list(-p, +title, Author:|Manager|150px)}}
+```
+
+### issue_name_link macro
+
+Creates a link from issue subject.
+
+**Basic syntax:** `{{issue_name_link(subject)}}` or `{{issue_name_link(subject|display text)}}`
+
+**Examples:**
+```
+{{issue_name_link(Bug fix)}}
+{{issue_name_link(Bug fix|Link text)}}
+{{issue_name_link(project-id:Bug fix)}}
+```
+
+### ref_issues macro
+
+Displays a list of issues matching conditions.
+
+**Basic syntax:** `{{ref_issues(options, columns...)}}`
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-p` | Current project issues only |
+| `-p=identifier` | Specified project issues only |
+| `-q=query name` | Use custom query |
+| `-i=query ID` | Use custom query ID |
+| `-s=keyword` | Search in subject |
+| `-d=keyword` | Search in description |
+| `-w=keyword` | Search in subject + description |
+| `-f:field=value` | Filter condition |
+| `-n=count` | Limit display count (max 1000) |
+| `-t` | Display subject as plain text |
+| `-l` | Display subject as link |
+| `-c` | Display count only |
+| `-0` | Display nothing if 0 results |
+
+**Examples:**
+```
+{{ref_issues(-p)}}
+{{ref_issues(-q=My Query)}}
+{{ref_issues(-f:status=New, -f:tracker=Bug)}}
+{{ref_issues(-p, id, subject, status)}}
+```
 
 ## Plugin API
 
@@ -140,7 +218,7 @@ For detailed options, see [redmine_wiki_lists](https://github.com/RedminePower/r
 Removes cron job and rolls back DB migration.
 
 ```bash
-cd /path/to/redmine
+cd /var/lib/redmine
 bundle exec rake redmine_studio_plugin:uninstall RAILS_ENV=production
 ```
 
@@ -149,7 +227,7 @@ bundle exec rake redmine_studio_plugin:uninstall RAILS_ENV=production
 Remove the plugin folder.
 
 ```bash
-cd /path/to/redmine/plugins
+cd /var/lib/redmine/plugins
 rm -rf redmine_studio_plugin
 ```
 

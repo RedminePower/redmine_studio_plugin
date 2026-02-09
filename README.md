@@ -4,10 +4,6 @@
 
 [Redmine Studio](https://www.redmine-power.com/)（Redmine Power が提供する Windows クライアントアプリ）で必要な機能を提供するプラグインです。
 
-### 前提条件
-
-「管理」→「設定」→「API」にて「REST による Web サービスを有効にする」を有効にしてください。
-
 ## 機能
 
 - **Reply Button** - チケットに「返答」ボタンを追加
@@ -24,21 +20,33 @@
 
 ## インストール
 
+Redmine のインストール先はお使いの環境によって異なります。
+以下の説明では `/var/lib/redmine` を使用しています。
+お使いの環境に合わせて変更してください。
+
+| 環境 | Redmine パス |
+|------|-------------|
+| apt (Debian/Ubuntu) | `/var/lib/redmine` |
+| Docker (公式イメージ) | `/usr/src/redmine` |
+| Bitnami | `/opt/bitnami/redmine` |
+
 ### 1. プラグインの配置
 
 Redmine のプラグインフォルダにて、以下を実行します。
 
 ```bash
-cd /path/to/redmine/plugins
+cd /var/lib/redmine/plugins
 git clone https://github.com/RedminePower/redmine_studio_plugin.git
 ```
 
 ### 2. インストール
 
-以下のコマンドを実行します。このコマンドは旧プラグインの削除、DB マイグレーション、cron 登録を一括で行います。
+以下のコマンドを実行します。
+このコマンドは旧プラグインの削除、DB マイグレーション、cron 登録を一括で行います。
+必ず Redmine のインストール先のフォルダで実行してください。
 
 ```bash
-cd /path/to/redmine
+cd /var/lib/redmine
 bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 ```
 
@@ -120,11 +128,82 @@ Redmine では「子チケットの値から算出」設定を有効にすると
 
 Wikiページにチケットやページの一覧を表示するマクロを提供します。
 
-- `{{wiki_list}}` - Wikiページの一覧を表形式で表示
-- `{{issue_name_link}}` - チケット名からリンクを生成
-- `{{ref_issues}}` - 参照チケットの一覧を表示
+### wiki_list マクロ
 
-詳細なオプションは [redmine_wiki_lists](https://github.com/RedminePower/redmine_wiki_lists) を参照してください。
+Wikiページの一覧を表形式で表示します。
+
+**基本構文:** `{{wiki_list(オプション, カラム...)}}`
+
+**オプション:**
+
+| オプション | 説明 |
+|-----------|------|
+| `-p` | 現在のプロジェクトのページのみ表示 |
+| `-p=識別子` | 指定プロジェクトのページのみ表示 |
+| `-c` | 子ページのみ表示 |
+| `-w=幅` | テーブル幅を指定（例: `-w=80%`） |
+
+**カラム:**
+
+| カラム | 説明 |
+|--------|------|
+| `+title` | ページタイトル（リンク） |
+| `+alias` | ページの別名 |
+| `+project` | プロジェクト名 |
+| `キーワード:` | ページ内のキーワード以降のテキストを抽出 |
+| `キーワード:\終端` | キーワードから終端文字までを抽出 |
+
+**例:**
+```
+{{wiki_list(-p, +title)}}
+{{wiki_list(-p, +title, 担当:)}}
+{{wiki_list(-p, +title, 担当:|責任者|150px)}}
+```
+
+### issue_name_link マクロ
+
+チケット名からリンクを生成します。
+
+**基本構文:** `{{issue_name_link(チケット名)}}` または `{{issue_name_link(チケット名|表示テキスト)}}`
+
+**例:**
+```
+{{issue_name_link(バグ修正)}}
+{{issue_name_link(バグ修正|リンクテキスト)}}
+{{issue_name_link(project-id:バグ修正)}}
+```
+
+### ref_issues マクロ
+
+条件に合うチケットの一覧を表示します。
+
+**基本構文:** `{{ref_issues(オプション, カラム...)}}`
+
+**オプション:**
+
+| オプション | 説明 |
+|-----------|------|
+| `-p` | 現在のプロジェクトのチケットのみ |
+| `-p=識別子` | 指定プロジェクトのチケットのみ |
+| `-q=クエリ名` | カスタムクエリを使用 |
+| `-i=クエリID` | カスタムクエリIDを使用 |
+| `-s=キーワード` | 題名で検索 |
+| `-d=キーワード` | 説明で検索 |
+| `-w=キーワード` | 題名＋説明で検索 |
+| `-f:フィールド=値` | フィルタ条件を指定 |
+| `-n=件数` | 表示件数を制限（最大1000） |
+| `-t` | 題名をプレーンテキストで表示 |
+| `-l` | 題名をリンクで表示 |
+| `-c` | 件数のみ表示 |
+| `-0` | 0件の場合は何も表示しない |
+
+**例:**
+```
+{{ref_issues(-p)}}
+{{ref_issues(-q=マイクエリ)}}
+{{ref_issues(-f:status=新規, -f:tracker=バグ)}}
+{{ref_issues(-p, id, subject, status)}}
+```
 
 ## Plugin API
 
@@ -140,7 +219,7 @@ Wikiページにチケットやページの一覧を表示するマクロを提�
 cron 解除と DB ロールバックを行います。
 
 ```bash
-cd /path/to/redmine
+cd /var/lib/redmine
 bundle exec rake redmine_studio_plugin:uninstall RAILS_ENV=production
 ```
 
@@ -149,7 +228,7 @@ bundle exec rake redmine_studio_plugin:uninstall RAILS_ENV=production
 プラグインのフォルダを削除してください。
 
 ```bash
-cd /path/to/redmine/plugins
+cd /var/lib/redmine/plugins
 rm -rf redmine_studio_plugin
 ```
 
