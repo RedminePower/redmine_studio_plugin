@@ -404,7 +404,165 @@ puts "expand_all preserved: #{new_settings['subtask_list_accordion_expand_all'] 
 
 ---
 
-### [2-4] 後処理: テスト用設定のクリーンアップ
+### [2-4] subtask_list_accordion: 一部のキーのみ存在する場合 → 存在するキーのみ移行
+
+**事前条件:**
+- `Setting.plugin_redmine_subtask_list_accordion` に一部のキーのみ存在する
+
+**確認方法:**
+```ruby
+# 旧設定を作成（一部のキーのみ）
+legacy_settings = {
+  'enable_server_scripting_mode' => false
+  # expand_all, collapsed_tracker_ids は未設定
+}
+Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+
+# 新設定から対象キーを削除
+new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
+new_settings.delete('subtask_list_accordion_expand_all')
+new_settings.delete('subtask_list_accordion_collapsed_tracker_ids')
+Setting.plugin_redmine_studio_plugin = new_settings
+
+# タスク実行
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
+
+# 確認
+new_settings = Setting.plugin_redmine_studio_plugin
+puts "enable_server_scripting_mode migrated: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
+puts "expand_all not migrated: #{new_settings['subtask_list_accordion_expand_all'].nil?}"
+```
+
+**期待結果:**
+- 存在するキー（`enable_server_scripting_mode`）のみ移行される
+- 存在しないキー（`expand_all` 等）は移行されない（nil のまま）
+- エラーが発生しない
+
+---
+
+### [2-5] subtask_list_accordion: 空の値（nil, 空文字, 空配列）の場合 → 正しく移行
+
+**事前条件:**
+- `Setting.plugin_redmine_subtask_list_accordion` に空の値が含まれる
+
+**確認方法:**
+```ruby
+# 旧設定を作成（空の値を含む）
+legacy_settings = {
+  'enable_server_scripting_mode' => nil,
+  'expand_all' => false,
+  'collapsed_trackers' => '',
+  'collapsed_tracker_ids' => []
+}
+Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+
+# 新設定から対象キーを削除
+new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
+new_settings.delete('subtask_list_accordion_expand_all')
+new_settings.delete('subtask_list_accordion_collapsed_trackers')
+new_settings.delete('subtask_list_accordion_collapsed_tracker_ids')
+Setting.plugin_redmine_studio_plugin = new_settings
+
+# タスク実行
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
+
+# 確認
+new_settings = Setting.plugin_redmine_studio_plugin
+puts "enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'].nil?}"
+puts "expand_all: #{new_settings['subtask_list_accordion_expand_all'] == false}"
+puts "collapsed_trackers: #{new_settings['subtask_list_accordion_collapsed_trackers'] == ''}"
+puts "collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tracker_ids'] == []}"
+```
+
+**期待結果:**
+- 空の値（nil, 空文字, 空配列, false）も正しく移行される
+- エラーが発生しない
+
+---
+
+### [2-6] subtask_list_accordion: 不正な YAML の場合 → エラーにならずスキップ
+
+**事前条件:**
+- `Setting` テーブルに不正な YAML が直接格納されている
+
+**確認方法:**
+```ruby
+# 不正な YAML を直接 DB に書き込み
+Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
+Setting.create!(name: 'plugin_redmine_subtask_list_accordion', value: "invalid: yaml: ::\n  broken")
+
+# タスク実行（例外が発生しないこと）
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+
+begin
+  Rake::Task['redmine_studio_plugin:install'].invoke
+  puts "No exception raised: true"
+rescue => e
+  puts "No exception raised: false (#{e.message})"
+end
+```
+
+**期待結果:**
+- 例外が発生しない（rescue で処理される）
+- 出力に `No settings to migrate` が含まれる
+
+---
+
+### [2-7] subtask_list_accordion: 旧プラグイン削除後も DB から移行可能
+
+**背景:**
+旧プラグインが削除されると `Setting.plugin_redmine_subtask_list_accordion` メソッドは使えない（`available_settings` を参照するため）。
+しかし DB レコードは残っているため、`Setting.find_by` + `[:value]` で直接読み取る必要がある。
+
+**事前条件:**
+- 旧プラグインのフォルダが存在しない（削除済み）
+- DB に `plugin_redmine_subtask_list_accordion` のレコードが存在する
+
+**確認方法:**
+```ruby
+# 旧プラグインフォルダが存在しないことを確認
+legacy_plugin_path = Rails.root.join('plugins', 'redmine_subtask_list_accordion')
+puts "Legacy plugin exists: #{File.directory?(legacy_plugin_path)}"
+
+# DB に直接レコードを作成（YAML 形式）
+Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
+legacy_yaml = {
+  'enable_server_scripting_mode' => false,
+  'expand_all' => true
+}.to_yaml
+Setting.create!(name: 'plugin_redmine_subtask_list_accordion', value: legacy_yaml)
+
+# 新設定から対象キーを削除
+new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
+new_settings.delete('subtask_list_accordion_expand_all')
+Setting.plugin_redmine_studio_plugin = new_settings
+
+# タスク実行
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
+
+# 確認
+new_settings = Setting.plugin_redmine_studio_plugin
+puts "enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
+puts "expand_all: #{new_settings['subtask_list_accordion_expand_all'] == true}"
+```
+
+**期待結果:**
+- 旧プラグインが削除されていても、DB から設定を読み取って移行できる
+- 設定値が正しく移行される
+
+---
+
+### [2-8] 後処理: テスト用設定のクリーンアップ
 
 **確認方法:**
 ```ruby
@@ -451,7 +609,8 @@ Rake::Task['redmine_studio_plugin:install'].invoke
 
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-1. フェーズ 1: 既存の統合済みプラグインを無効化（init.rb → init.rb.bak）
-2. フェーズ 2: 削除対象なしテスト実行
-3. フェーズ 3: ダミープラグイン作成 → 削除対象ありテスト実行
-4. フェーズ 4: クリーンアップ・有効化（init.rb.bak → init.rb）
+1. フェーズ 1: 既存の統合済みプラグインを無効化（init.rb → init.rb.bak, lib → lib.bak）
+2. フェーズ 2: 削除対象なしテスト実行（[1-1]）
+3. フェーズ 3: ダミープラグイン作成 → 削除対象ありテスト実行（[1-2], [1-3]）
+4. フェーズ 4: 設定移行テスト実行（[2-1] 〜 [2-7]）
+5. フェーズ 5: クリーンアップ（[2-8]）・有効化（init.rb.bak → init.rb, lib.bak → lib）
