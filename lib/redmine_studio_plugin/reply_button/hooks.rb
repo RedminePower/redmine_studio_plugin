@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module RedmineStudioPlugin
   module ReplyButton
     class Hooks < Redmine::Hook::ViewListener
