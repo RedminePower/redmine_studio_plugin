@@ -1,0 +1,17 @@
+# frozen_string_literal: true
+
+en:
+  label_subtask_list_accordion: "Subtask List Accordion"
+  subtask_list_accordion_list_all_expand: "Expand All"
+  subtask_list_accordion_list_all_collapse: "Collapse All"
+  subtask_list_accordion_context_menu_expand: "Expand this tree"
+  subtask_list_accordion_context_menu_collapse: "Collapse this tree"
+  subtask_list_accordion_context_menu_all_expand_next: "Expand next level all"
+  field_subtasks_default_expand_limit_upper: "Upper limit of child issues to tree expanding from the first time"
+  subtask_list_accordion_label_enable_server_scripting_mode: "Enable server processing mode"
+  subtask_list_accordion_label_enable_server_scripting_mode_hint: "Has many subtasks tree display more than faster, but tradeoff other subtask's plugin. for exsample 'subtask_list_columns' plugin"
+  subtask_list_accordion_label_expand_all: "Expand all child issues by default"
+  subtask_list_accordion_label_expand_all_hint: "If enabled, setting 'Upper limit of child issues to tree expanding from the first time' for each user will not work."
+  subtask_list_accordion_label_collapsed_trackers: "Trackers to be collapsed"
+  subtask_list_accordion_label_collapsed_trackers_hint: "Specify trackers that you want to collapse by default."
+  subtask_list_accordion_label_collapsed_trackers_hint_disabled: "This setting can be set only when Expand all child issues by default is enabled."

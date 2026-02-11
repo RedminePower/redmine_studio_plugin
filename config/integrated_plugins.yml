@@ -13,3 +13,4 @@ integrated_plugins:
   - redmine_auto_close
   - redmine_date_independent
   - redmine_wiki_lists
+  - redmine_subtask_list_accordion

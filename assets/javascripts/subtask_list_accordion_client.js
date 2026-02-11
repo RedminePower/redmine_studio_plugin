@@ -1,0 +1,322 @@
+function getParentIssue(startPos, rank, sameTreeOnly) {
+  if (sameTreeOnly) {
+    if (
+      rank > 0 &&
+      !slaTRs.eq(startPos.val + 1).hasClass("idnt-" + rank) &&
+      !slaTRs.eq(startPos.val + 1).hasClass("idnt-" + (rank + 1))
+    ) {
+      //skip because other tree
+      return $();
+    }
+  }
+
+  //find potential parent
+  var issuesSelector = "table.list > tbody > tr";
+  var rankAttr = rank <= 0 ? ":not(.idnt)" : "tr.idnt-" + rank;
+  var nextAttr = "tr.idnt-" + (rank + 1 - 0);
+  var selectorP =
+    startPos.val + rank > 0 ? ":gt(" + startPos.val + ")" + rankAttr : rankAttr;
+  var selectorC = nextAttr + ":first";
+  var pp = $(issuesSelector + selectorP + " + " + selectorC);
+
+  if (pp.length != 1) {
+    //no parent
+    return $();
+  }
+
+  //get parent
+  startPos.val = pp.index() - 1;
+  return slaTRs.filter(function (index) {
+    return index == startPos.val;
+  });
+}
+
+function getChildIssues(startPos, rank) {
+  //find first child
+  var nextAttr = ".idnt-" + (rank - 0 + 1);
+  var selectorFirst = ":gt(" + startPos.val + ")" + nextAttr + ":first";
+  var startIdx = slaTRs.filter(selectorFirst).index();
+  if (startIdx <= 0) {
+    return $();
+  }
+
+  //find last child
+  var cc = startIdx;
+  var rankCount = rank + 1;
+  var endIdx;
+  do {
+    if (slaTRs.eq(cc).is(".idnt-" + rankCount)) {
+      endIdx = cc++;
+    } else if (slaTRs.eq(cc).is(".idnt-" + (rankCount - 0 + 1))) {
+      endIdx = cc++;
+      rankCount++;
+    } else if (slaTRs.eq(cc).is(".idnt") && rankCount > rank + 1) {
+      rankCount--;
+    } else {
+      break;
+    }
+  } while (cc < slaTRsSize);
+
+  startPos.val = endIdx;
+  return slaTRs.filter(function (index) {
+    return index >= startIdx && index <= endIdx;
+  });
+}
+
+function addRangeIndex(parentTR, children, rank) {
+  parentTR
+    .attr("cs", children.filter("tr:first").index())
+    .attr("ce", children.filter("tr:last").index())
+    .attr("rank", rank);
+}
+
+function childIssueShowOrHide(parentTR) {
+  var children = slaTRs.filter(function (index) {
+    return index >= parentTR.attr("cs") - 0 && index <= parentTR.attr("ce") - 0;
+  });
+
+  if (children.is(":visible")) {
+    parentTR.removeClass("expand").addClass("collapse");
+    children
+      .hide("fast")
+      .filter(".haschild")
+      .removeClass("expand")
+      .addClass("collapse");
+  } else {
+    parentTR.removeClass("collapse").addClass("expand");
+    children.filter(".idnt-" + (parentTR.attr("rank") - 0 + 1)).show("fast");
+  }
+}
+
+function setAccordion(parentPos, rank, isHiding, sameTreeOnly) {
+  var parentTR = getParentIssue(parentPos, rank, sameTreeOnly);
+  if (parentTR.length != 1) {
+    return false;
+  } else if (parentTR.hasClass("haschild")) {
+    //search exit or skip
+    return !sameTreeOnly;
+  }
+  parentTR
+    .addClass("haschild")
+    .addClass(isHiding ? "collapse" : "expand")
+    .find("td.subject > a")
+    .before('<span class="treearrow" />');
+
+  var children = getChildIssues(parentPos, rank);
+  addRangeIndex(parentTR, children, rank);
+  parentTR.find("td.subject > span.treearrow").click(function () {
+    childIssueShowOrHide($(this).parent().parent());
+    return false;
+  });
+  if (isHiding) {
+    children.hide();
+  }
+
+  //make next rank
+  if (sameTreeOnly) {
+    parentTR.find("td.subject > span.treearrow").one("click", function () {
+      var parentTR = $(this).parent().parent();
+      var parentFound = false;
+      var parentPos = { val: 0 };
+      parentPos.val = parentTR.index();
+      do {
+        parentFound = setAccordion(parentPos, rank + 1, true, true);
+      } while (parentFound);
+    });
+  }
+
+  //do next
+  return true;
+}
+
+function selectedTreeOpen() {
+  var targetParents = slaTRs.filter("tr:has(td.checkbox > input:checked)");
+  for (var i = 0; i < targetParents.length; i++) {
+    var parentTR = targetParents.eq(i);
+    if (!parentTR.hasClass("haschild")) {
+      continue;
+    }
+
+    //make rank
+    for (var rank = parentTR.attr("rank") - 0 + 1; rank < 10; rank++) {
+      var parentFound = false;
+      var parentPos = { val: 0 };
+      parentPos.val = parentTR.index();
+      do {
+        parentFound = setAccordion(parentPos, rank, false, false);
+      } while (parentFound && parentPos.val < parentTR.attr("ce") - 0);
+    }
+
+    //show
+    var children = slaTRs.filter(function (index) {
+      return (
+        index >= parentTR.attr("cs") - 0 && index <= parentTR.attr("ce") - 0
+      );
+    });
+    children
+      .show()
+      .filter(".haschild")
+      .removeClass("collapse")
+      .addClass("expand");
+    parentTR.removeClass("collapse").addClass("expand");
+  }
+}
+
+function selectedTreeClose() {
+  var targetParents = slaTRs.filter("tr:has(td.checkbox > input:checked)");
+  for (var i = 0; i < targetParents.length; i++) {
+    var parentTR = targetParents.eq(i);
+    if (!parentTR.hasClass("haschild")) {
+      continue;
+    }
+
+    //hide
+    var children = slaTRs.filter(function (index) {
+      return (
+        index >= parentTR.attr("cs") - 0 && index <= parentTR.attr("ce") - 0
+      );
+    });
+    children
+      .hide()
+      .filter(".haschild")
+      .removeClass("expand")
+      .addClass("collapse");
+    parentTR.removeClass("expand").addClass("collapse");
+  }
+}
+
+function allExpandNext() {
+  var parentTR = slaTRs.filter("tr:has(td.checkbox > input:checked)");
+  if (parentTR.length != 1) {
+    return;
+  }
+  if (!parentTR.hasClass("haschild")) {
+    return;
+  }
+
+  //make rank
+  for (var rank = 0; rank <= parentTR.attr("rank") - 0 + 1; rank++) {
+    if (rank > 0) {
+      var parentFound = false;
+      var parentPos = { val: 0 };
+      do {
+        parentFound = setAccordion(parentPos, rank, true, false);
+      } while (parentFound);
+    }
+
+    //show
+    if (rank <= parentTR.attr("rank") - 0) {
+      slaTRs
+        .filter("tr[rank='" + rank + "'].haschild.collapse")
+        .each(function () {
+          childIssueShowOrHide($(this));
+        });
+    }
+  }
+}
+
+$(document).ready(function () {
+  function setupAccordionClient() {
+    // Note: slaTRs is defined in the global scope for access by other functions
+    slaTRs = $("table.list > tbody > tr");
+    slaTRsSize = slaTRs.length;
+
+    if (slaTRs.closest("table.list").data("subtaskListAccordionSetupDone")) {
+      return; // Already set up
+    }
+
+    var expandTreeAtFirst = window.subtaskListAccordionExpandTreeAtFirst;
+    //make rank first time
+    var analyzeTo = expandTreeAtFirst ? 10 : 1;
+    var isHiding = !expandTreeAtFirst;
+    var isSameTreeOnly = isHiding;
+
+    for (var rank = 0; rank < analyzeTo; rank++) {
+      var parentPos = { val: 0 };
+      var parentFound = false;
+      do {
+        parentFound = setAccordion(parentPos, rank, isHiding, isSameTreeOnly);
+      } while (parentFound);
+    }
+
+    //all expand
+    $("a.subtask_all_expand")
+      .one("click", function () {
+        for (var rank = 1; rank < 10; rank++) {
+          var parentPos = { val: 0 };
+          var parentFound = false;
+          do {
+            parentFound = setAccordion(parentPos, rank, false, false);
+          } while (parentFound);
+        }
+      })
+      .click(function () {
+        slaTRs
+          .show()
+          .filter(".haschild")
+          .removeClass("collapse")
+          .addClass("expand");
+
+        //for debug
+        if (slaTRs.filter("tr:visible").length != slaTRsSize) {
+          // alert("NG");
+          console.log("NG");
+        }
+
+        return false;
+      });
+
+    //all collapse
+    $("a.subtask_all_collapse").click(function () {
+      slaTRs.filter(".idnt").hide();
+      slaTRs.filter(".haschild").removeClass("expand").addClass("collapse");
+      return false;
+    });
+
+    //link move
+    $("div.accordion_control").insertAfter("#issue_tree > p");
+
+    // Add marker to indicate setup is done
+    slaTRs.closest("table.list").data("subtaskListAccordionSetupDone", true);
+  }
+
+  /**
+   * Set up form change detection.
+   * This method's purpose is to detect when the issue view is replaced by
+   * other plugins like Redmine RT.
+   */
+  function setupFormChangeDetection() {
+    const targetNode = $("div.issue.details").parent()[0];
+
+    if (targetNode) {
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === "childList") {
+            mutation.addedNodes.forEach((node) => {
+              if (
+                node.nodeType === Node.ELEMENT_NODE &&
+                ($(node).is("div.issue.details") ||
+                  $(node).is($("#issue_tree table.list.issues").parent("form")))
+              ) {
+                setupAccordionClient();
+              }
+            });
+          }
+        });
+      });
+
+      observer.observe(targetNode, {
+        childList: true,
+        subtree: true,
+        attributes: false,
+      });
+    }
+  }
+
+  function initialize() {
+    setupAccordionClient();
+    setupFormChangeDetection();
+  }
+
+  initialize();
+});

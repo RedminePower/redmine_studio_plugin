@@ -1,0 +1,50 @@
+<fieldset class="box">
+  <legend><%= l(:label_subtask_list_accordion) %></legend>
+  <p>
+    <label><%= l(:subtask_list_accordion_label_enable_server_scripting_mode) %></label>
+    <%= check_box_tag 'settings[subtask_list_accordion_enable_server_scripting_mode]', true, @settings['subtask_list_accordion_enable_server_scripting_mode'] %><br/>
+    <em><%= l(:subtask_list_accordion_label_enable_server_scripting_mode_hint) %></em><br/>
+
+    <label><%= l(:subtask_list_accordion_label_expand_all) %></label>
+    <%= check_box_tag 'settings[subtask_list_accordion_expand_all]', true, @settings['subtask_list_accordion_expand_all'], id: 'sla_expand_all_checkbox' %><br/>
+    <em><%= l(:subtask_list_accordion_label_expand_all_hint) %></em><br/>
+
+    <label><%= l(:subtask_list_accordion_label_collapsed_trackers) %></label>
+    <%= select_tag 'settings[subtask_list_accordion_collapsed_tracker_ids][]',
+          options_for_select(
+            Tracker.all.map{|t| [t.name, t.id]},
+            :selected => @settings['subtask_list_accordion_collapsed_tracker_ids']
+          ),
+          {
+            :id => 'sla_collapsed_trackers_field',
+            :label => l(:subtask_list_accordion_label_collapsed_trackers),
+            :size => (Tracker.all.size < 10 ? Tracker.all.size + 1 : 10),
+            :multiple => true,
+            :include_blank => true
+          }
+    %><br/>
+    <em><%= l(:subtask_list_accordion_label_collapsed_trackers_hint) %></em><br/>
+  </p>
+</fieldset>
+
+<script>
+$(document).ready(function() {
+  var tooltipText = "<%= j(l(:subtask_list_accordion_label_collapsed_trackers_hint_disabled)) %>";
+  toggleCollapsedTrackers();
+
+  $('#sla_expand_all_checkbox').change(function() {
+    toggleCollapsedTrackers();
+  });
+
+  function toggleCollapsedTrackers() {
+    var $collapsedField = $('#sla_collapsed_trackers_field');
+    if ($('#sla_expand_all_checkbox').prop('checked')) {
+      $collapsedField.prop('disabled', false);
+      $collapsedField.removeAttr('title');
+    } else {
+      $collapsedField.prop('disabled', true);
+      $collapsedField.attr('title', tooltipText);
+    }
+  }
+});
+</script>

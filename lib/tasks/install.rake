@@ -3,13 +3,17 @@
 require 'yaml'
 
 namespace :redmine_studio_plugin do
-  desc 'プラグインのインストール（旧プラグイン削除 + DBマイグレーション + cron登録）'
+  desc 'プラグインのインストール（設定移行 + 旧プラグイン削除 + DBマイグレーション + cron登録）'
   task install: :environment do
     puts '=== redmine_studio_plugin install ==='
     Rails.logger.info '[redmine_studio_plugin] Install task started'
 
-    # 1. 旧スタンドアロンプラグインの削除
-    puts "\n[1/3] Removing integrated plugins..."
+    # 1. 旧プラグインからの設定移行
+    puts "\n[1/4] Migrating settings from legacy plugins..."
+    migrate_subtask_list_accordion_settings
+
+    # 2. 旧スタンドアロンプラグインの削除
+    puts "\n[2/4] Removing integrated plugins..."
     plugin_root = Rails.root.join('plugins', 'redmine_studio_plugin')
     config_path = plugin_root.join('config', 'integrated_plugins.yml')
     config = YAML.load_file(config_path)
@@ -37,13 +41,13 @@ namespace :redmine_studio_plugin do
       puts "  No plugins to remove."
     end
 
-    # 2. DBマイグレーション
-    puts "\n[2/3] Running DB migration..."
+    # 3. DBマイグレーション
+    puts "\n[3/4] Running DB migration..."
     Rake::Task['redmine:plugins:migrate'].invoke
     puts 'Done'
 
-    # 3. cron登録
-    puts "\n[3/3] Registering cron job..."
+    # 4. cron登録
+    puts "\n[4/4] Registering cron job..."
     redmine_path = Rails.root
     cron_line = "0 3 * * * cd #{redmine_path} && bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production >> log/auto_close.log 2>&1"
     current_cron = `crontab -l 2>/dev/null` rescue ''
@@ -66,5 +70,50 @@ namespace :redmine_studio_plugin do
     puts "\n=== Install completed ==="
     puts 'Please restart Redmine to apply changes.'
     Rails.logger.info '[redmine_studio_plugin] Install task completed'
+  end
+
+  # Subtask List Accordion の設定移行
+  def migrate_subtask_list_accordion_settings
+    # 旧プラグインが削除されている場合、動的メソッドは使えないため DB から直接読み取る
+    # Setting#value は available_settings を参照するため、[:value] で直接アクセスする
+    legacy_record = Setting.find_by(name: 'plugin_redmine_subtask_list_accordion')
+
+    if legacy_record.nil? || legacy_record[:value].blank?
+      puts '  redmine_subtask_list_accordion: No settings to migrate (not installed or no settings).'
+      return
+    end
+
+    legacy_settings = YAML.safe_load(legacy_record[:value], permitted_classes: [Symbol]) rescue {}
+
+    if legacy_settings.blank?
+      puts '  redmine_subtask_list_accordion: No settings to migrate (empty settings).'
+      return
+    end
+
+    # 移行対象のキーマッピング（元のキー => 新しいキー）
+    key_mapping = {
+      'enable_server_scripting_mode' => 'subtask_list_accordion_enable_server_scripting_mode',
+      'expand_all' => 'subtask_list_accordion_expand_all',
+      'collapsed_trackers' => 'subtask_list_accordion_collapsed_trackers',
+      'collapsed_tracker_ids' => 'subtask_list_accordion_collapsed_tracker_ids'
+    }
+
+    current_settings = Setting.plugin_redmine_studio_plugin || {}
+    migrated_keys = []
+
+    key_mapping.each do |old_key, new_key|
+      if legacy_settings.key?(old_key) && !current_settings.key?(new_key)
+        current_settings[new_key] = legacy_settings[old_key]
+        migrated_keys << old_key
+      end
+    end
+
+    if migrated_keys.any?
+      Setting.plugin_redmine_studio_plugin = current_settings
+      puts "  redmine_subtask_list_accordion: Migrated #{migrated_keys.size} setting(s): #{migrated_keys.join(', ')}"
+      Rails.logger.info "[redmine_studio_plugin] Migrated subtask_list_accordion settings: #{migrated_keys.join(', ')}"
+    else
+      puts '  redmine_subtask_list_accordion: Settings already migrated or using defaults.'
+    end
   end
 end

@@ -69,6 +69,14 @@ else
          caption: :di_label_date_independent,
          html: { class: 'icon icon-date_independent' },
          if: proc { User.current.admin? }
+
+    # Subtask List Accordion settings
+    settings default: {
+      'subtask_list_accordion_enable_server_scripting_mode' => true,
+      'subtask_list_accordion_expand_all' => false,
+      'subtask_list_accordion_collapsed_trackers' => '',
+      'subtask_list_accordion_collapsed_tracker_ids' => []
+    }, partial: 'settings/subtask_list_accordion/settings'
   end
 
   # Load hooks only when no conflicts
@@ -90,8 +98,17 @@ else
   require_relative 'lib/redmine_studio_plugin/wiki_lists/ref_issues/parser'
   require_relative 'lib/redmine_studio_plugin/wiki_lists/ref_issues'
 
+  # Load Subtask List Accordion
+  require_relative 'lib/redmine_studio_plugin/subtask_list_accordion/hooks'
+  require_relative 'lib/redmine_studio_plugin/subtask_list_accordion/issues_helper_patch'
+  require_relative 'lib/redmine_studio_plugin/subtask_list_accordion/user_preference_patch'
+
   Rails.application.config.after_initialize do
     Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
     Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
+
+    # Subtask List Accordion patches
+    UserPreference.prepend RedmineStudioPlugin::SubtaskListAccordion::UserPreferencePatch
+    IssuesHelper.include RedmineStudioPlugin::SubtaskListAccordion::IssuesHelperPatch
   end
 end

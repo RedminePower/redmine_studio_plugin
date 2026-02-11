@@ -1,0 +1,38 @@
+<% if sla_has_grandson_issues?(@issue) %>
+  <%= content_for :header_tags do
+    stylesheet_link_tag(sla_use_css, :plugin => "redmine_studio_plugin") +
+    javascript_include_tag("subtask_list_accordion" + (subtask_tree_client_processing? ? "_client" : ""), :plugin => "redmine_studio_plugin")
+  end %>
+  <div class="accordion_control contextual">
+    <a href="javascript:void(0)" class="subtask_all_expand"><%= l(:subtask_list_accordion_list_all_expand) %></a>
+    <a href="javascript:void(0)" class="subtask_all_collapse"><%= l(:subtask_list_accordion_list_all_collapse) %></a>
+  </div>
+  <% if subtask_tree_client_processing? %>
+  <script>
+    window.subtaskListAccordionExpandTreeAtFirst = <%= expand_tree_at_first?(@issue) %>;
+  </script>
+  <% end %>
+<% end %>
+<script>
+  //control context-menu of this plugin
+  $(document).ready(function(){
+    //wrap contextMenuShow
+    var _contextMenuShow = contextMenuShow;
+    isHideMenuSla = false;
+    contextMenuShow = function(event){
+      if ($(event.target).parents("div[id='relations']").length == 1 || !$("table.list > tbody > tr").is(".idnt-1"))
+      {
+        //hide this plugin menu
+        isHideMenuSla = true;
+      }
+      _contextMenuShow(event);
+    }
+    $(document).ajaxComplete(function(){
+      if (isHideMenuSla)
+      {
+        $("#context-menu > ul > li.subtask_list_accordion").css("display", "none");
+        isHideMenuSla = false;
+      }
+    });
+  });
+</script>

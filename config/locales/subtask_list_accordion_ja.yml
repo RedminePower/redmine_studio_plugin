@@ -1,0 +1,17 @@
+# frozen_string_literal: true
+
+ja:
+  label_subtask_list_accordion: "子チケット一覧アコーディオン"
+  subtask_list_accordion_list_all_expand: "すべて展開"
+  subtask_list_accordion_list_all_collapse: "すべて収縮"
+  subtask_list_accordion_context_menu_expand: "このツリーを展開"
+  subtask_list_accordion_context_menu_collapse: "このツリーを収縮"
+  subtask_list_accordion_context_menu_all_expand_next: "この階層をすべて展開"
+  field_subtasks_default_expand_limit_upper: "デフォルトでツリーを展開する時の子チケット数上限"
+  subtask_list_accordion_label_enable_server_scripting_mode: "サーバー処理モードを有効にする"
+  subtask_list_accordion_label_enable_server_scripting_mode_hint: "小孫チケットが大量にある時のツリー表示が早くなりますが、子チケット一覧に関する他のプラグインとは共存できなくなります。 例 'subtask_list_columns' プラグイン"
+  subtask_list_accordion_label_expand_all: "デフォルトですべての子チケットを展開する"
+  subtask_list_accordion_label_expand_all_hint: "有効にするとユーザごとに「デフォルトでツリーを展開する時の子チケット数上限」を設定しても機能しません。"
+  subtask_list_accordion_label_collapsed_trackers: "収縮させるトラッカー"
+  subtask_list_accordion_label_collapsed_trackers_hint: "デフォルトで収縮させたいチケットのトラッカーを指定します。"
+  subtask_list_accordion_label_collapsed_trackers_hint_disabled: "本設定は「デフォルトですべての子チケットを展開する」が有効の場合のみ設定できます。"

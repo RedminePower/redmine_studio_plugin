@@ -14,6 +14,7 @@
 | `features/auto_close/TEST_SPEC.md` | Auto Close テスト |
 | `features/date_independent/TEST_SPEC.md` | Date Independent テスト |
 | `features/wiki_lists/TEST_SPEC.md` | Wiki Lists テスト |
+| `features/subtask_list_accordion/TEST_SPEC.md` | Subtask List Accordion テスト |
 
 ## テストの種類
 
@@ -35,7 +36,11 @@
 features 配下のテストを実行する前に、統合済みプラグインが存在すれば、無効化する。
 無効化した場合、テスト完了後は必ず有効化して元に戻す。
 
-### テスト前: 無効化（init.rb → init.rb.bak）
+**重要:** `init.rb` だけでなく `lib` フォルダもリネームする必要がある。
+`init.rb` のみリネームした場合、Rails のオートロードにより `lib` 配下のパッチが読み込まれ、
+旧プラグインの設定キー（`Setting.plugin_redmine_xxx`）を参照してエラーになる。
+
+### テスト前: 無効化
 
 ```powershell
 $pluginsDir = "C:\Docker\redmine_X.Y.Z\plugins"  # 環境に合わせて変更
@@ -44,15 +49,25 @@ $configContent = Get-Content $configPath -Raw
 $integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 foreach ($plugin in $integratedPlugins) {
-    $initPath = "$pluginsDir\$plugin\init.rb"
+    $pluginPath = "$pluginsDir\$plugin"
+
+    # init.rb → init.rb.bak
+    $initPath = "$pluginPath\init.rb"
     if (Test-Path $initPath) {
         Rename-Item -Path $initPath -NewName "init.rb.bak" -Force
-        Write-Host "Disabled: $plugin"
+        Write-Host "Disabled init.rb: $plugin"
+    }
+
+    # lib → lib.bak（オートロード防止）
+    $libPath = "$pluginPath\lib"
+    if (Test-Path $libPath) {
+        Rename-Item -Path $libPath -NewName "lib.bak" -Force
+        Write-Host "Disabled lib: $plugin"
     }
 }
 ```
 
-### テスト後: 有効化（init.rb.bak → init.rb）
+### テスト後: 有効化
 
 ```powershell
 $pluginsDir = "C:\Docker\redmine_X.Y.Z\plugins"  # 環境に合わせて変更
@@ -61,10 +76,20 @@ $configContent = Get-Content $configPath -Raw
 $integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
 
 foreach ($plugin in $integratedPlugins) {
-    $initBakPath = "$pluginsDir\$plugin\init.rb.bak"
+    $pluginPath = "$pluginsDir\$plugin"
+
+    # init.rb.bak → init.rb
+    $initBakPath = "$pluginPath\init.rb.bak"
     if (Test-Path $initBakPath) {
         Rename-Item -Path $initBakPath -NewName "init.rb" -Force
-        Write-Host "Enabled: $plugin"
+        Write-Host "Enabled init.rb: $plugin"
+    }
+
+    # lib.bak → lib
+    $libBakPath = "$pluginPath\lib.bak"
+    if (Test-Path $libBakPath) {
+        Rename-Item -Path $libBakPath -NewName "lib" -Force
+        Write-Host "Enabled lib: $plugin"
     }
 }
 ```
@@ -86,3 +111,4 @@ Claude に以下のように依頼してください:
 - `auto_close のテストを実行してください`
 - `date_independent のテストを実行してください`
 - `wiki_lists のテストを実行してください`
+- `subtask_list_accordion のテストを実行してください`

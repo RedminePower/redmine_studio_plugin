@@ -3,13 +3,14 @@
 ## 概要
 
 `rake redmine_studio_plugin:install` タスクのテスト仕様。
-このタスクは以下の 3 つの処理を一括で行う:
+このタスクは以下の 4 つの処理を一括で行う:
 
-1. 統合済みプラグインの削除（旧スタンドアロン版）
-2. DB マイグレーション
-3. cron 登録
+1. 旧プラグインからの設定移行
+2. 統合済みプラグインの削除（旧スタンドアロン版）
+3. DB マイグレーション
+4. cron 登録
 
-本テストでは主に「統合済みプラグインの削除」機能を検証する。
+本テストでは主に「設定移行」と「統合済みプラグインの削除」機能を検証する。
 DB マイグレーションと cron 登録のテストは `features/auto_close/TEST_SPEC.md` の [2-I] セクションを参照。
 
 ## 環境パラメータ
@@ -31,15 +32,19 @@ DB マイグレーションと cron 登録のテストは `features/auto_close/T
 ### 処理フロー
 
 1. ログ出力: `[redmine_studio_plugin] Install task started`
-2. [1/3] 統合済みプラグインのフォルダを確認・削除
-3. [2/3] DB マイグレーション実行
-4. [3/3] cron 登録
-5. ログ出力: `[redmine_studio_plugin] Install task completed`
+2. [1/4] 旧プラグインからの設定移行
+3. [2/4] 統合済みプラグインのフォルダを確認・削除
+4. [3/4] DB マイグレーション実行
+5. [4/4] cron 登録
+6. ログ出力: `[redmine_studio_plugin] Install task completed`
 
 ### 出力メッセージ
 
 | 条件 | stdout 出力 |
 |------|-------------|
+| 設定移行あり | `redmine_subtask_list_accordion: Migrated N setting(s): key1, key2` |
+| 設定移行なし | `redmine_subtask_list_accordion: No settings to migrate (not installed or no settings).` |
+| 設定移行済み | `redmine_subtask_list_accordion: Settings already migrated or using defaults.` |
 | プラグイン削除時 | `Removing {plugin}...` → `{plugin} removed.` |
 | プラグインなし | `{plugin} not found (already removed or not installed).` |
 | 削除あり | `{N} plugin(s) removed.` |
@@ -51,8 +56,18 @@ DB マイグレーションと cron 登録のテストは `features/auto_close/T
 | 条件 | ログメッセージ |
 |------|---------------|
 | 開始時 | `[redmine_studio_plugin] Install task started` |
+| 設定移行あり | `[redmine_studio_plugin] Migrated subtask_list_accordion settings: key1, key2` |
 | 削除あり | `[redmine_studio_plugin] Removed plugins: {plugin1}, {plugin2}` |
 | 完了時 | `[redmine_studio_plugin] Install task completed` |
+
+### 設定移行対象
+
+| 旧プラグイン | 旧キー | 新キー |
+|-------------|--------|-------|
+| redmine_subtask_list_accordion | `enable_server_scripting_mode` | `subtask_list_accordion_enable_server_scripting_mode` |
+| redmine_subtask_list_accordion | `expand_all` | `subtask_list_accordion_expand_all` |
+| redmine_subtask_list_accordion | `collapsed_trackers` | `subtask_list_accordion_collapsed_trackers` |
+| redmine_subtask_list_accordion | `collapsed_tracker_ids` | `subtask_list_accordion_collapsed_tracker_ids` |
 
 ---
 
@@ -274,6 +289,144 @@ I, [2026-02-05T...] INFO -- : [redmine_studio_plugin] Install task completed
 **期待結果:**
 - ログに `[redmine_studio_plugin] Install task started` が含まれる
 - ログに `[redmine_studio_plugin] Install task completed` が含まれる
+
+---
+
+## 2. 設定移行テスト
+
+### [2-1] subtask_list_accordion: 旧プラグインの設定がない場合 → スキップ
+
+**事前条件:**
+- `Setting.plugin_redmine_subtask_list_accordion` が存在しない、または空
+
+**確認方法:**
+```ruby
+# 旧設定をクリア（存在する場合）
+begin
+  Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
+rescue
+  # 設定が存在しない場合は無視
+end
+
+# タスク実行
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+
+# 出力をキャプチャ
+output = capture_stdout { Rake::Task['redmine_studio_plugin:install'].invoke }
+puts output.include?('No settings to migrate')
+```
+
+**期待結果:**
+- 出力に `No settings to migrate` が含まれる
+- エラーが発生しない
+
+---
+
+### [2-2] subtask_list_accordion: 旧プラグインの設定がある場合 → 移行される
+
+**事前条件:**
+- `Setting.plugin_redmine_subtask_list_accordion` に設定値が存在する
+
+**確認方法:**
+```ruby
+# 旧設定を作成
+legacy_settings = {
+  'enable_server_scripting_mode' => false,
+  'expand_all' => true,
+  'collapsed_trackers' => 'test',
+  'collapsed_tracker_ids' => ['1', '2']
+}
+Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+
+# 新設定から対象キーを削除（移行をテストするため）
+new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
+new_settings.delete('subtask_list_accordion_expand_all')
+new_settings.delete('subtask_list_accordion_collapsed_trackers')
+new_settings.delete('subtask_list_accordion_collapsed_tracker_ids')
+Setting.plugin_redmine_studio_plugin = new_settings
+
+# タスク実行
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
+
+# 確認
+new_settings = Setting.plugin_redmine_studio_plugin
+puts "enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
+puts "expand_all: #{new_settings['subtask_list_accordion_expand_all'] == true}"
+puts "collapsed_trackers: #{new_settings['subtask_list_accordion_collapsed_trackers'] == 'test'}"
+puts "collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tracker_ids'] == ['1', '2']}"
+```
+
+**期待結果:**
+- 各設定値が正しく移行される（すべて `true`）
+- 出力に `Migrated 4 setting(s)` が含まれる
+
+---
+
+### [2-3] subtask_list_accordion: 既に移行済みの場合 → 上書きしない
+
+**事前条件:**
+- `Setting.plugin_redmine_subtask_list_accordion` に設定値が存在する
+- `Setting.plugin_redmine_studio_plugin` に既に同じキーの設定が存在する
+
+**確認方法:**
+```ruby
+# 旧設定を作成（移行元の値）
+legacy_settings = {
+  'enable_server_scripting_mode' => false,
+  'expand_all' => true
+}
+Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+
+# 新設定に既に値を設定（既存の値）
+new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings['subtask_list_accordion_enable_server_scripting_mode'] = true  # 旧設定と異なる値
+new_settings['subtask_list_accordion_expand_all'] = false  # 旧設定と異なる値
+Setting.plugin_redmine_studio_plugin = new_settings
+
+# タスク実行
+Rake::Task['redmine_studio_plugin:install'].reenable
+Rake::Task['redmine:plugins:migrate'].reenable
+Rake::Task['redmine_studio_plugin:install'].invoke
+
+# 確認（既存の値が維持されていること）
+new_settings = Setting.plugin_redmine_studio_plugin
+puts "enable_server_scripting_mode preserved: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == true}"
+puts "expand_all preserved: #{new_settings['subtask_list_accordion_expand_all'] == false}"
+```
+
+**期待結果:**
+- 既存の設定値が上書きされない（既存の値が維持される）
+- 出力に `Settings already migrated or using defaults` が含まれる
+
+---
+
+### [2-4] 後処理: テスト用設定のクリーンアップ
+
+**確認方法:**
+```ruby
+# 旧設定を削除
+begin
+  Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
+rescue
+  # 設定が存在しない場合は無視
+end
+
+# 新設定をデフォルトに戻す
+new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings['subtask_list_accordion_enable_server_scripting_mode'] = true
+new_settings['subtask_list_accordion_expand_all'] = false
+new_settings['subtask_list_accordion_collapsed_trackers'] = ''
+new_settings['subtask_list_accordion_collapsed_tracker_ids'] = []
+Setting.plugin_redmine_studio_plugin = new_settings
+
+puts "Cleanup completed"
+```
+
+**期待結果:** `Cleanup completed` が出力される
 
 ---
 
