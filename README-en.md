@@ -205,9 +205,14 @@ Displays a list of issues matching conditions.
 {{ref_issues(-p, id, subject, status)}}
 ```
 
+### Note
+
+This feature allows displaying issue information with arbitrary search conditions through wiki macros. We recommend using it in environments where only trusted users have access.
+
 ## Subtask List Accordion
 
-A feature that converts the subtask list into an accordion format with collapse/expand functionality.
+Redmine's subtask list becomes difficult to navigate when the hierarchy is deep.
+This feature converts the subtask list into an accordion format with collapse/expand functionality, allowing you to display only the parts you need even with complex issue structures.
 
 - Collapse/expand each level of the subtask list
 - Adds "Expand All" and "Collapse All" links at the top of the subtask list
