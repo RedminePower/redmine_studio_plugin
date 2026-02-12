@@ -6,11 +6,12 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 
 ## Features
 
-- **Reply Button** - Adds a "Reply" button to tickets
+- **Reply Button** - Adds a "Reply" button to issues
 - **Teams Button** - Adds a "Teams" button to usernames to start a chat
 - **Auto Close** - Automatically closes issues based on conditions
 - **Date Independent** - Makes parent issue dates independent from child issues
 - **Wiki Lists** - Macros to display wiki pages and issue lists
+- **Subtask List Accordion** - Adds accordion functionality to the subtask list
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 
 ## Supported Redmine
@@ -55,11 +56,11 @@ Restart Redmine to apply the changes.
 
 ## Reply Button
 
-A feature that adds a "Reply" button to tickets.
+A feature that adds a "Reply" button to issues.
 
 - Clicking the "Reply" button automatically sets the last commenter as the assignee
-- If there are no comments, the ticket author is set as the assignee
-- Enables email-like exchanges on tickets, convenient for ticket-driven development
+- If there are no comments, the issue author is set as the assignee
+- Enables email-like exchanges on issues, convenient for issue-driven development
 
 ### Activation
 
@@ -74,7 +75,7 @@ The "Reply" button will not appear unless the following settings are configured.
 A feature that adds a "Teams" button next to usernames, allowing you to start a chat with one click.
 
 - Clicking the "Teams" button opens a Teams chat with that user
-- The chat is pre-filled with ticket information (title, URL, ticket number)
+- The chat is pre-filled with issue information (title, URL, issue ID)
 
 ### Supported Client
 
@@ -203,6 +204,26 @@ Displays a list of issues matching conditions.
 {{ref_issues(-f:status=New, -f:tracker=Bug)}}
 {{ref_issues(-p, id, subject, status)}}
 ```
+
+## Subtask List Accordion
+
+A feature that converts the subtask list into an accordion format with collapse/expand functionality.
+
+- Collapse/expand each level of the subtask list
+- Adds "Expand All" and "Collapse All" links at the top of the subtask list
+- Context menu options: "Expand this tree", "Collapse this tree", "Expand next level all"
+
+### Plugin Settings
+
+| Setting | Description |
+|---------|-------------|
+| Server processing mode | Faster but may conflict with other plugins (default: enabled) |
+| Expand all by default | Expand all subtasks on initial display |
+| Collapsed trackers | Specified trackers are collapsed by default (only when "Expand all" is enabled) |
+
+### User Settings
+
+- "Maximum number of subtasks for default tree expansion" can be configured in personal settings
 
 ## Plugin API
 
