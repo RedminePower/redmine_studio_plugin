@@ -2,6 +2,8 @@
 
 Adds a "Reply" button to issues.
 
+<img src="images/reply_button_01.png" width="500">
+
 ## Overview
 
 This feature adds a "Reply" button to the issue screen, allowing users to communicate on issues as naturally as replying to emails.

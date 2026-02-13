@@ -58,6 +58,8 @@ Restart Redmine to apply the changes.
 
 A feature that adds a "Reply" button to issues.
 
+<img src="docs/images/reply_button_01.png" width="400">
+
 - Clicking the "Reply" button automatically sets the last commenter as the assignee
 - If there are no comments, the issue author is set as the assignee
 - Enables email-like exchanges on issues, convenient for issue-driven development
@@ -67,6 +69,8 @@ For details, see [docs/reply_button-en.md](docs/reply_button-en.md).
 ## Teams Button
 
 A feature that adds a "Teams" button next to usernames, allowing you to start a chat with one click.
+
+<img src="docs/images/teams_button_01.png" width="400">
 
 - Clicking the "Teams" button opens a Teams chat with that user
 - The chat is pre-filled with issue information (title, URL, issue ID)
@@ -87,8 +91,8 @@ For details, see [docs/auto_close-en.md](docs/auto_close-en.md).
 
 A feature that makes parent issue start dates and due dates independent from child issues.
 
-In Redmine, when the "Derive from child issues" setting is enabled, parent issue dates are automatically calculated from child issues.
-This feature allows you to control this behavior based on project and status.
+Redmine's "Derived from child issues" setting applies system-wide, so you cannot change the behavior per project.
+With this feature, you can control synchronization based on specific projects and statuses.
 
 - Make parent issue dates independent for specific projects
 - Maintain synchronization for specific statuses (e.g., Closed)
@@ -98,6 +102,8 @@ For details, see [docs/date_independent-en.md](docs/date_independent-en.md).
 ## Wiki Lists
 
 Provides macros to display issue and page lists on Wiki pages.
+
+<img src="docs/images/wiki_lists_03.png" width="400">
 
 - `{{wiki_list}}` - Displays a list of wiki pages in table format
 - `{{issue_name_link}}` - Creates a link from issue subject
@@ -109,6 +115,8 @@ For details, see [docs/wiki_lists-en.md](docs/wiki_lists-en.md).
 
 Redmine's subtask list becomes difficult to navigate when the hierarchy is deep.
 This feature converts the subtask list into an accordion format with collapse/expand functionality, allowing you to display only the parts you need even with complex issue structures.
+
+<img src="docs/images/subtask_list_accordion_01.png" width="500">
 
 - Collapse/expand each level of the subtask list
 - Adds "Expand All" and "Collapse All" links at the top of the subtask list

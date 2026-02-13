@@ -7,6 +7,8 @@ Adds accordion (collapse/expand) functionality to the subtask list on issues.
 Redmine's subtask list becomes difficult to navigate when the hierarchy gets deep.
 This feature converts the subtask list into an accordion format that can be collapsed and expanded, allowing you to display only the parts you need even with complex issue structures.
 
+<img src="images/subtask_list_accordion_01.png" width="700">
+
 ### Key Features
 
 - Collapse/expand each level of the subtask list

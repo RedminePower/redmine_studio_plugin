@@ -2,6 +2,8 @@
 
 Adds a "Teams" button next to usernames, enabling one-click chat initiation.
 
+<img src="images/teams_button_01.png" width="500">
+
 ## Overview
 
 This feature adds a "Teams" button next to usernames displayed on issue pages (assignee, author, comment authors, etc.). Clicking the button opens Microsoft Teams chat with pre-filled issue information ready to send.
