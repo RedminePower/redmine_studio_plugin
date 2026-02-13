@@ -62,13 +62,7 @@ A feature that adds a "Reply" button to issues.
 - If there are no comments, the issue author is set as the assignee
 - Enables email-like exchanges on issues, convenient for issue-driven development
 
-### Activation
-
-This feature can be enabled or disabled per project.
-The "Reply" button will not appear unless the following settings are configured.
-
-1. Go to project "Settings"
-2. In the "Project" tab, check "Reply button" under "Modules" and save
+For details, see [docs/reply_button-en.md](docs/reply_button-en.md).
 
 ## Teams Button
 
@@ -77,18 +71,7 @@ A feature that adds a "Teams" button next to usernames, allowing you to start a 
 - Clicking the "Teams" button opens a Teams chat with that user
 - The chat is pre-filled with issue information (title, URL, issue ID)
 
-### Supported Client
-
-- Must be using Office365 (Tested on Windows10, Android)
-  - Because the DeepLink function is used to launch Teams
-
-### Activation
-
-This feature can be enabled or disabled per project.
-The "Teams" button will not appear unless the following settings are configured.
-
-1. Go to project "Settings"
-2. In the "Project" tab, check "Teams button" under "Modules" and save
+For details, see [docs/teams_button-en.md](docs/teams_button-en.md).
 
 ## Auto Close
 
@@ -98,17 +81,7 @@ A feature that automatically closes issues (status change, assignee change, comm
 - Periodically closes expired issues (executed via cron daily at 3:00)
 - Flexible condition settings including project, tracker, status, and custom fields
 
-### Administration
-
-Rules can be created, edited, and deleted from the "Auto close" menu in the administration panel.
-
-### Manual execution of expired issues
-
-The expired trigger is automatically executed by cron, but you can manually execute it with the following command.
-
-```bash
-bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production
-```
+For details, see [docs/auto_close-en.md](docs/auto_close-en.md).
 
 ## Date Independent
 
@@ -120,94 +93,17 @@ This feature allows you to control this behavior based on project and status.
 - Make parent issue dates independent for specific projects
 - Maintain synchronization for specific statuses (e.g., Closed)
 
-### Administration
-
-Rules can be created, edited, and deleted from the "Date independent" menu in the administration panel.
+For details, see [docs/date_independent-en.md](docs/date_independent-en.md).
 
 ## Wiki Lists
 
 Provides macros to display issue and page lists on Wiki pages.
 
-### wiki_list macro
+- `{{wiki_list}}` - Displays a list of wiki pages in table format
+- `{{issue_name_link}}` - Creates a link from issue subject
+- `{{ref_issues}}` - Displays a list of issues matching conditions
 
-Displays a list of wiki pages in table format.
-
-**Basic syntax:** `{{wiki_list(options, columns...)}}`
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-p` | Show only pages in current project |
-| `-p=identifier` | Show only pages in specified project |
-| `-c` | Show only child pages |
-| `-w=width` | Set table width (e.g., `-w=80%`) |
-
-**Columns:**
-
-| Column | Description |
-|--------|-------------|
-| `+title` | Page title (link) |
-| `+alias` | Page alias |
-| `+project` | Project name |
-| `keyword:` | Extract text after keyword in page |
-| `keyword:\delimiter` | Extract text from keyword to delimiter |
-
-**Examples:**
-```
-{{wiki_list(-p, +title)}}
-{{wiki_list(-p, +title, Author:)}}
-{{wiki_list(-p, +title, Author:|Manager|150px)}}
-```
-
-### issue_name_link macro
-
-Creates a link from issue subject.
-
-**Basic syntax:** `{{issue_name_link(subject)}}` or `{{issue_name_link(subject|display text)}}`
-
-**Examples:**
-```
-{{issue_name_link(Bug fix)}}
-{{issue_name_link(Bug fix|Link text)}}
-{{issue_name_link(project-id:Bug fix)}}
-```
-
-### ref_issues macro
-
-Displays a list of issues matching conditions.
-
-**Basic syntax:** `{{ref_issues(options, columns...)}}`
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-p` | Current project issues only |
-| `-p=identifier` | Specified project issues only |
-| `-q=query name` | Use custom query |
-| `-i=query ID` | Use custom query ID |
-| `-s=keyword` | Search in subject |
-| `-d=keyword` | Search in description |
-| `-w=keyword` | Search in subject + description |
-| `-f:field=value` | Filter condition |
-| `-n=count` | Limit display count (max 1000) |
-| `-t` | Display subject as plain text |
-| `-l` | Display subject as link |
-| `-c` | Display count only |
-| `-0` | Display nothing if 0 results |
-
-**Examples:**
-```
-{{ref_issues(-p)}}
-{{ref_issues(-q=My Query)}}
-{{ref_issues(-f:status=New, -f:tracker=Bug)}}
-{{ref_issues(-p, id, subject, status)}}
-```
-
-### Note
-
-This feature allows displaying issue information with arbitrary search conditions through wiki macros. We recommend using it in environments where only trusted users have access.
+For details, see [docs/wiki_lists-en.md](docs/wiki_lists-en.md).
 
 ## Subtask List Accordion
 
@@ -218,17 +114,7 @@ This feature converts the subtask list into an accordion format with collapse/ex
 - Adds "Expand All" and "Collapse All" links at the top of the subtask list
 - Context menu options: "Expand this tree", "Collapse this tree", "Expand next level all"
 
-### Plugin Settings
-
-| Setting | Description |
-|---------|-------------|
-| Server processing mode | Faster but may conflict with other plugins (default: enabled) |
-| Expand all by default | Expand all subtasks on initial display |
-| Collapsed trackers | Specified trackers are collapsed by default (only when "Expand all" is enabled) |
-
-### User Settings
-
-- "Maximum number of subtasks for default tree expansion" can be configured in personal settings
+For details, see [docs/subtask_list_accordion-en.md](docs/subtask_list_accordion-en.md).
 
 ## Plugin API
 
@@ -260,3 +146,4 @@ rm -rf redmine_studio_plugin
 ## License
 
 GPL v2 License
+
