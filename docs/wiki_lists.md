@@ -32,7 +32,7 @@ Wiki ページやチケットの説明に、チケットやページの一覧を
 
 Wiki ページの一覧を表形式で表示します。ページ内のテキストから特定のキーワードを抽出して列として表示することもできます。
 
-<img src="images/wiki_lists_01.png" width="500">
+<img src="images/wiki_lists_01.png" width="700">
 
 ### 基本構文
 
@@ -97,7 +97,7 @@ Wiki ページの一覧を表形式で表示します。ページ内のテキス
 
 チケットの件名からリンクを生成します。チケット番号ではなく、件名でリンクを作成したい場合に便利です。
 
-<img src="images/wiki_lists_02.png" width="500">
+<img src="images/wiki_lists_02.png" width="700">
 
 ### 基本構文
 
@@ -145,7 +145,7 @@ Wiki ページの一覧を表形式で表示します。ページ内のテキス
 
 条件に一致するチケットの一覧を表示します。カスタムクエリを利用したり、様々なフィルタを指定できます。
 
-<img src="images/wiki_lists_03.png" width="500">
+<img src="images/wiki_lists_03.png" width="700">
 
 ### 基本構文
 

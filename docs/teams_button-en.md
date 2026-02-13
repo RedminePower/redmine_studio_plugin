@@ -2,7 +2,7 @@
 
 Adds a "Teams" button next to usernames, enabling one-click chat initiation.
 
-<img src="images/teams_button_01.png" width="500">
+<img src="images/teams_button_01.png" width="700">
 
 ## Overview
 

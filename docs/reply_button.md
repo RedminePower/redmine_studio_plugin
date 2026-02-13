@@ -2,7 +2,7 @@
 
 チケットに「返答」ボタンを追加する機能です。
 
-<img src="images/reply_button_01.png" width="500">
+<img src="images/reply_button_01.png" width="700">
 
 ## 概要
 

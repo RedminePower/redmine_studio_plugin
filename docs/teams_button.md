@@ -2,7 +2,7 @@
 
 ユーザー名の横に「Teams」ボタンを追加し、ワンクリックでチャットを開始できる機能です。
 
-<img src="images/teams_button_01.png" width="500">
+<img src="images/teams_button_01.png" width="700">
 
 ## 概要
 

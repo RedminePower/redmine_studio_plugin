@@ -7,7 +7,7 @@
 Redmine の子チケット一覧は、階層が深くなると全体を把握しにくくなります。
 この機能は、子チケット一覧を「折りたたみ」や「展開」ができるアコーディオン形式に変換し、複雑なチケット構造でも必要な部分だけを表示して作業できるようにします。
 
-<img src="images/subtask_list_accordion_01.png" width="700">
+<img src="images/subtask_list_accordion_01.png" width="800">
 
 ### 主な機能
 

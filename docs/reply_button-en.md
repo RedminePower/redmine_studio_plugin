@@ -2,7 +2,7 @@
 
 Adds a "Reply" button to issues.
 
-<img src="images/reply_button_01.png" width="500">
+<img src="images/reply_button_01.png" width="700">
 
 ## Overview
 

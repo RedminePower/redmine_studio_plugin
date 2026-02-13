@@ -32,7 +32,7 @@ The following three macros are provided:
 
 Displays a list of wiki pages in table format. You can also extract specific keywords from page content and display them as columns.
 
-<img src="images/wiki_lists_01.png" width="500">
+<img src="images/wiki_lists_01.png" width="700">
 
 ### Basic Syntax
 
@@ -97,7 +97,7 @@ You can add display names and widths to column specifications:
 
 Generates a link from an issue's subject. This is useful when you want to create links using the subject instead of issue numbers.
 
-<img src="images/wiki_lists_02.png" width="500">
+<img src="images/wiki_lists_02.png" width="700">
 
 ### Basic Syntax
 
@@ -145,7 +145,7 @@ Generates a link from an issue's subject. This is useful when you want to create
 
 Displays a list of issues matching specified conditions. You can use custom queries or specify various filters.
 
-<img src="images/wiki_lists_03.png" width="500">
+<img src="images/wiki_lists_03.png" width="700">
 
 ### Basic Syntax
 

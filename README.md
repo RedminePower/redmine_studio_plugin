@@ -59,7 +59,7 @@ Redmine を再起動して変更を反映してください。
 
 チケットに「返答」ボタンを追加する機能です。
 
-<img src="docs/images/reply_button_01.png" width="400">
+<img src="docs/images/reply_button_01.png" width="600">
 
 - 「返答」ボタンをクリックすると、最終コメント投稿者が担当者に自動設定される
 - コメントがない場合は、チケット作成者が担当者に設定される
@@ -71,7 +71,7 @@ Redmine を再起動して変更を反映してください。
 
 ユーザー名の横に「Teams」ボタンを追加し、ワンクリックでチャットを開始できる機能です。
 
-<img src="docs/images/teams_button_01.png" width="400">
+<img src="docs/images/teams_button_01.png" width="600">
 
 - 「Teams」ボタンをクリックすると、そのユーザーとの Teams チャットが開く
 - チャットにはチケット情報（タイトル、URL、チケット番号）が自動入力される
@@ -104,7 +104,7 @@ Redmine の「子チケットの値から算出」設定はシステム全体に
 
 Wikiページにチケットやページの一覧を表示するマクロを提供します。
 
-<img src="docs/images/wiki_lists_03.png" width="400">
+<img src="docs/images/wiki_lists_03.png" width="600">
 
 - `{{wiki_list}}` - Wikiページの一覧を表形式で表示
 - `{{issue_name_link}}` - チケットの件名からリンクを生成
@@ -117,7 +117,7 @@ Wikiページにチケットやページの一覧を表示するマクロを提�
 Redmine の子チケット一覧は、階層が深くなると全体を把握しにくくなります。
 この機能は、子チケット一覧を折りたたみ/展開できるアコーディオン形式に変換し、複雑なチケット構造でも必要な部分だけを表示して作業できるようにします。
 
-<img src="docs/images/subtask_list_accordion_01.png" width="500">
+<img src="docs/images/subtask_list_accordion_01.png" width="600">
 
 - 子チケット一覧の各階層を折りたたみ/展開可能
 - 子チケット一覧の上部に「すべて展開」「すべて収縮」リンクを追加
