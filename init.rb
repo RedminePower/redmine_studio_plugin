@@ -103,12 +103,11 @@ else
   require_relative 'lib/redmine_studio_plugin/subtask_list_accordion/issues_helper_patch'
   require_relative 'lib/redmine_studio_plugin/subtask_list_accordion/user_preference_patch'
 
-  Rails.application.config.after_initialize do
-    Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
-    Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
+  # Apply patches directly (init.rb is already executed inside to_prepare)
+  Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
+  Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
 
-    # Subtask List Accordion patches
-    UserPreference.prepend RedmineStudioPlugin::SubtaskListAccordion::UserPreferencePatch
-    IssuesHelper.include RedmineStudioPlugin::SubtaskListAccordion::IssuesHelperPatch
-  end
+  # Subtask List Accordion patches
+  UserPreference.prepend RedmineStudioPlugin::SubtaskListAccordion::UserPreferencePatch
+  IssuesHelper.include RedmineStudioPlugin::SubtaskListAccordion::IssuesHelperPatch
 end

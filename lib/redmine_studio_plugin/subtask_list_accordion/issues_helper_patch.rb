@@ -39,7 +39,7 @@ module RedmineStudioPlugin
 
             arrow = (child.descendants.visible.count > 0 ? content_tag('span', '', :class => 'treearrow') : ''.html_safe)
             expand_tree_at_first = expand_tree_at_first?(issue, child)
-            css = "issue issue-#{child.id} hascontextmenu"
+            css = +"issue issue-#{child.id} hascontextmenu"
             css << " haschild" if child.children?
             css << (expand_tree_at_first ? " expand" : " collapse")
             css << " idnt idnt-#{level}" if level > 0
@@ -68,7 +68,7 @@ module RedmineStudioPlugin
             end
 
             arrow = (child.descendants.visible.count > 0 ? content_tag('span', '', :class => 'treearrow') : ''.html_safe)
-            css = "issue issue-#{child.id} hascontextmenu #{child.css_classes}"
+            css = +"issue issue-#{child.id} hascontextmenu #{child.css_classes}"
             css << " haschild" if child.children?
             css << (expand_tree_at_first ? " expand" : " collapse")
             css << " idnt idnt-#{level}" if level > 0
