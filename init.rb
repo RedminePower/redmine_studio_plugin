@@ -32,7 +32,7 @@ if conflicting_plugins.any?
     description "WARNING: Setup is not complete. " \
                 "Run 'bundle exec rake redmine_studio_plugin:install RAILS_ENV=production'. " \
                 "Until then, integrated features are disabled to prevent conflicts."
-    version '0.1.0'
+    version '1.0.0'
     url 'https://github.com/RedminePower/redmine_studio_plugin'
     author_url 'https://www.redmine-power.com/'
   end
@@ -42,7 +42,7 @@ else
     name 'Redmine Studio plugin'
     author 'Redmine Power'
     description 'Provides features for Redmine Studio (Windows client application provided by Redmine Power).'
-    version '0.1.0'
+    version '1.0.0'
     url 'https://github.com/RedminePower/redmine_studio_plugin'
     author_url 'https://www.redmine-power.com/'
 
