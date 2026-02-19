@@ -15,6 +15,7 @@
 | `features/date_independent/TEST_SPEC.md` | Date Independent テスト |
 | `features/wiki_lists/TEST_SPEC.md` | Wiki Lists テスト |
 | `features/subtask_list_accordion/TEST_SPEC.md` | Subtask List Accordion テスト |
+| `features/review_settings_api/TEST_SPEC.md` | Review Settings API テスト |
 
 ## テストの種類
 
@@ -112,3 +113,4 @@ Claude に以下のように依頼してください:
 - `date_independent のテストを実行してください`
 - `wiki_lists のテストを実行してください`
 - `subtask_list_accordion のテストを実行してください`
+- `review_settings_api のテストを実行してください`
