@@ -41,7 +41,9 @@
   "plugins": [
     { "id": "plugin_id", "name": "Plugin Name", "version": "1.0.0", "author": "Author" }
   ],
-  "total_count": 3
+  "total_count": 3,
+  "offset": 0,
+  "limit": 25
 }
 ```
 
@@ -254,6 +256,7 @@ User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! 
 
 **期待結果:**
 - ステータスコード 404
+- レスポンスボディ: `{"error": "Plugin not found: id=non_existent_plugin"}`
 
 ---
 
@@ -282,6 +285,49 @@ User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! 
 
 **備考:**
 - [2-14] で JSON パースの成功を確認しているため、実質的に [2-14] でカバーされる
+
+---
+
+### [2-16] offset と limit がレスポンスに含まれる
+
+**確認方法:**
+- GET `/plugins.json?key={ApiKey}`
+
+**期待結果:**
+- `response.offset` が 0
+- `response.limit` が 25（デフォルト値）
+
+---
+
+### [2-17] offset パラメータが機能する
+
+**確認方法:**
+- GET `/plugins.json?key={ApiKey}&offset=1`
+
+**期待結果:**
+- `response.offset` が 1
+- `response.plugins.length` が `response.total_count - 1`（1件スキップ）
+
+---
+
+### [2-18] limit パラメータが機能する
+
+**確認方法:**
+- GET `/plugins.json?key={ApiKey}&limit=1`
+
+**期待結果:**
+- `response.limit` が 1
+- `response.plugins.length` が 1
+
+---
+
+### [2-19] limit 最大値（100）
+
+**確認方法:**
+- GET `/plugins.json?key={ApiKey}&limit=200`
+
+**期待結果:**
+- `response.limit` が 100（最大値に制限される）
 
 ---
 

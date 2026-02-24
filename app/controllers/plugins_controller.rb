@@ -7,7 +7,13 @@ class PluginsController < ApplicationController
   before_action :find_plugin, :only => [:show]
 
   def index
-    @plugins = Redmine::Plugin.all
+    all_plugins = Redmine::Plugin.all
+
+    # Pagination
+    @offset, @limit = api_offset_and_limit
+    @total_count = all_plugins.count
+    @plugins = all_plugins.drop(@offset).first(@limit)
+
     respond_to do |format|
       format.api
     end
@@ -24,6 +30,10 @@ class PluginsController < ApplicationController
   def find_plugin
     @plugin = Redmine::Plugin.find(params[:id])
   rescue Redmine::PluginNotFound
-    render_404
+    respond_to do |format|
+      format.api do
+        render json: { error: "Plugin not found: id=#{params[:id]}" }, status: :not_found
+      end
+    end
   end
 end

@@ -128,10 +128,9 @@ Redmine の子チケット一覧は、階層が深くなると全体を把握し
 
 ## Plugin API
 
-| エンドポイント | 説明 |
-|---------------|------|
-| `GET /plugins.json` | プラグイン一覧の取得 |
-| `GET /plugins/:id.json` | 単体プラグイン情報の取得 |
+プラグイン情報を取得する API です。Redmine Studio が内部で使用します。
+
+詳細は [docs/plugin_api.md](docs/plugin_api.md) をご覧ください。
 
 ## Studio Settings API
 

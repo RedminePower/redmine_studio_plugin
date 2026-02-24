@@ -127,10 +127,9 @@ For details, see [docs/subtask_list_accordion-en.md](docs/subtask_list_accordion
 
 ## Plugin API
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /plugins.json` | Get plugin list |
-| `GET /plugins/:id.json` | Get single plugin information |
+API to retrieve plugin information. Used internally by Redmine Studio.
+
+For details, see [docs/plugin_api-en.md](docs/plugin_api-en.md).
 
 ## Studio Settings API
 
