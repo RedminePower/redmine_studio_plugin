@@ -24,6 +24,31 @@
 - Container: `redmine_6.1.1`
 - BaseUrl: `http://localhost:3061`（3000 + 60 + 1）
 
+## テスト前提条件
+
+### ダミープラグイン
+
+`settings` の省略テスト（[2-9], [2-12]）には、設定を持たないプラグインが必要。
+テスト環境に該当プラグインがない場合、以下のダミープラグインを作成する。
+
+**作成先:** `plugins/redmine_dummy_no_settings/init.rb`
+
+```ruby
+# frozen_string_literal: true
+
+Redmine::Plugin.register :redmine_dummy_no_settings do
+  name 'Dummy Plugin (No Settings)'
+  author 'Test'
+  description 'A dummy plugin without settings for API testing'
+  version '1.0.0'
+  url 'https://example.com'
+  author_url 'https://example.com'
+  # No settings block - this plugin is NOT configurable
+end
+```
+
+作成後、コンテナを再起動してプラグインを認識させる。
+
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -55,7 +80,7 @@
     "name": "Plugin Name",
     "version": "1.0.0",
     "author": "Author",
-    "settings": "{...}"  // 常に含まれる
+    "settings": "{...}"  // 設定可能なプラグインのみ（省略される場合あり）
   }
 }
 ```
@@ -200,21 +225,21 @@ User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! 
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}&include=settings`
-- 設定を持つプラグイン（例: `redmine_teams_button`）を検証
+- 設定を持つプラグイン（例: `redmine_studio_plugin`）を検証
 
 **期待結果:**
 - `settings` フィールドが存在し、null ではない
 
 ---
 
-### [2-9] ?include=settings あり、設定なしプラグイン → null
+### [2-9] ?include=settings あり、設定なしプラグイン → settings 省略
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}&include=settings`
-- 設定を持たないプラグイン（例: `redmine_studio_plugin`）を検証
+- 設定を持たないプラグイン（例: `redmine_dummy_no_settings`）を検証
 
 **期待結果:**
-- `settings` フィールドが存在し、値が null
+- `settings` フィールドが存在しない（省略される）
 
 ---
 
@@ -239,13 +264,15 @@ User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! 
 
 ---
 
-### [2-12] 単体取得で settings が常に含まれる
+### [2-12] 単体取得で settings が条件付きで含まれる
 
 **確認方法:**
-- GET `/plugins/redmine_studio_plugin.json?key={ApiKey}`
+- GET `/plugins/redmine_studio_plugin.json?key={ApiKey}`（設定可能なプラグイン）
+- GET `/plugins/redmine_dummy_no_settings.json?key={ApiKey}`（設定なしプラグイン）
 
 **期待結果:**
-- `response.plugin` に `settings` フィールドが存在する
+- 設定可能なプラグイン: `settings` フィールドが存在する
+- 設定なしプラグイン: `settings` フィールドが存在しない（省略される）
 
 ---
 
@@ -263,13 +290,13 @@ User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! 
 ### [2-14] settings が有効な JSON 文字列
 
 **確認方法:**
-- 設定を持つ任意のプラグインを対象とする（例: `redmine_subtask_list_accordion`）
+- 設定を持つ任意のプラグインを対象とする（例: `redmine_studio_plugin`）
 - GET `/plugins/{plugin_id}.json?key={ApiKey}`
 - `response.plugin.settings` を JSON パース
 
 **期待結果:**
 - パースが成功する（有効な JSON）
-- settings が null の場合も PASS（設定が未構成の状態）
+- settings が省略されている場合も PASS（設定を持たないプラグイン）
 
 ---
 

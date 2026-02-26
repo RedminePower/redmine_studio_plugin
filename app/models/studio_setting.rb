@@ -37,12 +37,13 @@ class StudioSetting < ActiveRecord::Base
       scope_id: scope_id,
       schema_version: schema_version,
       created_on: created_on,
-      created_by: created_by ? { id: created_by.id, name: created_by.name } : nil,
       updated_on: updated_on,
-      updated_by: updated_by ? { id: updated_by.id, name: updated_by.name } : nil,
-      deleted_on: deleted_on,
-      deleted_by: deleted_by ? { id: deleted_by.id, name: deleted_by.name } : nil
+      deleted_on: deleted_on
     }
+    # 標準 Redmine API のパターンに合わせて、nil の場合はプロパティを省略
+    result[:created_by] = { id: created_by.id, name: created_by.name } if created_by
+    result[:updated_by] = { id: updated_by.id, name: updated_by.name } if updated_by
+    result[:deleted_by] = { id: deleted_by.id, name: deleted_by.name } if deleted_by
     result[:payload] = payload if options[:include_payload]
     result[:assignments] = assignments.map(&:as_json) if options[:include_assignments]
     result

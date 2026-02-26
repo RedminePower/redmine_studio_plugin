@@ -73,7 +73,7 @@ GET /plugins.json?key=YOUR_API_KEY
 }
 ```
 
-※ 設定を持たないプラグインの場合、`settings` は `null` になる
+※ 設定を持たないプラグインの場合、`settings` プロパティは省略される
 
 ---
 
@@ -81,7 +81,7 @@ GET /plugins.json?key=YOUR_API_KEY
 
 ### GET /plugins/:id
 
-指定したプラグインの詳細を取得。`settings` を常に含む。
+指定したプラグインの詳細を取得。設定可能なプラグインの場合は `settings` を含む。
 
 レスポンス:
 

@@ -73,7 +73,7 @@ With `include=settings`:
 }
 ```
 
-Note: For plugins without settings, `settings` will be `null`
+Note: For plugins without settings, the `settings` property is omitted
 
 ---
 
@@ -81,7 +81,7 @@ Note: For plugins without settings, `settings` will be `null`
 
 ### GET /plugins/:id
 
-Get details of a specific plugin. Always includes `settings`.
+Get details of a specific plugin. Includes `settings` if the plugin is configurable.
 
 Response:
 

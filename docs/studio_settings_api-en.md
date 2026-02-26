@@ -61,8 +61,7 @@ Response:
       "created_by": { "id": 1, "name": "Admin" },
       "updated_on": "2026-02-19T...",
       "updated_by": { "id": 1, "name": "Admin" },
-      "deleted_on": null,
-      "deleted_by": null
+      "deleted_on": null
     }
   ],
   "total_count": 1,
@@ -70,6 +69,8 @@ Response:
   "limit": 25
 }
 ```
+
+**Note:** `created_by`, `updated_by`, and `deleted_by` are nullable nested objects. When nil, the property is omitted entirely.
 
 ---
 
@@ -99,8 +100,7 @@ Response:
     "created_by": { "id": 1, "name": "Admin" },
     "updated_on": "2026-02-19T...",
     "updated_by": { "id": 1, "name": "Admin" },
-    "deleted_on": null,
-    "deleted_by": null
+    "deleted_on": null
   }
 }
 ```
@@ -162,8 +162,7 @@ Response (201 Created):
     "created_by": { "id": 1, "name": "Admin" },
     "updated_on": "2026-02-19T...",
     "updated_by": { "id": 1, "name": "Admin" },
-    "deleted_on": null,
-    "deleted_by": null
+    "deleted_on": null
   }
 }
 ```
@@ -201,8 +200,7 @@ Response:
     "created_by": { "id": 1, "name": "Admin" },
     "updated_on": "2026-02-19T...",
     "updated_by": { "id": 1, "name": "Admin" },
-    "deleted_on": null,
-    "deleted_by": null
+    "deleted_on": null
   }
 }
 ```

@@ -61,8 +61,7 @@ GET /studio_settings.json?key=YOUR_API_KEY
       "created_by": { "id": 1, "name": "Admin" },
       "updated_on": "2026-02-19T...",
       "updated_by": { "id": 1, "name": "Admin" },
-      "deleted_on": null,
-      "deleted_by": null
+      "deleted_on": null
     }
   ],
   "total_count": 1,
@@ -70,6 +69,8 @@ GET /studio_settings.json?key=YOUR_API_KEY
   "limit": 25
 }
 ```
+
+**注意:** `created_by`, `updated_by`, `deleted_by` は nullable なネストオブジェクト。nil の場合はプロパティ自体が省略される。
 
 ---
 
@@ -99,8 +100,7 @@ GET /studio_settings.json?key=YOUR_API_KEY
     "created_by": { "id": 1, "name": "Admin" },
     "updated_on": "2026-02-19T...",
     "updated_by": { "id": 1, "name": "Admin" },
-    "deleted_on": null,
-    "deleted_by": null
+    "deleted_on": null
   }
 }
 ```
@@ -162,8 +162,7 @@ GET /studio_settings.json?key=YOUR_API_KEY
     "created_by": { "id": 1, "name": "Admin" },
     "updated_on": "2026-02-19T...",
     "updated_by": { "id": 1, "name": "Admin" },
-    "deleted_on": null,
-    "deleted_by": null
+    "deleted_on": null
   }
 }
 ```
@@ -201,8 +200,7 @@ GET /studio_settings.json?key=YOUR_API_KEY
     "created_by": { "id": 1, "name": "Admin" },
     "updated_on": "2026-02-19T...",
     "updated_by": { "id": 1, "name": "Admin" },
-    "deleted_on": null,
-    "deleted_by": null
+    "deleted_on": null
   }
 }
 ```
