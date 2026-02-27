@@ -1,0 +1,35 @@
+api.array :studio_settings, api_meta(:total_count => @total_count, :offset => @offset, :limit => @limit) do
+  @studio_settings.each do |setting|
+    api.studio_setting do
+      api.id setting.id
+      api.name setting.name
+      api.schema_type setting.schema_type
+      api.scope_type setting.scope_type
+      api.scope_id setting.scope_id
+      api.schema_version setting.schema_version
+      api.created_on setting.created_on
+      api.updated_on setting.updated_on
+      api.deleted_on setting.deleted_on
+
+      api.created_by(:id => setting.created_by.id, :name => setting.created_by.name) unless setting.created_by.nil?
+      api.updated_by(:id => setting.updated_by.id, :name => setting.updated_by.name) unless setting.updated_by.nil?
+      api.deleted_by(:id => setting.deleted_by.id, :name => setting.deleted_by.name) unless setting.deleted_by.nil?
+
+      api.payload setting.payload if @include_options[:include_payload]
+
+      if @include_options[:include_assignments]
+        api.array :assignments do
+          setting.assignments.each do |assignment|
+            api.assignment do
+              api.id assignment.id
+              api.setting_id assignment.setting_id
+              api.assigned_on assignment.assigned_on
+              api.user(:id => assignment.user.id, :name => assignment.user.name) unless assignment.user.nil?
+              api.assigned_by(:id => assignment.assigned_by.id, :name => assignment.assigned_by.name) unless assignment.assigned_by.nil?
+            end
+          end
+        end
+      end
+    end
+  end
+end

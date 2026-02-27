@@ -25,6 +25,21 @@ All endpoints require API key authentication.
 GET /studio_settings.json?key=YOUR_API_KEY
 ```
 
+## Response Format
+
+The API supports both JSON and XML.
+
+| Extension | Content-Type |
+|-----------|--------------|
+| `.json` | application/json |
+| `.xml` | application/xml |
+
+Example:
+```
+GET /studio_settings.json   → Returns JSON format
+GET /studio_settings.xml    → Returns XML format
+```
+
 ---
 
 ## Settings
@@ -358,17 +373,12 @@ Response:
 
 ### 404 Not Found
 
-```json
-{ "error": "Studio setting not found: id=99999" }
-```
+Returns standard HTTP 404 status (no response body).
 
-```json
-{ "error": "User not found: id=99999" }
-```
-
-```json
-{ "error": "Assignment not found: setting_id=10, user_id=99999" }
-```
+Returns 404 in the following cases:
+- Specified setting does not exist
+- Specified user does not exist
+- Specified assignment does not exist
 
 ### 422 Unprocessable Entity
 

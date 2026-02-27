@@ -17,6 +17,21 @@ All endpoints require API key authentication.
 GET /plugins.json?key=YOUR_API_KEY
 ```
 
+## Response Format
+
+The API supports both JSON and XML.
+
+| Extension | Content-Type |
+|-----------|--------------|
+| `.json` | application/json |
+| `.xml` | application/xml |
+
+Example:
+```
+GET /plugins.json   → Returns JSON format
+GET /plugins.xml    → Returns XML format
+```
+
 ---
 
 ## Plugin List
@@ -106,6 +121,7 @@ Response:
 
 ### 404 Not Found
 
-```json
-{ "error": "Plugin not found: id=non_existent_plugin" }
-```
+Returns standard HTTP 404 status (no response body).
+
+Returns 404 in the following cases:
+- Specified plugin does not exist

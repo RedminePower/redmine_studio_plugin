@@ -25,6 +25,21 @@ Redmine Studio の汎用設定を管理する API。
 GET /studio_settings.json?key=YOUR_API_KEY
 ```
 
+## レスポンス形式
+
+API は JSON と XML の両方をサポートする。
+
+| 拡張子 | Content-Type |
+|--------|--------------|
+| `.json` | application/json |
+| `.xml` | application/xml |
+
+例:
+```
+GET /studio_settings.json   → JSON 形式で返却
+GET /studio_settings.xml    → XML 形式で返却
+```
+
 ---
 
 ## 設定
@@ -358,17 +373,12 @@ GET /studio_settings.json?key=YOUR_API_KEY
 
 ### 404 Not Found
 
-```json
-{ "error": "Studio setting not found: id=99999" }
-```
+標準的な HTTP 404 ステータスを返す（レスポンスボディなし）。
 
-```json
-{ "error": "User not found: id=99999" }
-```
-
-```json
-{ "error": "Assignment not found: setting_id=10, user_id=99999" }
-```
+以下の場合に 404 が返される:
+- 指定された設定が存在しない
+- 指定されたユーザーが存在しない
+- 指定された割り当てが存在しない
 
 ### 422 Unprocessable Entity
 

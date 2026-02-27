@@ -58,6 +58,18 @@ end
 | View ファイル | `app/views/plugins/index.api.rsb`, `app/views/plugins/show.api.rsb` |
 | 認証 | API キー必須（未認証で 401 または 302） |
 
+### レスポンス形式
+
+API は JSON と XML の両方をサポートする。
+
+| 拡張子 | Content-Type |
+|--------|--------------|
+| `.json` | application/json |
+| `.xml` | application/xml |
+
+**エラーレスポンス:**
+- 404 Not Found: 標準的な 404 ステータスを返す（ボディなし）
+
 ### API レスポンス構造
 
 **一覧取得 (`GET /plugins.json`):**
@@ -283,7 +295,6 @@ User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! 
 
 **期待結果:**
 - ステータスコード 404
-- レスポンスボディ: `{"error": "Plugin not found: id=non_existent_plugin"}`
 
 ---
 

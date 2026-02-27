@@ -34,10 +34,6 @@ class UserStudioSettingsController < ApplicationController
   def find_user
     @user = User.find(params[:id])
   rescue ActiveRecord::RecordNotFound
-    respond_to do |format|
-      format.api do
-        render json: { error: "User not found: id=#{params[:id]}" }, status: :not_found
-      end
-    end
+    render_404
   end
 end

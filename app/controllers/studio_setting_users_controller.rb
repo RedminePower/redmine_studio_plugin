@@ -120,11 +120,7 @@ class StudioSettingUsersController < ApplicationController
         end
       end
     else
-      respond_to do |format|
-        format.api do
-          render json: { error: "Assignment not found: setting_id=#{params[:id]}, user_id=#{params[:user_id]}" }, status: :not_found
-        end
-      end
+      render_404
     end
   end
 
@@ -133,10 +129,6 @@ class StudioSettingUsersController < ApplicationController
   def find_studio_setting
     @studio_setting = StudioSetting.find(params[:id])
   rescue ActiveRecord::RecordNotFound
-    respond_to do |format|
-      format.api do
-        render json: { error: "Studio setting not found: id=#{params[:id]}" }, status: :not_found
-      end
-    end
+    render_404
   end
 end

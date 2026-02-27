@@ -37,26 +37,16 @@ class StudioSettingsController < ApplicationController
     @include_options = parse_include_params
 
     respond_to do |format|
-      format.api do
-        render json: {
-          studio_settings: @studio_settings.map { |s| s.as_json(@include_options) },
-          total_count: @total_count,
-          offset: @offset || 0,
-          limit: @limit
-        }
-      end
+      format.api
     end
   end
 
   # GET /studio_settings/:id
   def show
-    include_options = parse_include_params
-    include_options[:include_payload] = true  # Always include payload for show
+    @include_options = parse_include_params
 
     respond_to do |format|
-      format.api do
-        render json: { studio_setting: @studio_setting.as_json(include_options) }
-      end
+      format.api
     end
   end
 
@@ -69,14 +59,13 @@ class StudioSettingsController < ApplicationController
     if @studio_setting.save
       respond_to do |format|
         format.api do
-          render json: { studio_setting: @studio_setting.as_json(include_payload: true) }, status: :created
+          render :action => 'show', :status => :created,
+                 :location => studio_setting_url(@studio_setting)
         end
       end
     else
       respond_to do |format|
-        format.api do
-          render json: { errors: @studio_setting.errors.full_messages }, status: :unprocessable_entity
-        end
+        format.api { render_validation_errors(@studio_setting) }
       end
     end
   end
@@ -88,15 +77,11 @@ class StudioSettingsController < ApplicationController
 
     if @studio_setting.save
       respond_to do |format|
-        format.api do
-          render json: { studio_setting: @studio_setting.as_json(include_payload: true) }
-        end
+        format.api { render :action => 'show', :status => :ok }
       end
     else
       respond_to do |format|
-        format.api do
-          render json: { errors: @studio_setting.errors.full_messages }, status: :unprocessable_entity
-        end
+        format.api { render_validation_errors(@studio_setting) }
       end
     end
   end
@@ -123,11 +108,7 @@ class StudioSettingsController < ApplicationController
   def find_studio_setting
     @studio_setting = StudioSetting.find(params[:id])
   rescue ActiveRecord::RecordNotFound
-    respond_to do |format|
-      format.api do
-        render json: { error: "Studio setting not found: id=#{params[:id]}" }, status: :not_found
-      end
-    end
+    render_404
   end
 
   def studio_setting_params

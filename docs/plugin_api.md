@@ -17,6 +17,21 @@ Redmine にインストールされているプラグインの情報を取得す
 GET /plugins.json?key=YOUR_API_KEY
 ```
 
+## レスポンス形式
+
+API は JSON と XML の両方をサポートする。
+
+| 拡張子 | Content-Type |
+|--------|--------------|
+| `.json` | application/json |
+| `.xml` | application/xml |
+
+例:
+```
+GET /plugins.json   → JSON 形式で返却
+GET /plugins.xml    → XML 形式で返却
+```
+
 ---
 
 ## プラグイン一覧
@@ -106,6 +121,7 @@ GET /plugins.json?key=YOUR_API_KEY
 
 ### 404 Not Found
 
-```json
-{ "error": "Plugin not found: id=non_existent_plugin" }
-```
+標準的な HTTP 404 ステータスを返す（レスポンスボディなし）。
+
+以下の場合に 404 が返される:
+- 指定されたプラグインが存在しない

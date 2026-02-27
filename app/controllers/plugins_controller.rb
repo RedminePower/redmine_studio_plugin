@@ -30,10 +30,6 @@ class PluginsController < ApplicationController
   def find_plugin
     @plugin = Redmine::Plugin.find(params[:id])
   rescue Redmine::PluginNotFound
-    respond_to do |format|
-      format.api do
-        render json: { error: "Plugin not found: id=#{params[:id]}" }, status: :not_found
-      end
-    end
+    render_404
   end
 end
