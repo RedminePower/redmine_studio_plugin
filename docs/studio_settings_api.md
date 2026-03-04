@@ -16,6 +16,10 @@ Redmine Studio の汎用設定を管理する API。
 | `POST /studio_settings/:id/users/:user_id.json` | ユーザー割り当て追加 |
 | `DELETE /studio_settings/:id/users/:user_id.json` | ユーザー割り当て削除 |
 | `GET /users/:id/studio_settings.json` | ユーザーの設定一覧 |
+| `GET /studio_settings/:id/histories.json` | 履歴一覧の取得 |
+| `GET /studio_settings/:id/histories/:version.json` | 履歴詳細の取得 |
+| `DELETE /studio_settings/:id/histories/:version.json` | 履歴の削除 |
+| `POST /studio_settings/:id/restore.json` | 履歴からの復元 |
 
 ## 認証
 
@@ -369,6 +373,183 @@ GET /studio_settings.xml    → XML 形式で返却
 
 ---
 
+## 履歴
+
+設定の変更履歴を管理する。設定の作成・更新・削除時に自動的に履歴が作成される。
+
+### change_type の種類
+
+| change_type | 説明 |
+|-------------|------|
+| `create` | 新規作成 |
+| `update` | 更新 |
+| `delete` | 論理削除 |
+| `undelete` | 論理削除からの復活 |
+| `restore` | 履歴からの復元 |
+
+---
+
+### GET /studio_settings/:id/histories
+
+設定の履歴一覧を取得。新しい順（version DESC）でソートされる。
+
+クエリパラメータ:
+
+| パラメータ | 説明 |
+|-----------|------|
+| `include` | `payload` で payload フィールドを含める |
+| `offset` | 取得開始位置 |
+| `limit` | 取得件数（デフォルト: 25、最大: 100） |
+
+レスポンス:
+
+```json
+{
+  "studio_setting_histories": [
+    {
+      "id": 3,
+      "studio_setting_id": 1,
+      "version": 3,
+      "name": "設定名",
+      "schema_type": "review",
+      "scope_type": "global",
+      "scope_id": null,
+      "schema_version": 1,
+      "change_type": "update",
+      "restored_from_version": null,
+      "comment": "項目を追加",
+      "is_current": true,
+      "changed_on": "2026-03-04T10:00:00Z",
+      "changed_by": { "id": 1, "name": "Admin" }
+    },
+    {
+      "id": 2,
+      "studio_setting_id": 1,
+      "version": 2,
+      "name": "設定名",
+      "schema_type": "review",
+      "scope_type": "global",
+      "scope_id": null,
+      "schema_version": 0,
+      "change_type": "update",
+      "restored_from_version": null,
+      "comment": null,
+      "is_current": false,
+      "changed_on": "2026-03-03T15:00:00Z",
+      "changed_by": { "id": 1, "name": "Admin" }
+    }
+  ],
+  "total_count": 3,
+  "offset": 0,
+  "limit": 25
+}
+```
+
+`include=payload` を指定した場合、各履歴に `payload` フィールドが追加される。
+
+---
+
+### GET /studio_settings/:id/histories/:version
+
+指定したバージョンの履歴詳細を取得。payload を常に含む。
+
+レスポンス:
+
+```json
+{
+  "studio_setting_history": {
+    "id": 1,
+    "studio_setting_id": 1,
+    "version": 1,
+    "name": "設定名",
+    "schema_type": "review",
+    "scope_type": "global",
+    "scope_id": null,
+    "schema_version": 0,
+    "payload": "{\"key\":\"value\"}",
+    "change_type": "create",
+    "restored_from_version": null,
+    "comment": "初期作成",
+    "is_current": false,
+    "changed_on": "2026-03-01T10:00:00Z",
+    "changed_by": { "id": 1, "name": "Admin" }
+  }
+}
+```
+
+---
+
+### DELETE /studio_settings/:id/histories/:version
+
+指定したバージョンの履歴を削除（物理削除）。
+
+**制限:** `is_current = true` の履歴（最新履歴）は削除できない。
+
+レスポンス: 204 No Content
+
+エラーレスポンス（最新履歴を削除しようとした場合）:
+
+```json
+{ "errors": ["Cannot delete the current version"] }
+```
+
+---
+
+### POST /studio_settings/:id/restore
+
+指定したバージョンの履歴から設定を復元。
+
+**復元対象:**
+- `payload` と `schema_version` が復元される
+- `name` は現在の値を維持（復元されない）
+
+**change_type の判定:**
+- 設定が論理削除状態の場合: `undelete`
+- それ以外の場合: `restore`
+
+リクエスト:
+
+```json
+{
+  "version": 1,
+  "comment": "v1 に復元"
+}
+```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `version` | ○ | 復元元のバージョン番号 |
+| `comment` | - | 変更コメント |
+
+レスポンス:
+
+```json
+{
+  "studio_setting": {
+    "id": 1,
+    "name": "設定名",
+    "schema_type": "review",
+    "scope_type": "global",
+    "scope_id": null,
+    "schema_version": 0,
+    "payload": "{\"key\":\"value\"}",
+    "created_on": "2026-03-01T10:00:00Z",
+    "created_by": { "id": 1, "name": "Admin" },
+    "updated_on": "2026-03-04T12:00:00Z",
+    "updated_by": { "id": 1, "name": "Admin" },
+    "deleted_on": null
+  }
+}
+```
+
+エラーレスポンス（最新バージョンに復元しようとした場合）:
+
+```json
+{ "errors": ["Cannot restore to the current version"] }
+```
+
+---
+
 ## エラーレスポンス
 
 ### 404 Not Found
@@ -379,6 +560,7 @@ GET /studio_settings.xml    → XML 形式で返却
 - 指定された設定が存在しない
 - 指定されたユーザーが存在しない
 - 指定された割り当てが存在しない
+- 指定されたバージョンの履歴が存在しない
 
 ### 422 Unprocessable Entity
 

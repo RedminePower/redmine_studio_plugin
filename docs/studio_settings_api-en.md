@@ -16,6 +16,10 @@ API to manage general settings for Redmine Studio.
 | `POST /studio_settings/:id/users/:user_id.json` | Add user assignment |
 | `DELETE /studio_settings/:id/users/:user_id.json` | Remove user assignment |
 | `GET /users/:id/studio_settings.json` | Get user's settings |
+| `GET /studio_settings/:id/histories.json` | Get history list |
+| `GET /studio_settings/:id/histories/:version.json` | Get history details |
+| `DELETE /studio_settings/:id/histories/:version.json` | Delete history |
+| `POST /studio_settings/:id/restore.json` | Restore from history |
 
 ## Authentication
 
@@ -369,6 +373,183 @@ Response:
 
 ---
 
+## History
+
+Manage setting change history. History is automatically created when a setting is created, updated, or deleted.
+
+### change_type Values
+
+| change_type | Description |
+|-------------|-------------|
+| `create` | New creation |
+| `update` | Update |
+| `delete` | Soft delete |
+| `undelete` | Restore from soft delete |
+| `restore` | Restore from history |
+
+---
+
+### GET /studio_settings/:id/histories
+
+Get history list for a setting. Sorted by newest first (version DESC).
+
+Query parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `include` | Set to `payload` to include payload field |
+| `offset` | Starting position |
+| `limit` | Number of items (default: 25, max: 100) |
+
+Response:
+
+```json
+{
+  "studio_setting_histories": [
+    {
+      "id": 3,
+      "studio_setting_id": 1,
+      "version": 3,
+      "name": "Setting Name",
+      "schema_type": "review",
+      "scope_type": "global",
+      "scope_id": null,
+      "schema_version": 1,
+      "change_type": "update",
+      "restored_from_version": null,
+      "comment": "Added items",
+      "is_current": true,
+      "changed_on": "2026-03-04T10:00:00Z",
+      "changed_by": { "id": 1, "name": "Admin" }
+    },
+    {
+      "id": 2,
+      "studio_setting_id": 1,
+      "version": 2,
+      "name": "Setting Name",
+      "schema_type": "review",
+      "scope_type": "global",
+      "scope_id": null,
+      "schema_version": 0,
+      "change_type": "update",
+      "restored_from_version": null,
+      "comment": null,
+      "is_current": false,
+      "changed_on": "2026-03-03T15:00:00Z",
+      "changed_by": { "id": 1, "name": "Admin" }
+    }
+  ],
+  "total_count": 3,
+  "offset": 0,
+  "limit": 25
+}
+```
+
+When `include=payload` is specified, a `payload` field is added to each history entry.
+
+---
+
+### GET /studio_settings/:id/histories/:version
+
+Get history details for the specified version. Always includes payload.
+
+Response:
+
+```json
+{
+  "studio_setting_history": {
+    "id": 1,
+    "studio_setting_id": 1,
+    "version": 1,
+    "name": "Setting Name",
+    "schema_type": "review",
+    "scope_type": "global",
+    "scope_id": null,
+    "schema_version": 0,
+    "payload": "{\"key\":\"value\"}",
+    "change_type": "create",
+    "restored_from_version": null,
+    "comment": "Initial creation",
+    "is_current": false,
+    "changed_on": "2026-03-01T10:00:00Z",
+    "changed_by": { "id": 1, "name": "Admin" }
+  }
+}
+```
+
+---
+
+### DELETE /studio_settings/:id/histories/:version
+
+Delete the specified version of history (hard delete).
+
+**Restriction:** Cannot delete history with `is_current = true` (current history).
+
+Response: 204 No Content
+
+Error response (when trying to delete current history):
+
+```json
+{ "errors": ["Cannot delete the current version"] }
+```
+
+---
+
+### POST /studio_settings/:id/restore
+
+Restore setting from the specified history version.
+
+**What gets restored:**
+- `payload` and `schema_version` are restored
+- `name` retains its current value (not restored)
+
+**change_type determination:**
+- If setting is soft-deleted: `undelete`
+- Otherwise: `restore`
+
+Request:
+
+```json
+{
+  "version": 1,
+  "comment": "Restore to v1"
+}
+```
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `version` | Yes | Version number to restore from |
+| `comment` | No | Change comment |
+
+Response:
+
+```json
+{
+  "studio_setting": {
+    "id": 1,
+    "name": "Setting Name",
+    "schema_type": "review",
+    "scope_type": "global",
+    "scope_id": null,
+    "schema_version": 0,
+    "payload": "{\"key\":\"value\"}",
+    "created_on": "2026-03-01T10:00:00Z",
+    "created_by": { "id": 1, "name": "Admin" },
+    "updated_on": "2026-03-04T12:00:00Z",
+    "updated_by": { "id": 1, "name": "Admin" },
+    "deleted_on": null
+  }
+}
+```
+
+Error response (when trying to restore to current version):
+
+```json
+{ "errors": ["Cannot restore to the current version"] }
+```
+
+---
+
 ## Error Responses
 
 ### 404 Not Found
@@ -379,6 +560,7 @@ Returns 404 in the following cases:
 - Specified setting does not exist
 - Specified user does not exist
 - Specified assignment does not exist
+- Specified history version does not exist
 
 ### 422 Unprocessable Entity
 

@@ -19,7 +19,9 @@ Rails.application.routes.draw do
       put 'users', to: 'studio_setting_users#replace'
       post 'users/:user_id', to: 'studio_setting_users#add', as: 'add_user'
       delete 'users/:user_id', to: 'studio_setting_users#remove', as: 'remove_user'
+      post 'restore', to: 'studio_setting_histories#restore'
     end
+    resources :histories, controller: 'studio_setting_histories', only: [:index, :show, :destroy], param: :version
   end
 
   # User's Studio Settings
