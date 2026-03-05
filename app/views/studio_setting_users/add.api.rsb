@@ -1,0 +1,9 @@
+# frozen_string_literal: true
+
+api.studio_setting_assignment do
+  api.id @assignment.id
+  api.setting_id @assignment.setting_id
+  api.assigned_on @assignment.assigned_on
+  api.user(:id => @assignment.user.id, :name => @assignment.user.name) if @assignment.user
+  api.assigned_by(:id => @assignment.assigned_by.id, :name => @assignment.assigned_by.name) if @assignment.assigned_by
+end

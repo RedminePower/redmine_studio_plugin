@@ -18,14 +18,7 @@ class UserStudioSettingsController < ApplicationController
     @assignments = scope.order(:id).limit(@limit).offset(@offset)
 
     respond_to do |format|
-      format.api do
-        render json: {
-          studio_setting_assignments: @assignments.map(&:as_json),
-          total_count: @total_count,
-          offset: @offset || 0,
-          limit: @limit
-        }
-      end
+      format.api
     end
   end
 

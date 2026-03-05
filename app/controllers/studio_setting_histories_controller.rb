@@ -33,9 +33,7 @@ class StudioSettingHistoriesController < ApplicationController
   def destroy
     unless @history.deletable?
       respond_to do |format|
-        format.api do
-          render json: { errors: ['Cannot delete the current version'] }, status: :bad_request
-        end
+        format.api { render_api_errors('Cannot delete the current version') }
       end
       return
     end
@@ -54,9 +52,7 @@ class StudioSettingHistoriesController < ApplicationController
     # Check if trying to restore to current version
     if version == @studio_setting.current_version
       respond_to do |format|
-        format.api do
-          render json: { errors: ['Cannot restore to the current version'] }, status: :bad_request
-        end
+        format.api { render_api_errors('Cannot restore to the current version') }
       end
       return
     end
