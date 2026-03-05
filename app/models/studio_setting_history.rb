@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class StudioSettingHistory < ApplicationRecord
+class StudioSettingHistory < ActiveRecord::Base
   belongs_to :studio_setting
   belongs_to :changed_by, class_name: 'User'
 
