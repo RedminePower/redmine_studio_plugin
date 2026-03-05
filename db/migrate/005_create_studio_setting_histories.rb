@@ -3,7 +3,7 @@
 class CreateStudioSettingHistories < ActiveRecord::Migration[6.1]
   def change
     create_table :studio_setting_histories do |t|
-      t.integer :studio_setting_id, null: false
+      t.bigint :studio_setting_id, null: false
       t.string :name, null: false
       t.string :schema_type, null: false
       t.string :scope_type, null: false
@@ -21,6 +21,8 @@ class CreateStudioSettingHistories < ActiveRecord::Migration[6.1]
 
     add_index :studio_setting_histories, :studio_setting_id
     add_index :studio_setting_histories, [:studio_setting_id, :version], unique: true
+    add_index :studio_setting_histories, [:studio_setting_id, :is_current],
+              name: 'index_studio_setting_histories_on_setting_id_and_is_current'
     add_foreign_key :studio_setting_histories, :studio_settings,
                     column: :studio_setting_id, on_delete: :cascade
   end
