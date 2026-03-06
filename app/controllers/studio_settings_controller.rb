@@ -58,7 +58,7 @@ class StudioSettingsController < ApplicationController
 
     if @studio_setting.save
       # Create history record
-      @studio_setting.create_history('create', User.current, comment: params[:comment])
+      @studio_setting.create_history('create', User.current, comment: params[:studio_setting][:comment])
 
       respond_to do |format|
         format.api do
@@ -90,7 +90,7 @@ class StudioSettingsController < ApplicationController
                     end
 
       # Create history record
-      @studio_setting.create_history(change_type, User.current, comment: params[:comment])
+      @studio_setting.create_history(change_type, User.current, comment: params[:studio_setting][:comment])
 
       respond_to do |format|
         format.api { render :action => 'show', :status => :ok }
