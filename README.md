@@ -13,6 +13,7 @@
 - **Wiki Lists** - Wikiページやチケットの一覧を表示するマクロ
 - **Subtask List Accordion** - 子チケット一覧にアコーディオン機能を追加
 - **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
+- **Studio Settings API** - 汎用設定を管理する API（Redmine Studio が内部で使用）
 
 ## 対応 Redmine
 
@@ -127,10 +128,15 @@ Redmine の子チケット一覧は、階層が深くなると全体を把握し
 
 ## Plugin API
 
-| エンドポイント | 説明 |
-|---------------|------|
-| `GET /plugins.json` | プラグイン一覧の取得 |
-| `GET /plugins/:id.json` | 単体プラグイン情報の取得 |
+プラグイン情報を取得する API です。Redmine Studio が内部で使用します。
+
+詳細は [docs/plugin_api.md](docs/plugin_api.md) をご覧ください。
+
+## Studio Settings API
+
+汎用設定を管理する API です。Redmine Studio が内部で使用します。
+
+詳細は [docs/studio_settings_api.md](docs/studio_settings_api.md) をご覧ください。
 
 ## アンインストール
 

@@ -1,0 +1,30 @@
+api.studio_setting do
+  api.id @studio_setting.id
+  api.name @studio_setting.name
+  api.schema_type @studio_setting.schema_type
+  api.scope_type @studio_setting.scope_type
+  api.scope_id @studio_setting.scope_id
+  api.schema_version @studio_setting.schema_version
+  api.payload @studio_setting.payload
+  api.created_on @studio_setting.created_on
+  api.updated_on @studio_setting.updated_on
+  api.deleted_on @studio_setting.deleted_on
+
+  api.created_by(:id => @studio_setting.created_by.id, :name => @studio_setting.created_by.name) unless @studio_setting.created_by.nil?
+  api.updated_by(:id => @studio_setting.updated_by.id, :name => @studio_setting.updated_by.name) unless @studio_setting.updated_by.nil?
+  api.deleted_by(:id => @studio_setting.deleted_by.id, :name => @studio_setting.deleted_by.name) unless @studio_setting.deleted_by.nil?
+
+  if @include_options && @include_options[:include_assignments]
+    api.array :assignments do
+      @studio_setting.assignments.each do |assignment|
+        api.assignment do
+          api.id assignment.id
+          api.setting_id assignment.setting_id
+          api.assigned_on assignment.assigned_on
+          api.user(:id => assignment.user.id, :name => assignment.user.name) unless assignment.user.nil?
+          api.assigned_by(:id => assignment.assigned_by.id, :name => assignment.assigned_by.name) unless assignment.assigned_by.nil?
+        end
+      end
+    end
+  end
+end

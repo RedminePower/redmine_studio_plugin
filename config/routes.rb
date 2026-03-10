@@ -11,4 +11,19 @@ Rails.application.routes.draw do
 
   # Date Independent
   resources :date_independents
+
+  # Studio Settings
+  resources :studio_settings, only: [:index, :show, :create, :update, :destroy] do
+    member do
+      get 'users', to: 'studio_setting_users#index'
+      put 'users', to: 'studio_setting_users#replace'
+      post 'users/:user_id', to: 'studio_setting_users#add', as: 'add_user'
+      delete 'users/:user_id', to: 'studio_setting_users#remove', as: 'remove_user'
+      post 'restore', to: 'studio_setting_histories#restore'
+    end
+    resources :histories, controller: 'studio_setting_histories', only: [:index, :show, :destroy], param: :version
+  end
+
+  # User's Studio Settings
+  get 'users/:id/studio_settings', to: 'user_studio_settings#index', as: 'user_studio_settings'
 end

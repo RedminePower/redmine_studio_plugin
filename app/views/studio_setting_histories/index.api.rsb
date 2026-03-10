@@ -1,0 +1,21 @@
+api.array :studio_setting_histories, api_meta(:total_count => @total_count, :offset => @offset, :limit => @limit) do
+  @histories.each do |history|
+    api.studio_setting_history do
+      api.id history.id
+      api.studio_setting_id history.studio_setting_id
+      api.version history.version
+      api.name history.name
+      api.schema_type history.schema_type
+      api.scope_type history.scope_type
+      api.scope_id history.scope_id
+      api.schema_version history.schema_version
+      api.change_type history.change_type
+      api.restored_from_version history.restored_from_version
+      api.comment history.comment
+      api.is_current history.is_current
+      api.changed_on history.changed_on
+      api.changed_by(:id => history.changed_by.id, :name => history.changed_by.name) unless history.changed_by.nil?
+      api.payload history.payload if @include_payload
+    end
+  end
+end

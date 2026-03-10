@@ -1,4 +1,4 @@
-api.array :plugins, api_meta(:total_count => @plugins.count) do
+api.array :plugins, api_meta(:total_count => @total_count, :offset => @offset, :limit => @limit) do
   @plugins.each do |plugin|
     api.plugin do
       api.id plugin.id.to_s
@@ -8,12 +8,9 @@ api.array :plugins, api_meta(:total_count => @plugins.count) do
       api.author plugin.author
       api.author_url plugin.author_url
       api.url plugin.url
-      if include_in_api_response?('settings')
-        if plugin.configurable?
-          api.settings Setting["plugin_#{plugin.id}"].to_json
-        else
-          api.settings nil
-        end
+      # 標準 Redmine API のパターンに合わせて、nil の場合はプロパティを省略
+      if include_in_api_response?('settings') && plugin.configurable?
+        api.settings Setting["plugin_#{plugin.id}"].to_json
       end
     end
   end
