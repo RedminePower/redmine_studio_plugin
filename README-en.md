@@ -13,6 +13,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Wiki Lists** - Macros to display wiki pages and issue lists
 - **Subtask List Accordion** - Adds accordion functionality to the subtask list
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
+- **Info API** - API to retrieve Redmine environment information (used internally by Redmine Studio)
 - **Studio Settings API** - API to manage general settings (used internally by Redmine Studio)
 
 ## Supported Redmine
@@ -130,6 +131,12 @@ For details, see [docs/subtask_list_accordion-en.md](docs/subtask_list_accordion
 API to retrieve plugin information. Used internally by Redmine Studio.
 
 For details, see [docs/plugin_api-en.md](docs/plugin_api-en.md).
+
+## Info API
+
+API to retrieve Redmine environment information. Used internally by Redmine Studio.
+
+For details, see [docs/info_api-en.md](docs/info_api-en.md).
 
 ## Studio Settings API
 

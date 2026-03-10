@@ -3,6 +3,9 @@
 Rails.application.routes.draw do
   resources :plugins, :only => [:index, :show]
 
+  # Info
+  get 'info', to: 'info#show'
+
   # Teams Button
   get 'teams_button/user_email/:id', to: 'teams_button#user_email'
 

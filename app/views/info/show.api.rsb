@@ -1,0 +1,28 @@
+api.info do
+  api.redmine_version @info[:redmine_version]
+  api.ruby_version @info[:ruby_version]
+  api.rails_version @info[:rails_version]
+  api.environment @info[:environment]
+  api.database_adapter @info[:database_adapter]
+  api.mailer_queue @info[:mailer_queue]
+  api.mailer_delivery @info[:mailer_delivery]
+  api.redmine_theme @info[:redmine_theme]
+
+  api.array :scm do
+    @info[:scm].each do |scm|
+      api.scm do
+        api.name scm[:name]
+        api.version scm[:version]
+      end
+    end
+  end
+
+  api.array :plugins do
+    @info[:plugins].each do |plugin|
+      api.plugin do
+        api.id plugin[:id]
+        api.version plugin[:version]
+      end
+    end
+  end
+end
