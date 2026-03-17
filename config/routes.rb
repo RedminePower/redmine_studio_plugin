@@ -27,6 +27,10 @@ Rails.application.routes.draw do
     resources :histories, controller: 'studio_setting_histories', only: [:index, :show, :destroy], param: :version
   end
 
+  # Journals List (AJAX) - show_all を先に定義（:id より前にマッチさせる）
+  get 'journals_list/show_all', to: 'journals_list#show_all', as: 'journals_list_show_all'
+  get 'journals_list/:id', to: 'journals_list#show', as: 'journals_list_show'
+
   # User's Studio Settings
   get 'users/:id/studio_settings', to: 'user_studio_settings#index', as: 'user_studio_settings'
 end

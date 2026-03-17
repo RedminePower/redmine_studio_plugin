@@ -103,6 +103,11 @@ else
   require_relative 'lib/redmine_studio_plugin/subtask_list_accordion/issues_helper_patch'
   require_relative 'lib/redmine_studio_plugin/subtask_list_accordion/user_preference_patch'
 
+  # Load Journals List (query_column は QueryColumn 定義後にロードする必要があるため後で require)
+  require_relative 'lib/redmine_studio_plugin/journals_list/issue_patch'
+  require_relative 'lib/redmine_studio_plugin/journals_list/issue_query_patch'
+  require_relative 'lib/redmine_studio_plugin/journals_list/queries_helper_patch'
+
   # Apply patches directly (init.rb is already executed inside to_prepare)
   Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
   Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
@@ -110,4 +115,13 @@ else
   # Subtask List Accordion patches
   UserPreference.prepend RedmineStudioPlugin::SubtaskListAccordion::UserPreferencePatch
   IssuesHelper.include RedmineStudioPlugin::SubtaskListAccordion::IssuesHelperPatch
+
+  # Journals List patches
+  Issue.include RedmineStudioPlugin::JournalsList::IssuePatch
+  IssueQuery.prepend RedmineStudioPlugin::JournalsList::IssueQueryPatch
+  QueriesHelper.include RedmineStudioPlugin::JournalsList::QueriesHelperPatch
+
+  # Register Journals List column (QueryColumn が利用可能になった後にロード)
+  require_relative 'lib/redmine_studio_plugin/journals_list/query_column'
+  IssueQuery.add_available_column(RedmineStudioPlugin::JournalsList::QueryColumn.new)
 end

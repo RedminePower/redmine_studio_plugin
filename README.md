@@ -12,6 +12,7 @@
 - **Date Independent** - 親チケットの日付を子チケットから独立させる
 - **Wiki Lists** - Wikiページやチケットの一覧を表示するマクロ
 - **Subtask List Accordion** - 子チケット一覧にアコーディオン機能を追加
+- **Journals List** - チケット一覧にコメントの更新履歴を表示
 - **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
 - **Info API** - Redmine 環境情報を取得する API（Redmine Studio が内部で使用）
 - **Studio Settings API** - 汎用設定を管理する API（Redmine Studio が内部で使用）
@@ -126,6 +127,16 @@ Redmine の子チケット一覧は、階層が深くなると全体を把握し
 - 右クリックメニューから「このツリーを展開」「このツリーを収縮」「この階層をすべて展開」を選択可能
 
 詳細は [docs/subtask_list_accordion.md](docs/subtask_list_accordion.md) をご覧ください。
+
+## Journals List
+
+チケット一覧の表示オプションに「更新履歴」を追加する機能です。有効にすると、各チケットの行の下にコメント一覧が表示され、レビューのやり取りを一覧で俯瞰できます。
+
+- チケット一覧と `ref_issues` マクロの両方で使用可能
+- 各コメントの折りたたみ/展開（Wiki レンダリング対応）
+- カラムヘッダーによるソート、右クリックメニューによる一括操作
+
+詳細は [docs/journals_list.md](docs/journals_list.md) をご覧ください。
 
 ## Plugin API
 
