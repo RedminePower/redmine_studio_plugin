@@ -219,101 +219,110 @@ puts "show_id: #{show_route[:id]}"
 - `show_action: show`
 - `show_id: 123`
 
-### [1-13] 累積ステータスの計算確認
+### [1-13] 累積ステータスの計算確認（次のコメント直前の値）
 
 **確認方法:**
 ```ruby
 User.current = User.find(1)
 project = Project.first
+conn = ActiveRecord::Base.connection
 status_1 = IssueStatus.first
 status_2 = IssueStatus.second
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-13_Status', author: User.find(1), status: status_1)
+issue.update_columns(status_id: status_1.id)
 
-# コメント1（ステータス変更なし）
-Journal.create(journalized: issue, user: User.find(1), notes: 'Comment before status change')
+# コメント1
+j1 = Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 1')
 
-# ステータス変更 + コメント2
-issue.init_journal(User.find(1), 'Comment with status change')
-issue.status = status_2
-issue.save
+# コメントなしでステータス変更
+j2_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', 1, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
+conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j2_id}, 'attr', 'status_id', '#{status_1.id}', '#{status_2.id}')")
 
-journals = issue.reload.visible_journals_with_notes
+# コメント2
+j3 = Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 2')
+
+issue.update_columns(status_id: status_2.id)
+journals = Issue.find(issue.id).visible_journals_with_notes
 puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
 puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
-puts "j1_expected: #{status_1.name}"
-puts "j2_expected: #{status_2.name}"
 ```
 
 **期待結果:**
-- `j1_status` と `j1_expected` が一致（変更前のステータス）
-- `j2_status` と `j2_expected` が一致（変更後のステータス）
+- `j1_status`: ステータス2の名前（次のコメント直前にステータス変更が反映される）
+- `j2_status`: ステータス2の名前（最後のコメントなので現在値）
 
-### [1-14] 累積担当者の計算確認
+### [1-14] 累積担当者の計算確認（次のコメント直前の値）
 
 **確認方法:**
 ```ruby
 User.current = User.find(1)
 project = Project.first
+conn = ActiveRecord::Base.connection
 user_a = User.find(1)
 user_b = User.where(status: 1).where.not(id: 1).first
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-14_Assign', author: user_a)
+issue.update_columns(assigned_to_id: nil)
 
-# コメント1（担当者変更付き）
-issue.init_journal(user_a, 'Assign to user_b')
-issue.assigned_to = user_b
-issue.save
+# コメント1
+j1 = Journal.create(journalized: issue, user: user_a, notes: 'Comment 1')
 
-# コメント2（担当者クリア付き）
-issue.init_journal(user_a, 'Clear assignee')
-issue.assigned_to = nil
-issue.save
+# コメントなしで担当者変更
+j2_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', #{user_a.id}, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
+conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j2_id}, 'attr', 'assigned_to_id', '', '#{user_b.id}')")
 
-journals = issue.reload.visible_journals_with_notes
+# コメント2
+j3 = Journal.create(journalized: issue, user: user_a, notes: 'Comment 2')
+
+issue.update_columns(assigned_to_id: user_b.id)
+journals = Issue.find(issue.id).visible_journals_with_notes
 puts "j1_assigned: #{journals[0].instance_variable_get(:@cumulative_assigned_to_name)}"
 puts "j1_expected: #{user_b.name}"
 puts "j2_assigned: #{journals[1].instance_variable_get(:@cumulative_assigned_to_name)}"
-puts "j2_expected_empty: #{journals[1].instance_variable_get(:@cumulative_assigned_to_name).empty?}"
+puts "j2_expected: #{user_b.name}"
 ```
 
 **期待結果:**
-- `j1_assigned` と `j1_expected` が一致
-- `j2_expected_empty: true`（担当者クリア後は空）
+- `j1_assigned` と `j1_expected` が一致（次のコメント直前に担当者変更が反映される）
+- `j2_assigned` と `j2_expected` が一致（最後のコメントなので現在値）
 
-### [1-15] コメントなしジャーナルの属性変更が累積値に反映される確認
+### [1-15] コメントなしジャーナルの属性変更が次のコメント行に反映される確認
 
 **確認方法:**
 ```ruby
 User.current = User.find(1)
 project = Project.first
+conn = ActiveRecord::Base.connection
 status_1 = IssueStatus.first
 status_2 = IssueStatus.second
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-15_NoNote', author: User.find(1), status: status_1)
+issue.update_columns(status_id: status_1.id)
 
 # コメント1
 Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 1')
 
 # 属性変更のみ（コメントなし）
-issue.init_journal(User.find(1))
-issue.status = status_2
-issue.save
+j_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', 1, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
+conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j_id}, 'attr', 'status_id', '#{status_1.id}', '#{status_2.id}')")
 
 # コメント2
 Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 2')
 
-journals = issue.reload.visible_journals_with_notes
+issue.update_columns(status_id: status_2.id)
+journals = Issue.find(issue.id).visible_journals_with_notes
 puts "count: #{journals.size}"
 puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
 puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
+puts "j1_expected: #{status_2.name}"
 puts "j2_expected: #{status_2.name}"
 ```
 
 **期待結果:**
 - `count: 2`（コメント付きのみ）
-- `j1_status`: ステータス1の名前
-- `j2_status` と `j2_expected` が一致（コメントなしジャーナルのステータス変更が反映される）
+- `j1_status` と `j1_expected` が一致（コメントなしジャーナルの変更が次のコメント直前の値として反映）
+- `j2_status` と `j2_expected` が一致（最後のコメントなので現在値）
 
 ---
 

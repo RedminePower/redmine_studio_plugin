@@ -51,9 +51,10 @@ The following information is displayed in a single row for each comment.
 
 ### Status and Assignee Display Rules
 
-- Each comment row shows the cumulative status and assignee up to and including that journal's attribute changes
+- Each comment row shows the status and assignee that were finalized between that comment and the next comment
 - If status or assignee is changed at the same time as the comment, the post-change value is displayed
-- Journals without notes (attribute changes only) are not displayed as rows, but their attribute changes are reflected in subsequent comment rows
+- Journals without notes (attribute changes only) are not displayed as rows, but their attribute changes are reflected in the preceding comment row
+- The last comment row shows the current status and assignee
 
 ### Detail View
 

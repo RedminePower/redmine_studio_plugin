@@ -93,13 +93,20 @@ module RedmineStudioPlugin
             end
 
             # 初期値から順に走査して累積値を計算
+            # 各コメントには「次のコメントの直前までの累積値」を設定する
             comment_journal_ids = issue_journals.map(&:id).to_set
+            last_comment_journal = nil
             issue_journal_ids.each do |jid|
+              # コメント付きジャーナルに到達したら、前のコメントに累積値を確定
+              if comment_journal_ids.include?(jid) && last_comment_journal
+                set_cumulative_values(last_comment_journal, running_status_id, running_assigned_to_id,
+                  status_names, user_names, note_numbers, issue.id)
+              end
+
               changes = changes_by_journal[jid]
               if changes
                 if changes['status_id']
-                  new_val = changes['status_id'][:new]
-                  running_status_id = new_val&.to_i
+                  running_status_id = changes['status_id'][:new]&.to_i
                 end
                 if changes['assigned_to_id']
                   new_val = changes['assigned_to_id'][:new]
@@ -107,20 +114,30 @@ module RedmineStudioPlugin
                 end
               end
 
-              # コメント付きジャーナルの場合、累積値を設定
               if comment_journal_ids.include?(jid)
-                journal = issue_journals.find { |j| j.id == jid }
-                journal.instance_variable_set(:@note_number, note_numbers.dig(issue.id, jid))
-                journal.instance_variable_set(:@cumulative_status_name,
-                  status_names[running_status_id] || IssueStatus.find_by(id: running_status_id)&.name || '')
-                journal.instance_variable_set(:@cumulative_assigned_to_id, running_assigned_to_id)
-                journal.instance_variable_set(:@cumulative_assigned_to_name,
-                  running_assigned_to_id ? (user_names[running_assigned_to_id] || User.find_by(id: running_assigned_to_id)&.name || '') : '')
+                last_comment_journal = issue_journals.find { |j| j.id == jid }
               end
+            end
+
+            # 最後のコメントには現在の累積値を設定
+            if last_comment_journal
+              set_cumulative_values(last_comment_journal, running_status_id, running_assigned_to_id,
+                status_names, user_names, note_numbers, issue.id)
             end
 
             issue.visible_journals_with_notes = issue_journals
           end
+        end
+
+        private
+
+        def set_cumulative_values(journal, status_id, assigned_to_id, status_names, user_names, note_numbers, issue_id)
+          journal.instance_variable_set(:@note_number, note_numbers.dig(issue_id, journal.id))
+          journal.instance_variable_set(:@cumulative_status_name,
+            status_names[status_id] || IssueStatus.find_by(id: status_id)&.name || '')
+          journal.instance_variable_set(:@cumulative_assigned_to_id, assigned_to_id)
+          journal.instance_variable_set(:@cumulative_assigned_to_name,
+            assigned_to_id ? (user_names[assigned_to_id] || User.find_by(id: assigned_to_id)&.name || '') : '')
         end
       end
 
@@ -166,8 +183,20 @@ module RedmineStudioPlugin
         end
 
         # 累積値を計算
+        # 各コメントには「次のコメントの直前までの累積値」を設定する
         comment_journal_ids = journals.map(&:id).to_set
+        last_comment_journal = nil
+        last_comment_note_number = nil
         all_journal_ids.each_with_index do |jid, idx|
+          if comment_journal_ids.include?(jid) && last_comment_journal
+            last_comment_journal.instance_variable_set(:@note_number, last_comment_note_number)
+            last_comment_journal.instance_variable_set(:@cumulative_status_name,
+              IssueStatus.find_by(id: running_status_id)&.name || '')
+            last_comment_journal.instance_variable_set(:@cumulative_assigned_to_id, running_assigned_to_id)
+            last_comment_journal.instance_variable_set(:@cumulative_assigned_to_name,
+              running_assigned_to_id ? (User.find_by(id: running_assigned_to_id)&.name || '') : '')
+          end
+
           changes = changes_by_journal[jid]
           if changes
             if changes['status_id']
@@ -180,13 +209,19 @@ module RedmineStudioPlugin
           end
 
           if comment_journal_ids.include?(jid)
-            journal = journals.find { |j| j.id == jid }
-            journal.instance_variable_set(:@note_number, idx + 1)
-            journal.instance_variable_set(:@cumulative_status_name,
-              IssueStatus.find_by(id: running_status_id)&.name || '')
-            journal.instance_variable_set(:@cumulative_assigned_to_name,
-              running_assigned_to_id ? (User.find_by(id: running_assigned_to_id)&.name || '') : '')
+            last_comment_journal = journals.find { |j| j.id == jid }
+            last_comment_note_number = idx + 1
           end
+        end
+
+        # 最後のコメントには現在の累積値を設定
+        if last_comment_journal
+          last_comment_journal.instance_variable_set(:@note_number, last_comment_note_number)
+          last_comment_journal.instance_variable_set(:@cumulative_status_name,
+            IssueStatus.find_by(id: running_status_id)&.name || '')
+          last_comment_journal.instance_variable_set(:@cumulative_assigned_to_id, running_assigned_to_id)
+          last_comment_journal.instance_variable_set(:@cumulative_assigned_to_name,
+            running_assigned_to_id ? (User.find_by(id: running_assigned_to_id)&.name || '') : '')
         end
 
         journals
