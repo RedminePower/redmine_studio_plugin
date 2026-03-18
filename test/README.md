@@ -17,7 +17,8 @@
 | `features/wiki_lists/TEST_SPEC.md` | Wiki Lists テスト |
 | `features/subtask_list_accordion/TEST_SPEC.md` | Subtask List Accordion テスト |
 | `features/studio_settings_api/TEST_SPEC.md` | Studio Settings API テスト |
-| `features/journals_list/TEST_SPEC.md` | Journals List（更新履歴）テスト |
+| `features/journals_list/TEST_SPEC.md` | Journals List（コメント履歴）テスト |
+| `features/rally_count/TEST_SPEC.md` | Rally Count（ラリー回数）テスト |
 
 ## テストの種類
 
@@ -118,3 +119,4 @@ Claude に以下のように依頼してください:
 - `subtask_list_accordion のテストを実行してください`
 - `studio_settings_api のテストを実行してください`
 - `journals_list のテストを実行してください`
+- `rally_count のテストを実行してください`

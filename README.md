@@ -13,6 +13,7 @@
 - **Wiki Lists** - Wikiページやチケットの一覧を表示するマクロ
 - **Subtask List Accordion** - 子チケット一覧にアコーディオン機能を追加
 - **Journals List** - チケット一覧にコメント履歴を表示
+- **Rally Count** - チケット一覧に担当者の切り替え回数（ラリー回数）を表示
 - **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
 - **Info API** - Redmine 環境情報を取得する API（Redmine Studio が内部で使用）
 - **Studio Settings API** - 汎用設定を管理する API（Redmine Studio が内部で使用）
@@ -138,6 +139,15 @@ Redmine の子チケット一覧は、階層が深くなると全体を把握し
 - カラムヘッダーによるソート、ダブルクリック、右クリックメニューによる操作
 
 詳細は [docs/journals_list.md](docs/journals_list.md) をご覧ください。
+
+## Rally Count
+
+チケット一覧に「ラリー回数」（担当者の切り替え回数）を表示する機能です。ラリー回数が多いチケットは、要件の認識齟齬やレビュー指摘の多さを示唆する指標として活用できます。
+
+- ラリー回数でソート可能
+- カーソルを合わせると担当者の変更履歴をツールチップで表示
+
+詳細は [docs/rally_count.md](docs/rally_count.md) をご覧ください。
 
 ## Plugin API
 
