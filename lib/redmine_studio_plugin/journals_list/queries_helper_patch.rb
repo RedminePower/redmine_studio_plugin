@@ -39,7 +39,9 @@ module RedmineStudioPlugin
             content_tag(:th, '#', class: 'jl-note jl-sortable', 'data-sort-col': '0', 'data-sort-type': 'num') +
             content_tag(:th, l(:label_journals_list_author), class: 'jl-author jl-sortable', 'data-sort-col': '1', 'data-sort-type': 'text') +
             content_tag(:th, l(:label_journals_list_date), class: 'jl-date jl-sortable', 'data-sort-col': '2', 'data-sort-type': 'text') +
-            content_tag(:th, l(:label_journals_list_notes), class: 'jl-preview jl-sortable', 'data-sort-col': '3', 'data-sort-type': 'text') +
+            content_tag(:th, l(:field_status), class: 'jl-status jl-sortable', 'data-sort-col': '3', 'data-sort-type': 'text') +
+            content_tag(:th, l(:field_assigned_to), class: 'jl-assigned-to jl-sortable', 'data-sort-col': '4', 'data-sort-type': 'text') +
+            content_tag(:th, l(:label_journals_list_notes), class: 'jl-preview jl-sortable', 'data-sort-col': '5', 'data-sort-type': 'text') +
             content_tag(:th, '', class: 'jl-toggle')
           end
         end
@@ -57,6 +59,9 @@ module RedmineStudioPlugin
         author_link = journal.user ? link_to(author_name, user_path(journal.user)) : '?'
         date_str = format_time(journal.created_on)
         date_sort_key = journal.created_on.strftime('%Y-%m-%d %H:%M:%S')
+        status_name = journal.instance_variable_get(:@cumulative_status_name) || ''
+        assigned_to_id = journal.instance_variable_get(:@cumulative_assigned_to_id)
+        assigned_to_name = journal.instance_variable_get(:@cumulative_assigned_to_name) || ''
         first_line = journal.notes.to_s.split(/\r?\n/).reject(&:blank?).first.to_s.truncate(100)
 
         # 表示/非表示ボタン（AJAX で展開するため、クリック処理は JavaScript で行う）
@@ -82,17 +87,19 @@ module RedmineStudioPlugin
         # ヘッダー行
         header_row = content_tag(:tr, class: 'journal-header',
           'data-journal-id': journal.id,
-          'data-sort-keys': [note_number.to_s, author_name, date_sort_key, first_line].to_json) do
+          'data-sort-keys': [note_number.to_s, author_name, date_sort_key, status_name, assigned_to_name, first_line].to_json) do
           content_tag(:td, note_link, class: 'jl-note') +
           content_tag(:td, author_link, class: 'jl-author') +
           content_tag(:td, date_str, class: 'jl-date') +
+          content_tag(:td, h(status_name), class: 'jl-status') +
+          content_tag(:td, assigned_to_id ? link_to(assigned_to_name, user_path(assigned_to_id)) : '', class: 'jl-assigned-to') +
           content_tag(:td, h(first_line), class: 'jl-preview') +
           content_tag(:td, show_link + hide_link, class: 'jl-toggle')
         end
 
         # 展開時のコンテンツ行（初期状態は空、AJAX で取得）
         content_row = content_tag(:tr, id: html_id, class: 'journal-content', style: 'display:none;') do
-          content_tag(:td, '', colspan: 5, class: 'wiki jl-content-cell')
+          content_tag(:td, '', colspan: 7, class: 'wiki jl-content-cell')
         end
 
         header_row + content_row
@@ -121,6 +128,14 @@ module RedmineStudioPlugin
             white-space: nowrap;
             padding-right: 8px;
             color: #888;
+          }
+          .journals-list .jl-status {
+            white-space: nowrap;
+            padding-right: 8px;
+          }
+          .journals-list .jl-assigned-to {
+            white-space: nowrap;
+            padding-right: 8px;
           }
           .journals-list td.jl-preview {
             width: 100%;
@@ -291,6 +306,19 @@ module RedmineStudioPlugin
             function isExpanded($header) {
               return $header.next('tr.journal-content').is(':visible');
             }
+
+            // ヘッダー行ダブルクリックで詳細の表示/非表示を切り替え
+            $(document).on('dblclick', '.journals-list tr.journal-header', function(e) {
+              e.preventDefault();
+              var $header = $(this);
+              if (isExpanded($header)) {
+                collapseJournal($header);
+              } else {
+                expandJournal($header);
+              }
+              // ダブルクリックによるテキスト選択を解除
+              if (window.getSelection) { window.getSelection().removeAllRanges(); }
+            });
 
             // 「表示」ボタンクリック
             $(document).on('click', '.jl-expand-btn', function(e) {

@@ -1,8 +1,8 @@
-# Journals List（更新履歴）テスト仕様書
+# Journals List（コメント履歴）テスト仕様書
 
 ## 概要
 
-チケット一覧に「更新履歴」ブロックカラムを追加する機能のテスト仕様。チケットのコメント一覧を折りたたみ/展開可能なテーブル形式で表示する。展開時のコンテンツは AJAX で遅延ロードする。
+チケット一覧に「コメント履歴」ブロックカラムを追加する機能のテスト仕様。チケットのコメント一覧を折りたたみ/展開可能なテーブル形式で表示する。各コメント時点のステータスと担当者を累積値で表示する。展開時のコンテンツは AJAX で遅延ロードする。
 
 ## 環境パラメータ
 
@@ -129,7 +129,7 @@ puts "label_journals_list_hide_all: #{I18n.t(:label_journals_list_hide_all)}"
 ```
 
 **期待結果:**
-- `field_journals_list: 更新履歴`
+- `field_journals_list: コメント履歴`
 - `label_journals_list_author: 更新者`
 - `label_journals_list_date: 更新日`
 - `label_journals_list_notes: コメント`
@@ -142,12 +142,10 @@ puts "label_journals_list_hide_all: #{I18n.t(:label_journals_list_hide_all)}"
 
 **確認方法:**
 ```ruby
-# テストデータ作成
 project = Project.first
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-9_Test', author: User.find(1))
 Journal.create(journalized: issue, user: User.find(1), notes: 'Test comment 1')
 Journal.create(journalized: issue, user: User.find(1), notes: 'Test comment 2')
-# ノートなしジャーナル（属性変更のみ）
 Journal.create(journalized: issue, user: User.find(1), notes: '')
 
 User.current = User.find(1)
@@ -171,12 +169,10 @@ issue = Issue.create(project: project, tracker: project.trackers.first, subject:
 Journal.create(journalized: issue, user: User.find(1), notes: 'Public comment')
 Journal.create(journalized: issue, user: User.find(1), notes: 'Private comment', private_notes: true)
 
-# 管理者（プライベートコメント参照可能）
 User.current = User.find(1)
 admin_journals = issue.visible_journals_with_notes
 puts "admin_count: #{admin_journals.size}"
 
-# プライベートコメント参照不可のユーザー
 user = User.where(admin: false).where(status: 1).first
 User.current = user
 role = Role.find_by(name: 'Manager') || Role.first
@@ -223,6 +219,102 @@ puts "show_id: #{show_route[:id]}"
 - `show_action: show`
 - `show_id: 123`
 
+### [1-13] 累積ステータスの計算確認
+
+**確認方法:**
+```ruby
+User.current = User.find(1)
+project = Project.first
+status_1 = IssueStatus.first
+status_2 = IssueStatus.second
+
+issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-13_Status', author: User.find(1), status: status_1)
+
+# コメント1（ステータス変更なし）
+Journal.create(journalized: issue, user: User.find(1), notes: 'Comment before status change')
+
+# ステータス変更 + コメント2
+issue.init_journal(User.find(1), 'Comment with status change')
+issue.status = status_2
+issue.save
+
+journals = issue.reload.visible_journals_with_notes
+puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
+puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
+puts "j1_expected: #{status_1.name}"
+puts "j2_expected: #{status_2.name}"
+```
+
+**期待結果:**
+- `j1_status` と `j1_expected` が一致（変更前のステータス）
+- `j2_status` と `j2_expected` が一致（変更後のステータス）
+
+### [1-14] 累積担当者の計算確認
+
+**確認方法:**
+```ruby
+User.current = User.find(1)
+project = Project.first
+user_a = User.find(1)
+user_b = User.where(status: 1).where.not(id: 1).first
+
+issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-14_Assign', author: user_a)
+
+# コメント1（担当者変更付き）
+issue.init_journal(user_a, 'Assign to user_b')
+issue.assigned_to = user_b
+issue.save
+
+# コメント2（担当者クリア付き）
+issue.init_journal(user_a, 'Clear assignee')
+issue.assigned_to = nil
+issue.save
+
+journals = issue.reload.visible_journals_with_notes
+puts "j1_assigned: #{journals[0].instance_variable_get(:@cumulative_assigned_to_name)}"
+puts "j1_expected: #{user_b.name}"
+puts "j2_assigned: #{journals[1].instance_variable_get(:@cumulative_assigned_to_name)}"
+puts "j2_expected_empty: #{journals[1].instance_variable_get(:@cumulative_assigned_to_name).empty?}"
+```
+
+**期待結果:**
+- `j1_assigned` と `j1_expected` が一致
+- `j2_expected_empty: true`（担当者クリア後は空）
+
+### [1-15] コメントなしジャーナルの属性変更が累積値に反映される確認
+
+**確認方法:**
+```ruby
+User.current = User.find(1)
+project = Project.first
+status_1 = IssueStatus.first
+status_2 = IssueStatus.second
+
+issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-15_NoNote', author: User.find(1), status: status_1)
+
+# コメント1
+Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 1')
+
+# 属性変更のみ（コメントなし）
+issue.init_journal(User.find(1))
+issue.status = status_2
+issue.save
+
+# コメント2
+Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 2')
+
+journals = issue.reload.visible_journals_with_notes
+puts "count: #{journals.size}"
+puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
+puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
+puts "j2_expected: #{status_2.name}"
+```
+
+**期待結果:**
+- `count: 2`（コメント付きのみ）
+- `j1_status`: ステータス1の名前
+- `j2_status` と `j2_expected` が一致（コメントなしジャーナルのステータス変更が反映される）
+
 ---
 
 ## 2. HTTP テスト
@@ -264,6 +356,8 @@ $response.Content -match 'journals-list'
 $response.Content -match 'class="jl-note"'
 $response.Content -match 'class="jl-author"'
 $response.Content -match 'class="jl-date"'
+$response.Content -match 'class="jl-status"'
+$response.Content -match 'class="jl-assigned-to"'
 $response.Content -match 'class="jl-preview"'
 $response.Content -match 'class="jl-toggle"'
 ```
@@ -322,7 +416,7 @@ $response.Content -match 'href="/issues/{ISSUE_ID}#note-'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
-$response.Content -match 'href="/users/\d+"'
+$response.Content -match 'jl-author.*href="/users/\d+"'
 ```
 
 **期待結果:** `True`
@@ -339,7 +433,7 @@ $response.Content -match 'data-journal-id'
 
 **期待結果:** すべて `True`
 
-### [2-10] ソート用の data 属性が出力される
+### [2-10] ソート用の data 属性が出力される（6要素）
 
 **確認方法:**
 ```powershell
@@ -358,13 +452,39 @@ $response.Content -match 'data-sort-keys'
 $response.Content -match 'table\.journals-list'
 $response.Content -match 'jl-context-menu'
 $response.Content -match 'expandJournal'
+$response.Content -match 'dblclick'
 ```
 
 **期待結果:** すべて `True`
 
+### [2-12] ステータス列とソート属性が出力される
+
+**確認方法:**
+```powershell
+# [2-2] と同じリクエスト
+$response.Content -match 'th.*jl-status.*jl-sortable'
+$response.Content -match 'td.*class="jl-status"'
+```
+
+**期待結果:** 両方 `True`
+
+### [2-13] 担当者列がリンク付きで出力される
+
+**前提条件:**
+- 担当者が設定されたコメントを持つチケットが存在すること
+
+**確認方法:**
+```powershell
+# [2-2] と同じリクエスト
+$response.Content -match 'th.*jl-assigned-to.*jl-sortable'
+$response.Content -match 'jl-assigned-to.*href="/users/\d+"'
+```
+
+**期待結果:** 両方 `True`
+
 ### AJAX エンドポイント
 
-### [2-12] JournalsListController#show - 単一ジャーナル取得
+### [2-14] JournalsListController#show - 単一ジャーナル取得
 
 **前提条件:**
 - コメント付きジャーナルが存在すること（ジャーナル ID を `{JOURNAL_ID}` とする）
@@ -382,20 +502,20 @@ $response.Headers['Content-Type']
 - ステータスコード: `200`
 - Content-Type: `text/html` を含む
 
-### [2-13] JournalsListController#show - Wiki レンダリング確認
+### [2-15] JournalsListController#show - Wiki レンダリング確認
 
 **前提条件:**
 - Wiki 記法を含むコメントを持つジャーナルが存在すること
 
 **確認方法:**
 ```powershell
-# [2-12] と同じリクエスト
+# [2-14] と同じリクエスト
 $response.Content.Length -gt 0
 ```
 
 **期待結果:** `True`（空でないレスポンス）
 
-### [2-14] JournalsListController#show_all - 複数ジャーナル一括取得
+### [2-16] JournalsListController#show_all - 複数ジャーナル一括取得
 
 **前提条件:**
 - 複数のコメント付きジャーナルが存在すること（ID を `{JID1}`, `{JID2}` とする）
@@ -416,7 +536,7 @@ $json.PSObject.Properties.Name
 - Content-Type: `application/json` を含む
 - JSON のキーに `{JID1}`, `{JID2}` が含まれる
 
-### [2-15] JournalsListController#show - 存在しない ID で 404 エラー
+### [2-17] JournalsListController#show - 存在しない ID で 404 エラー
 
 **確認方法:**
 ```powershell
@@ -431,42 +551,6 @@ try {
 
 **期待結果:** `404`
 
-### [2-16] JournalsListController#show - チケット閲覧権限なしで 403 エラー
-
-**前提条件:**
-- 権限のないユーザーが存在すること
-- そのユーザーが閲覧できないプロジェクトのジャーナルが存在すること（ID を `{JOURNAL_ID}` とする）
-
-**確認方法:**
-```powershell
-$cred = New-Object PSCredential('{権限なしユーザー}', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-try {
-  Invoke-WebRequest -Uri 'http://localhost:{ポート}/journals_list/{JOURNAL_ID}' `
-    -Credential $cred -AllowUnencryptedAuthentication
-} catch {
-  $_.Exception.Response.StatusCode.Value__
-}
-```
-
-**期待結果:** `403`
-
-### [2-17] JournalsListController#show_all - 権限フィルタリング
-
-**前提条件:**
-- 権限のないユーザーが存在すること
-- アクセス可能なジャーナル（ID: `{ACCESSIBLE_JID}`）とアクセス不可のジャーナル（ID: `{RESTRICTED_JID}`）が存在すること
-
-**確認方法:**
-```powershell
-$cred = New-Object PSCredential('{権限なしユーザー}', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/journals_list/show_all?ids[]={ACCESSIBLE_JID}&ids[]={RESTRICTED_JID}' `
-  -Credential $cred -AllowUnencryptedAuthentication
-$json = $response.Content | ConvertFrom-Json
-$json.PSObject.Properties.Name
-```
-
-**期待結果:** `{ACCESSIBLE_JID}` のみが含まれる（`{RESTRICTED_JID}` は除外される）
-
 ---
 
 ## 3. ブラウザテスト
@@ -477,17 +561,17 @@ $json.PSObject.Properties.Name
 
 **チケット:**
 
-| テストID | subject | コメント数 | 備考 |
-|---------|---------|-----------|------|
-| 用途 | JL_Browser_TestIssue | 3件以上 | 複数ユーザーによるコメント |
+| テストID | subject | 備考 |
+|---------|---------|------|
+| 用途 | JL_Browser_TestIssue | 複数ユーザーによるコメント、ステータス・担当者変更を含む |
 
-**コメント:**
+**コメント（ステータス・担当者変更付き）:**
 
-| # | 投稿者 | 内容 |
-|---|--------|------|
-| 1 | admin | レビュー指摘（複数行、Wiki 記法あり） |
-| 2 | 一般ユーザー | 修正報告 |
-| 3 | admin | 確認完了 |
+| # | 投稿者 | ステータス変更 | 担当者変更 | 内容 |
+|---|--------|-------------|----------|------|
+| 1 | admin | 新規→進行中 | →admin | 着手します |
+| 2 | admin | - | admin→一般ユーザー | レビューお願いします |
+| 3 | 一般ユーザー | - | 一般ユーザー→admin | 確認しました |
 
 ### [3-1] 折りたたみ/展開操作
 
@@ -506,58 +590,77 @@ $json.PSObject.Properties.Name
 
 **確認3:** AJAX リクエストなしで即座に展開される（キャッシュ動作）
 
-### [3-2] ソート操作
+### [3-2] ダブルクリックで展開/折りたたみ
+
+**手順:**
+1. コメント #1 のヘッダー行をダブルクリック
+
+**確認1:** 詳細が展開される。テキスト選択は残らない
+
+2. 再度ヘッダー行をダブルクリック
+
+**確認2:** 詳細が折りたたまれる
+
+3. 展開された詳細部分をダブルクリック
+
+**確認3:** テキストが選択される（詳細は折りたたまれない）
+
+### [3-3] ソート操作
 
 **手順:**
 1. 「更新者」ヘッダーをクリック
 
 **確認1:** コメントが更新者名の昇順でソートされる。ソートアイコンが表示される
 
-2. 再度「更新者」ヘッダーをクリック
+2. 「ステータス」ヘッダーをクリック
 
-**確認2:** 降順に切り替わる。ソートアイコンが変わる
+**確認2:** コメントがステータスの昇順でソートされる。「更新者」のソートアイコンが消える
 
-3. 「#」ヘッダーをクリック
+3. 「担当者」ヘッダーをクリック
 
-**確認3:** コメント番号の昇順でソートされる。「更新者」のソートアイコンが消える
+**確認3:** コメントが担当者名でソートされる
 
-### [3-3] 右クリックコンテキストメニュー
+### [3-4] ステータス・担当者列の表示確認
+
+**手順:**
+1. テストチケットのコメント一覧を表示
+
+**確認1:** 各コメント行にステータス列と担当者列が表示される
+
+**確認2:** 担当者名がリンクになっている（クリックでユーザーページに遷移）
+
+**確認3:** ステータスと担当者が各コメント時点の正しい値を表示している
+
+### [3-5] 右クリックコンテキストメニュー
 
 **手順:**
 1. 折りたたまれたコメントのヘッダー行を右クリック
 
-**確認1:** 「詳細を表示」が表示される（`＞` 右向きアイコン付き）。「詳細を隠す」は表示されない
+**確認1:** 「詳細を表示」が表示される。「詳細を隠す」は表示されない
 
-2. 「詳細を表示」をクリック → 展開されたコメントのヘッダー行を右クリック
+2. 「詳細を表示」をクリック → 展開されたコメントを右クリック
 
-**確認2:** 「詳細を隠す」が表示される（`＞` 下向きアイコン付き）。「詳細を表示」は表示されない
+**確認2:** 「詳細を隠す」が表示される。「詳細を表示」は表示されない
 
-3. 展開されたコメントの詳細部分（Wiki レンダリング領域）を右クリック
+3. 右クリック → 「すべての詳細を表示」
 
-**確認3:** ヘッダー行を右クリックした場合と同じメニューが表示される
+**確認3:** すべてのコメントが展開される
 
-### [3-4] すべての詳細を表示/隠す
+4. 右クリック → 「すべての詳細を隠す」
 
-**手順:**
-1. すべて折りたたまれた状態で、任意のコメントを右クリック → 「すべての詳細を表示」
+**確認4:** すべてのコメントが折りたたまれる
 
-**確認1:** 同じチケットのすべてのコメントが展開される
-
-2. 任意のコメントを右クリック → 「すべての詳細を隠す」
-
-**確認2:** すべてのコメントが折りたたまれる
-
-### [3-5] コンテキストメニューの閉じ動作と既存メニューとの排他
+### [3-6] コンテキストメニューの閉じ動作と既存メニューとの排他
 
 **手順:**
 1. コメントを右クリックしてメニュー表示 → メニュー外をクリック
 
 **確認1:** メニューが閉じる
 
-2. コメントを右クリックしてメニュー表示 → チケット行（更新履歴外）を右クリック
+2. コメントを右クリックしてメニュー表示 → チケット行を右クリック
 
-**確認2:** 更新履歴メニューが閉じ、Redmine 標準メニューが表示される
+**確認2:** コメント履歴メニューが閉じ、Redmine 標準メニューが表示される
 
 3. Redmine 標準メニューが表示された状態で、コメントを右クリック
 
-**確認3:** Redmine 標準メニューが閉じ、更新履歴メニューが表示される
+**確認3:** Redmine 標準メニューが閉じ、コメント履歴メニューが表示される

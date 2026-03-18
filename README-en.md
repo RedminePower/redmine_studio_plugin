@@ -12,7 +12,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Date Independent** - Makes parent issue dates independent from child issues
 - **Wiki Lists** - Macros to display wiki pages and issue lists
 - **Subtask List Accordion** - Adds accordion functionality to the subtask list
-- **Journals List** - Displays comment history in the issue list
+- **Journals List** - Displays comment history with status and assignee in the issue list
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 - **Info API** - API to retrieve Redmine environment information (used internally by Redmine Studio)
 - **Studio Settings API** - API to manage general settings (used internally by Redmine Studio)
@@ -129,11 +129,12 @@ For details, see [docs/subtask_list_accordion-en.md](docs/subtask_list_accordion
 
 ## Journals List
 
-Adds a "Journals" display option to the issue list. When enabled, a table of comments is displayed below each issue row, allowing you to see at a glance who made what comments.
+Adds a "Comment History" display option to the issue list. When enabled, a table of comments is displayed below each issue row, allowing you to see at a glance who made what comments.
 
 - Available in both the issue list and the `ref_issues` macro
+- Shows status and assignee at each comment's point in time
 - Collapse/expand individual comments (with Wiki rendering)
-- Sort by column headers, right-click context menu for batch operations
+- Sort by column headers, double-click, and right-click context menu for operations
 
 For details, see [docs/journals_list-en.md](docs/journals_list-en.md).
 
