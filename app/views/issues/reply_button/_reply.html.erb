@@ -16,21 +16,36 @@
             text: '<%= escape_javascript(l(:button_reply)) %>',
             href: '<%= edit_issue_path(@issue) %>',
             click: function() {
-              // Get the latest journal
-              var latestJournal = $(".journal").toArray().reduce(function(latest, current) {
-                if (!latest) return current;
-                var latestId = parseInt(latest.id.replace(/\D/g, ''), 10);
-                var currentId = parseInt(current.id.replace(/\D/g, ''), 10);
-                return currentId > latestId ? current : latest;
-              }, null);
+              var currentUserId = '<%= User.current.id %>';
               var userElement = null;
 
-              // Find the author of the latest journal if exists
-              if (latestJournal) {
-                userElement = $("#" + latestJournal.id).find(".user.active");
+              // Get all journals sorted by ID descending (newest first)
+              var journals = $(".journal").toArray().sort(function(a, b) {
+                var idA = parseInt(a.id.replace(/\D/g, ''), 10);
+                var idB = parseInt(b.id.replace(/\D/g, ''), 10);
+                return idB - idA;
+              });
+
+              // Find the first journal whose author is not the current user
+              for (var i = 0; i < journals.length; i++) {
+                var candidate = $("#" + journals[i].id).find(".user.active");
+                if (candidate.length > 0) {
+                  var match = candidate[0].href.match(/\/users\/(\d+)$/);
+                  if (match && match[1] !== currentUserId) {
+                    userElement = candidate;
+                    break;
+                  }
+                }
               }
 
-              // Fall back to the issue author if not found
+              // If no other user found, fall back to the latest journal's author (self)
+              if (!userElement || userElement.length === 0) {
+                if (journals.length > 0) {
+                  userElement = $("#" + journals[0].id).find(".user.active");
+                }
+              }
+
+              // Fall back to the issue author if still not found
               if (!userElement || userElement.length === 0) {
                 userElement = $(".author").find(".user.active");
               }

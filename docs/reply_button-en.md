@@ -33,8 +33,14 @@ Assignee assignment logic when the "Reply" button is clicked:
 
 | Condition | User Set as Assignee |
 |-----------|---------------------|
-| Issue has comments | Last comment author |
+| Last updater is another user | Last updater |
+| Last updater is yourself | Searches backwards for the first other user |
+| All updaters are yourself | Yourself |
 | Issue has no comments | Issue author |
+
+### When the Last Comment Is Your Own
+
+When the last updater is yourself, the reply button searches backwards through previous updates and sets the most recent other user as assignee. This allows you to correctly reassign the issue even if you forgot to change the assignee after commenting.
 
 ### Difference from Edit Button
 
