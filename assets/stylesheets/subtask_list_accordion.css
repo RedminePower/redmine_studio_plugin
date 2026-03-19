@@ -74,3 +74,13 @@ tr.issue.haschild.expand > td.subject > span.treearrow {
 .icon-arrow-collapsed {
   background-image: url(../images/arrow_right.png);
 }
+
+/*
+ * Redmine 6.x のコンテキストメニューでは #context-menu a { padding: 2px 8px } が
+ * 詳細度で勝つため、アイコン用の padding-left が上書きされてしまう。
+ * 詳細度を上げて padding-left を確保する。
+ */
+#context-menu .subtask_list_accordion a {
+  padding-left: 24px;
+}
+
