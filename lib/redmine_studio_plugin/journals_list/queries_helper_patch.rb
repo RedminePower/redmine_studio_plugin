@@ -285,8 +285,9 @@ module RedmineStudioPlugin
                   $cell.attr('data-loaded', 'true');
                   if (callback) callback();
                 },
-                error: function() {
-                  $cell.html('<span class="jl-loading">Failed to load.</span>');
+                error: function(xhr, textStatus) {
+                  var info = xhr.status ? xhr.status : '0 ' + textStatus;
+                  $cell.html('<span class="jl-loading">Failed to load. (' + info + ')</span>');
                   if (callback) callback();
                 }
               });
@@ -377,10 +378,11 @@ module RedmineStudioPlugin
                       }
                     });
                   },
-                  error: function() {
+                  error: function(xhr, textStatus) {
+                    var info = xhr.status ? xhr.status : '0 ' + textStatus;
                     needLoad.forEach(function($h) {
                       var $cell = $h.next('tr.journal-content').find('.jl-content-cell');
-                      $cell.html('<span class="jl-loading">Failed to load.</span>');
+                      $cell.html('<span class="jl-loading">Failed to load. (' + info + ')</span>');
                     });
                   }
                 });
