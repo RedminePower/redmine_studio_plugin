@@ -278,7 +278,7 @@ module RedmineStudioPlugin
 
               var journalId = $header.attr('data-journal-id');
               $.ajax({
-                url: '/journals_list/' + journalId,
+                url: '#{journals_list_show_path("__ID__")}'.replace('__ID__', journalId),
                 method: 'GET',
                 success: function(html) {
                   $cell.html(html);
@@ -363,7 +363,7 @@ module RedmineStudioPlugin
               if (needLoad.length > 0) {
                 var ids = needLoad.map(function($h) { return $h.attr('data-journal-id'); });
                 $.ajax({
-                  url: '/journals_list/show_all',
+                  url: '#{journals_list_show_all_path}',
                   method: 'GET',
                   data: { ids: ids },
                   success: function(data) {

@@ -4,12 +4,6 @@
 
 チケット一覧に「コメント履歴」ブロックカラムを追加する機能のテスト仕様。チケットのコメント一覧を折りたたみ/展開可能なテーブル形式で表示する。各コメント時点のステータスと担当者を累積値で表示する。展開時のコンテンツは AJAX で遅延ロードする。
 
-## 環境パラメータ
-
-パスから自動判定:
-- `redmine_5.1.11` → コンテナ名: `redmine_5.1.11`, ポート: `3051`
-- `redmine_6.1.1` → コンテナ名: `redmine_6.1.1`, ポート: `3061`
-
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -334,8 +328,8 @@ puts "j2_expected: #{status_2.name}"
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
@@ -349,8 +343,8 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={ISSUE_ID}' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={ISSUE_ID}' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'journals-list'
 ```
@@ -380,8 +374,8 @@ $response.Content -match 'class="jl-toggle"'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_COMMENT_ID}' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_COMMENT_ID}' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'journals-list'
 ```
@@ -402,8 +396,8 @@ $response.Content -match 'journals_list block_column'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'journals_list'
 ```
@@ -500,8 +494,8 @@ $response.Content -match 'jl-assigned-to.*href="/users/\d+"'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/journals_list/{JOURNAL_ID}' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/journals_list/{JOURNAL_ID}' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 $response.Headers['Content-Type']
@@ -531,8 +525,8 @@ $response.Content.Length -gt 0
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/journals_list/show_all?ids[]={JID1}&ids[]={JID2}' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/journals_list/show_all?ids[]={JID1}&ids[]={JID2}' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 $response.Headers['Content-Type']
@@ -549,9 +543,9 @@ $json.PSObject.Properties.Name
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 try {
-  Invoke-WebRequest -Uri 'http://localhost:{ポート}/journals_list/999999' `
+  Invoke-WebRequest -Uri '{BaseUrl}/journals_list/999999' `
     -Credential $cred -AllowUnencryptedAuthentication
 } catch {
   $_.Exception.Response.StatusCode.Value__
