@@ -6,12 +6,6 @@ redmine_studio_plugin の Date Independent 機能のテスト仕様。
 
 親チケットの開始日・期日が子チケットから自動計算（derived）される動作を、プロジェクト単位・ステータス単位で制御する機能をテストする。
 
-## 環境パラメータ
-
-パスから自動判定:
-- `redmine_5.1.11` → コンテナ名: `redmine_5.1.11`, ポート: `3051`
-- `redmine_6.1.1` → コンテナ名: `redmine_6.1.1`, ポート: `3061`
-
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -45,7 +39,7 @@ SQLite ロック競合を回避するため、Runner テスト実行前に Puma 
 詳細は CLAUDE.md の「SQLite ロック競合の回避」を参照。
 
 ```bash
-docker exec redmine_5.1.11 bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
+docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
 ```
 
 ### フェーズ 1: 登録確認テスト（バッチ 1）
@@ -70,7 +64,7 @@ docker exec redmine_5.1.11 bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.
 HTTP テスト・ブラウザテストに備え、コンテナを再起動して Puma を復帰させる。
 
 ```bash
-docker restart redmine_5.1.11
+docker restart {Container}
 ```
 
 ---

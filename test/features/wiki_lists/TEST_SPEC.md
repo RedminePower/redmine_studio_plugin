@@ -12,12 +12,6 @@ redmine_studio_plugin の Wiki Lists 機能のテスト仕様。
 | `{{issue_name_link}}` | チケット題名でリンクを作成 |
 | `{{ref_issues}}` | 条件に合うチケット一覧を表示 |
 
-## 環境パラメータ
-
-パスから自動判定:
-- `redmine_5.1.11` → コンテナ名: `redmine_5.1.11`, ポート: `3051`
-- `redmine_6.1.1` → コンテナ名: `redmine_6.1.1`, ポート: `3061`
-
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -38,7 +32,7 @@ redmine_studio_plugin の Wiki Lists 機能のテスト仕様。
 SQLite ロック競合を回避するため、Runner テスト実行前に Puma を停止する。
 
 ```bash
-docker exec redmine_5.1.11 bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
+docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
 ```
 
 ### フェーズ 1: Runner テスト
@@ -50,7 +44,7 @@ docker exec redmine_5.1.11 bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.
 HTTP テストに備え、コンテナを再起動して Puma を復帰させる。
 
 ```bash
-docker restart redmine_5.1.11
+docker restart {Container}
 ```
 
 ### フェーズ 3: HTTP テスト

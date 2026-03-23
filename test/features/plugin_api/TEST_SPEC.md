@@ -4,26 +4,6 @@
 
 プラグイン情報 API 機能のテスト仕様。この文書から runner_test.rb, http_test.ps1 を再生成できる。
 
-## 環境パラメータ
-
-以下のパラメータは TEST_SPEC.md のパスから自動判定する:
-
-| パラメータ | 判定方法 |
-|-----------|----------|
-| Container | パス内の `redmine_X.Y.Z` フォルダ名をそのまま使用 |
-| BaseUrl | バージョンからポート算出: `3000 + (メジャー × 10) + マイナー` |
-
-固定パラメータ:
-
-| パラメータ | 値 | 説明 |
-|-----------|-----|------|
-| Username | `admin` | テスト用ログインID |
-| Password | `password123` | テスト用パスワード |
-
-**例:** パスが `C:\Docker\redmine_6.1.1\plugins\...` の場合
-- Container: `redmine_6.1.1`
-- BaseUrl: `http://localhost:3061`（3000 + 60 + 1）
-
 ## テスト前提条件
 
 ### ダミープラグイン
@@ -152,13 +132,13 @@ File.exist?(index_view) && File.exist?(show_view)
 
 **実行方法:**
 ```powershell
-pwsh -File "...\http_test.ps1" -BaseUrl "http://localhost:3051"
+pwsh -File "...\http_test.ps1" -BaseUrl "{BaseUrl}"
 ```
 
 **API キーの取得:**
 ```ruby
-User.find_by_login('admin').api_key ||
-User.find_by_login('admin').tap { |u| u.api_key = SecureRandom.hex(20); u.save! }.api_key
+User.find_by_login('{Username}').api_key ||
+User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.save! }.api_key
 ```
 
 ### [2-1] 未認証でアクセス

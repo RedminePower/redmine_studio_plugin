@@ -4,27 +4,6 @@
 
 Reply Button 機能のテスト仕様。この文書から runner_test.rb, http_test.ps1, browser_setup_all.rb, browser_test.md を再生成できる。
 
-## 環境パラメータ
-
-以下のパラメータは TEST_SPEC.md のパスから自動判定する:
-
-| パラメータ | 判定方法 |
-|-----------|----------|
-| Container | パス内の `redmine_X.Y.Z` フォルダ名をそのまま使用 |
-| BaseUrl | バージョンからポート算出: `3000 + (メジャー × 10) + マイナー` |
-
-固定パラメータ:
-
-| パラメータ | 値 | 説明 |
-|-----------|-----|------|
-| Username | `admin` | テスト用ログインID |
-| Password | `password123` | テスト用パスワード |
-| TestProject | `test-plugin` | テスト用プロジェクト識別子 |
-
-**例:** パスが `C:\Docker\redmine_6.1.1\plugins\...` の場合
-- Container: `redmine_6.1.1`
-- BaseUrl: `http://localhost:3061`（3000 + 60 + 1）
-
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -192,7 +171,7 @@ project.module_enabled?(:reply_button)
 
 **実行方法:**
 ```powershell
-pwsh -File "...\http_test.ps1" -BaseUrl "http://localhost:3051"
+pwsh -File "...\http_test.ps1" -BaseUrl "{BaseUrl}"
 ```
 
 **認証方法:**
@@ -248,7 +227,7 @@ Issue.joins(:project)
 
 **事前設定:**
 ```ruby
-User.find_by_login('admin').pref.update(comments_sorting: 'desc')
+User.find_by_login('{Username}').pref.update(comments_sorting: 'desc')
 ```
 
 **確認方法:**
@@ -266,7 +245,7 @@ User.find_by_login('admin').pref.update(comments_sorting: 'desc')
 
 **事前設定:**
 ```ruby
-User.find_by_login('admin').pref.update(comments_sorting: 'asc')
+User.find_by_login('{Username}').pref.update(comments_sorting: 'asc')
 ```
 
 **確認方法:**

@@ -4,12 +4,6 @@
 
 Subtask List Accordion 機能のテスト仕様。チケットのサブタスク一覧にアコーディオン機能を追加する。
 
-## 環境パラメータ
-
-パスから自動判定:
-- `redmine_5.1.11` → コンテナ名: `redmine_5.1.11`, ポート: `3051`
-- `redmine_6.1.1` → コンテナ名: `redmine_6.1.1`, ポート: `3061`
-
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -135,7 +129,7 @@ puts "subtask_list_accordion_collapsed_tracker_ids: #{defaults['subtask_list_acc
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
 $response.Content -match "accordion_control"
 ```
 
@@ -145,7 +139,7 @@ $response.Content -match "accordion_control"
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
 $response.Content -match "subtask_list_accordion\.js"
 ```
 
@@ -157,7 +151,7 @@ $response.Content -match "subtask_list_accordion\.js"
 ```powershell
 $session = # ログインセッション取得
 # Note: back_url パラメータで /issues/{ID} パターンを渡す必要がある（チケット画面判定に使用）
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/context_menu?ids[]={ID}&back_url=/issues/{ID}" -WebSession $session -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/context_menu?ids[]={ID}&back_url=/issues/{ID}" -WebSession $session -UseBasicParsing
 $response.Content -match "selectedTreeOpen"
 ```
 
@@ -168,7 +162,7 @@ $response.Content -match "selectedTreeOpen"
 **確認方法:**
 ```powershell
 $session = # admin でログインセッション取得
-$response = Invoke-WebRequest -Uri "http://localhost:3051/settings/plugin/redmine_studio_plugin" -WebSession $session -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/settings/plugin/redmine_studio_plugin" -WebSession $session -UseBasicParsing
 $response.StatusCode
 ```
 
@@ -179,7 +173,7 @@ $response.StatusCode
 **確認方法:**
 ```powershell
 $session = # admin でログインセッション取得
-$response = Invoke-WebRequest -Uri "http://localhost:3051/settings/plugin/redmine_studio_plugin" -WebSession $session -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/settings/plugin/redmine_studio_plugin" -WebSession $session -UseBasicParsing
 $html = $response.Content
 # サーバースクリプトモード設定
 $html -match "subtask_list_accordion_enable_server_scripting_mode"
@@ -196,7 +190,7 @@ $html -match "subtask_list_accordion_collapsed_tracker_ids"
 **確認方法:**
 ```powershell
 $session = # admin でログインセッション取得
-$response = Invoke-WebRequest -Uri "http://localhost:3051/my/account" -WebSession $session -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/my/account" -WebSession $session -UseBasicParsing
 $response.Content -match "subtasks_default_expand_limit_upper"
 ```
 
@@ -220,7 +214,7 @@ Setting.plugin_redmine_studio_plugin = settings
 ```
 
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
 # すべての子チケットが expand クラスを持つことを確認
 $response.Content -match "issue-{子チケットID}.*expand"
 ```
@@ -250,7 +244,7 @@ target_tracker_id = Tracker.first.id
 
 ```powershell
 # 親チケットを表示し、対象トラッカーの子チケットに collapse クラスが付与されていることを確認
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
 # 対象トラッカーの子チケット行に "collapse" クラスがあることを確認
 $response.Content -match "issue-{子チケットID}.*collapse"
 ```
@@ -279,7 +273,7 @@ Setting.plugin_redmine_studio_plugin = settings
 ```
 
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
 # 対象トラッカーの子チケット行に "collapse" クラスがあることを確認
 $response.Content -match "issue-{子チケットID_tracker1}.*collapse"
 $response.Content -match "issue-{子チケットID_tracker2}.*collapse"
@@ -316,7 +310,7 @@ Setting.plugin_redmine_studio_plugin = settings
 ```
 
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
 # すべての子チケットが expand クラスを持つことを確認
 $response.Content -match "issue-{子チケットID}.*expand"
 ```
@@ -344,7 +338,7 @@ User.current.pref.save
 ```
 
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -WebSession $session -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
 # 子チケットが expand クラスを持つことを確認
 $response.Content -match "issue-{子チケットID}.*expand"
 ```
@@ -367,7 +361,7 @@ User.current.pref.save
 ```
 
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -WebSession $session -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
 # 子チケットが collapse クラスを持つことを確認
 $response.Content -match "issue-{子チケットID}.*collapse"
 ```
@@ -395,7 +389,7 @@ User.current.pref.save
 ```
 
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -WebSession $session -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
 # 子チケットが collapse クラスを持つことを確認（上限0なので常に折りたたみ）
 $response.Content -match "issue-{子チケットID}.*collapse"
 ```
@@ -427,7 +421,7 @@ Setting.plugin_redmine_studio_plugin = settings
 ```
 
 ```powershell
-$response = Invoke-WebRequest -Uri "http://localhost:3051/issues/{親チケットID}" -UseBasicParsing
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
 # クライアントモードの JS が読み込まれることを確認
 $response.Content -match "subtask_list_accordion_client\.js"
 ```

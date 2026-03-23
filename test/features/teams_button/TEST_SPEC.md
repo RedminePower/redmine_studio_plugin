@@ -4,12 +4,6 @@
 
 redmine_studio_plugin の Teams Button 機能のテスト仕様。チケット画面のユーザー名に Teams ボタンを追加し、クリックで Teams チャットを起動する機能。
 
-## 環境パラメータ
-
-パスから自動判定:
-- `redmine_5.1.11` → コンテナ名: `redmine_5.1.11`, ポート: `3051`
-- `redmine_6.1.1` → コンテナ名: `redmine_6.1.1`, ポート: `3061`
-
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -169,12 +163,12 @@ puts hooks.any? { |h| h.is_a?(RedmineStudioPlugin::TeamsButton::Hooks) }
 
 **確認方法:**
 ```powershell
-$BaseUrl = "http://localhost:{Port}"
+$BaseUrl = "{BaseUrl}"
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $loginPage = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable session -UseBasicParsing
 $csrfMatch = [regex]::Match($loginPage.Content, 'name="authenticity_token" value="([^"]+)"')
 $csrfToken = $csrfMatch.Groups[1].Value
-$body = "authenticity_token=$([System.Web.HttpUtility]::UrlEncode($csrfToken))&username=admin&password=password123"
+$body = "authenticity_token=$([System.Web.HttpUtility]::UrlEncode($csrfToken))&username={Username}&password={Password}"
 Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded"
 $response = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/1" -WebSession $session
 $response.email

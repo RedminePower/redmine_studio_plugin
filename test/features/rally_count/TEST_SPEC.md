@@ -4,12 +4,6 @@
 
 チケット一覧に「ラリー回数」カラムを追加する機能のテスト仕様。担当者の切り替え回数を表示し、ツールチップで担当者の変更履歴を確認できる。
 
-## 環境パラメータ
-
-パスから自動判定:
-- `redmine_5.1.11` → コンテナ名: `redmine_5.1.11`, ポート: `3051`
-- `redmine_6.1.1` → コンテナ名: `redmine_6.1.1`, ポート: `3061`
-
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -336,8 +330,8 @@ puts "contains_no_assignee: #{tooltip.include?(no_assignee)}"
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
@@ -348,8 +342,8 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'rally_count'
 ```
@@ -363,8 +357,8 @@ $response.Content -match 'rally_count'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:desc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:desc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'class="rally-count"'
 ```
@@ -385,8 +379,8 @@ $response.Content -match 'title=.*class="rally-count"'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:desc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:desc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
@@ -397,8 +391,8 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:asc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:asc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
@@ -412,8 +406,8 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:{ポート}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_RALLY_ID}' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_RALLY_ID}' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'rally-count.*title=.*>0<'
 ```
