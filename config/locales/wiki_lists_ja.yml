@@ -1,2 +1,3 @@
 ja:
   ref_issues_display_limit_reached: "※ 表示件数が上限(%{limit}件)に達しました。全 %{total} 件。-n=件数 で上限を変更できます。"
+  ref_issues_recursion_skipped: "再帰的な展開を検出したため、ref_issues の展開をスキップしました"

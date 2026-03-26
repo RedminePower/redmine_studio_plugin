@@ -6,6 +6,13 @@ module RedmineStudioPlugin
       Redmine::WikiFormatting::Macros.register do
         desc 'Displays a list of referer issues.'
         macro :ref_issues do |obj, args|
+          # 再帰防止: ref_issues マクロの展開中に再度呼ばれた場合はスキップ
+          if (Thread.current[:ref_issues_depth] || 0) > 0
+            return "<i style=\"color: gray;\">(#{I18n.t('ref_issues_recursion_skipped')})</i>".html_safe
+          end
+
+          incremented = true
+          Thread.current[:ref_issues_depth] = (Thread.current[:ref_issues_depth] || 0) + 1
           parser = nil
 
           begin
@@ -235,6 +242,10 @@ TEXT
               end
             end
             raise msg.html_safe
+          end
+        ensure
+          if incremented
+            Thread.current[:ref_issues_depth] = [(Thread.current[:ref_issues_depth] || 0) - 1, 0].max
           end
         end
       end
