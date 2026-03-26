@@ -48,6 +48,7 @@ Redmine の環境情報を取得。
     "mailer_queue": "ActiveJob::QueueAdapters::AsyncAdapter",
     "mailer_delivery": "smtp",
     "redmine_theme": "Default",
+    "text_formatting": "common_mark",
     "scm": [
       {
         "name": "Git",
@@ -82,6 +83,7 @@ Redmine の環境情報を取得。
 | `mailer_queue` | string | メールキューアダプタのクラス名 |
 | `mailer_delivery` | string | メール配信方法（smtp, sendmail など） |
 | `redmine_theme` | string | UI テーマ（未設定時は "Default"） |
+| `text_formatting` | string | テキスト書式（textile, common_mark など） |
 | `scm` | array | インストール済み SCM の一覧 |
 | `plugins` | array | インストール済みプラグインの一覧 |
 

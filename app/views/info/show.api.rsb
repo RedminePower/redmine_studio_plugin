@@ -7,6 +7,7 @@ api.info do
   api.mailer_queue @info[:mailer_queue]
   api.mailer_delivery @info[:mailer_delivery]
   api.redmine_theme @info[:redmine_theme]
+  api.text_formatting @info[:text_formatting]
 
   api.array :scm do
     @info[:scm].each do |scm|

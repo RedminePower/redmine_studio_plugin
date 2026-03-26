@@ -23,6 +23,7 @@ class InfoController < ApplicationController
       mailer_queue: ActionMailer::MailDeliveryJob.queue_adapter.class.name,
       mailer_delivery: ActionMailer::Base.delivery_method.to_s,
       redmine_theme: Setting.ui_theme.presence || 'Default',
+      text_formatting: Setting.text_formatting,
       scm: gather_scm_info,
       plugins: gather_plugins_info
     }

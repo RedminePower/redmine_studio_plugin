@@ -48,6 +48,7 @@ Response:
     "mailer_queue": "ActiveJob::QueueAdapters::AsyncAdapter",
     "mailer_delivery": "smtp",
     "redmine_theme": "Default",
+    "text_formatting": "common_mark",
     "scm": [
       {
         "name": "Git",
@@ -82,6 +83,7 @@ Response:
 | `mailer_queue` | string | Mail queue adapter class name |
 | `mailer_delivery` | string | Mail delivery method (smtp, sendmail, etc.) |
 | `redmine_theme` | string | UI theme ("Default" if not set) |
+| `text_formatting` | string | Text formatting (textile, common_mark, etc.) |
 | `scm` | array | List of installed SCMs |
 | `plugins` | array | List of installed plugins |
 

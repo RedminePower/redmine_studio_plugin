@@ -36,6 +36,7 @@ API は JSON と XML の両方をサポートする。
     "mailer_queue": "ActiveJob::QueueAdapters::AsyncAdapter",
     "mailer_delivery": "smtp",
     "redmine_theme": "Default",
+    "text_formatting": "common_mark",
     "scm": [
       { "name": "Git", "version": "2.47.3" }
     ],
@@ -58,6 +59,7 @@ API は JSON と XML の両方をサポートする。
 | mailer_queue | string | メールキューアダプタのクラス名 |
 | mailer_delivery | string | メール配信方法 |
 | redmine_theme | string | UI テーマ（未設定時は "Default"） |
+| text_formatting | string | テキスト書式（textile, common_mark など） |
 | scm | array | インストール済み SCM の一覧（バージョン取得可能なもののみ） |
 | plugins | array | インストール済みプラグインの一覧 |
 
@@ -118,7 +120,7 @@ controller = InfoController.new
 info = controller.send(:gather_info)
 expected_keys = [:redmine_version, :ruby_version, :rails_version, :environment,
                  :database_adapter, :mailer_queue, :mailer_delivery, :redmine_theme,
-                 :scm, :plugins]
+                 :text_formatting, :scm, :plugins]
 missing = expected_keys - info.keys
 puts missing.empty? ? 'PASS' : "FAIL: Missing keys: #{missing.join(', ')}"
 ```
@@ -341,7 +343,20 @@ $response.info.redmine_theme
 
 ---
 
-### [2-12] scm が配列として含まれる
+### [2-12] text_formatting が含まれる
+
+**確認方法:**
+```powershell
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response.info.text_formatting
+```
+
+**期待結果:**
+- `text_formatting` が空でない文字列（textile, common_mark など）
+
+---
+
+### [2-13] scm が配列として含まれる
 
 **確認方法:**
 ```powershell
@@ -354,7 +369,7 @@ $response.info.scm -is [array]
 
 ---
 
-### [2-13] scm の各要素に name と version が含まれる
+### [2-14] scm の各要素に name と version が含まれる
 
 **確認方法:**
 ```powershell
@@ -367,7 +382,7 @@ $response.info.scm | ForEach-Object { $_.name; $_.version }
 
 ---
 
-### [2-14] plugins が配列として含まれる
+### [2-15] plugins が配列として含まれる
 
 **確認方法:**
 ```powershell
@@ -380,7 +395,7 @@ $response.info.plugins -is [array]
 
 ---
 
-### [2-15] plugins の各要素に id と version が含まれる
+### [2-16] plugins の各要素に id と version が含まれる
 
 **確認方法:**
 ```powershell
@@ -393,7 +408,7 @@ $response.info.plugins | ForEach-Object { $_.id; $_.version }
 
 ---
 
-### [2-16] XML レスポンスに info タグが含まれる
+### [2-17] XML レスポンスに info タグが含まれる
 
 **確認方法:**
 ```powershell
@@ -406,7 +421,7 @@ $response.Content -match '<info>'
 
 ---
 
-### [2-17] XML レスポンスに scm 配列が含まれる
+### [2-18] XML レスポンスに scm 配列が含まれる
 
 **確認方法:**
 ```powershell
@@ -419,7 +434,7 @@ $response.Content -match '<scm type="array">'
 
 ---
 
-### [2-18] XML レスポンスに plugins 配列が含まれる
+### [2-19] XML レスポンスに plugins 配列が含まれる
 
 **確認方法:**
 ```powershell
