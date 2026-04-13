@@ -6,6 +6,9 @@ Rails.application.routes.draw do
   # Info
   get 'info', to: 'info#show'
 
+  # Activity Info
+  get 'activity_infos', to: 'activity_infos#index'
+
   # Teams Button
   get 'teams_button/user_email/:id', to: 'teams_button#user_email'
 

@@ -17,6 +17,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 - **Info API** - API to retrieve Redmine environment information (used internally by Redmine Studio)
 - **Studio Settings API** - API to manage general settings (used internally by Redmine Studio)
+- **Activity Info API** - API to retrieve activity history (used internally by Redmine Studio)
 
 ## Supported Redmine
 
@@ -165,6 +166,12 @@ For details, see [docs/info_api-en.md](docs/info_api-en.md).
 API to manage general settings. Used internally by Redmine Studio.
 
 For details, see [docs/studio_settings_api-en.md](docs/studio_settings_api-en.md).
+
+## Activity Info API
+
+API to retrieve activity history. Used internally by Redmine Studio.
+
+For details, see [docs/activity_info_api-en.md](docs/activity_info_api-en.md).
 
 ## Uninstall
 
