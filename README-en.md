@@ -59,6 +59,28 @@ bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 
 Restart Redmine to apply the changes.
 
+## Update
+
+### 1. Get the latest version
+
+```bash
+cd /var/lib/redmine/plugins/redmine_studio_plugin
+git pull
+```
+
+### 2. Update
+
+Already-applied steps are skipped, so you can use the same command as for a fresh install.
+
+```bash
+cd /var/lib/redmine
+bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
+```
+
+### 3. Restart Redmine
+
+Restart Redmine to apply the changes.
+
 ## Reply Button
 
 A feature that adds a "Reply" button to issues.

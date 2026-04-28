@@ -60,6 +60,29 @@ bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 
 Redmine を再起動して変更を反映してください。
 
+## アップデート
+
+### 1. 最新版の取得
+
+```bash
+cd /var/lib/redmine/plugins/redmine_studio_plugin
+git pull
+```
+
+### 2. アップデート
+
+既に適用済みの処理はスキップされるため、
+新規インストールと同じコマンドでアップデートできます。
+
+```bash
+cd /var/lib/redmine
+bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
+```
+
+### 3. Redmine の再起動
+
+Redmine を再起動して変更を反映してください。
+
 ## Reply Button
 
 チケットに「返答」ボタンを追加する機能です。
