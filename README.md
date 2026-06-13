@@ -14,6 +14,7 @@
 - **Subtask List Accordion** - 子チケット一覧にアコーディオン機能を追加
 - **Journals List** - チケット一覧にコメント履歴を表示
 - **Rally Count** - チケット一覧に担当者の切り替え回数（ラリー回数）を表示
+- **Children Count** - チケット一覧に直下の子チケット数を表示
 - **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
 - **Info API** - Redmine 環境情報を取得する API（Redmine Studio が内部で使用）
 - **Studio Settings API** - 汎用設定を管理する API（Redmine Studio が内部で使用）
@@ -172,6 +173,16 @@ Redmine の子チケット一覧は、階層が深くなると全体を把握し
 - カーソルを合わせると担当者の変更履歴をツールチップで表示
 
 詳細は [docs/rally_count.md](docs/rally_count.md) をご覧ください。
+
+## Children Count
+
+チケット一覧に「子チケット数」（直下の子チケット数）を表示する機能です。レビュー指摘やサブタスクの多いチケットを一覧で素早く把握できます。
+
+- 子チケット数でソート可能
+- カウントをクリックすると、当該チケットを親に持つチケット一覧画面に遷移
+- カーソルを合わせると子チケットの ID と件名をツールチップで表示
+
+詳細は [docs/children_count.md](docs/children_count.md) をご覧ください。
 
 ## Plugin API
 

@@ -113,6 +113,11 @@ else
   require_relative 'lib/redmine_studio_plugin/rally_count/issue_query_patch'
   require_relative 'lib/redmine_studio_plugin/rally_count/queries_helper_patch'
 
+  # Load Children Count
+  require_relative 'lib/redmine_studio_plugin/children_count/issue_patch'
+  require_relative 'lib/redmine_studio_plugin/children_count/issue_query_patch'
+  require_relative 'lib/redmine_studio_plugin/children_count/queries_helper_patch'
+
   # Apply patches directly (init.rb is already executed inside to_prepare)
   Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
   Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
@@ -131,10 +136,18 @@ else
   IssueQuery.prepend RedmineStudioPlugin::RallyCount::IssueQueryPatch
   QueriesHelper.include RedmineStudioPlugin::RallyCount::QueriesHelperPatch
 
+  # Children Count patches
+  Issue.include RedmineStudioPlugin::ChildrenCount::IssuePatch
+  IssueQuery.prepend RedmineStudioPlugin::ChildrenCount::IssueQueryPatch
+  QueriesHelper.include RedmineStudioPlugin::ChildrenCount::QueriesHelperPatch
+
   # Register columns (QueryColumn が利用可能になった後にロード)
   require_relative 'lib/redmine_studio_plugin/journals_list/query_column'
   IssueQuery.add_available_column(RedmineStudioPlugin::JournalsList::QueryColumn.new)
 
   require_relative 'lib/redmine_studio_plugin/rally_count/query_column'
   IssueQuery.add_available_column(RedmineStudioPlugin::RallyCount::QueryColumn.new)
+
+  require_relative 'lib/redmine_studio_plugin/children_count/query_column'
+  IssueQuery.add_available_column(RedmineStudioPlugin::ChildrenCount::QueryColumn.new)
 end

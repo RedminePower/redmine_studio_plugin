@@ -14,6 +14,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Subtask List Accordion** - Adds accordion functionality to the subtask list
 - **Journals List** - Displays comment history with status and assignee in the issue list
 - **Rally Count** - Displays assignee change count (rally count) in the issue list
+- **Children Count** - Displays the number of direct child issues in the issue list
 - **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
 - **Info API** - API to retrieve Redmine environment information (used internally by Redmine Studio)
 - **Studio Settings API** - API to manage general settings (used internally by Redmine Studio)
@@ -170,6 +171,16 @@ Displays the number of times an issue's assignee has been changed as "Rally Coun
 - Hover over the rally count to see the assignee change history in a tooltip
 
 For details, see [docs/rally_count-en.md](docs/rally_count-en.md).
+
+## Children Count
+
+Displays the number of direct child issues in the issue list. Useful for quickly identifying issues with many review comments or subtasks.
+
+- Sortable by children count
+- Click the count to navigate to a list of child issues
+- Hover over the count to see child issue IDs and subjects in a tooltip
+
+For details, see [docs/children_count-en.md](docs/children_count-en.md).
 
 ## Plugin API
 

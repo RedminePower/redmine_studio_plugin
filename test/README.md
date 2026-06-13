@@ -19,6 +19,7 @@
 | `features/studio_settings_api/TEST_SPEC.md` | Studio Settings API テスト |
 | `features/journals_list/TEST_SPEC.md` | Journals List（コメント履歴）テスト |
 | `features/rally_count/TEST_SPEC.md` | Rally Count（ラリー回数）テスト |
+| `features/children_count/TEST_SPEC.md` | Children Count（子チケット数）テスト |
 
 ## テストの種類
 
@@ -120,3 +121,4 @@ Claude に以下のように依頼してください:
 - `studio_settings_api のテストを実行してください`
 - `journals_list のテストを実行してください`
 - `rally_count のテストを実行してください`
+- `children_count のテストを実行してください`
