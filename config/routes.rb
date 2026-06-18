@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 Rails.application.routes.draw do
+  # Plugins
   resources :plugins, :only => [:index, :show]
 
   # Info
@@ -36,4 +37,7 @@ Rails.application.routes.draw do
 
   # User's Studio Settings
   get 'users/:id/studio_settings', to: 'user_studio_settings#index', as: 'user_studio_settings'
+
+  # Wiki Preview
+  post 'wiki_preview', to: 'wiki_previews#create'
 end

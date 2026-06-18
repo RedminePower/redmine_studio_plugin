@@ -15,10 +15,12 @@
 - **Journals List** - チケット一覧にコメント履歴を表示
 - **Rally Count** - チケット一覧に担当者の切り替え回数（ラリー回数）を表示
 - **Children Count** - チケット一覧に直下の子チケット数を表示
-- **Plugin API** - プラグイン情報を取得する API（Redmine Studio が内部で使用）
-- **Info API** - Redmine 環境情報を取得する API（Redmine Studio が内部で使用）
-- **Studio Settings API** - 汎用設定を管理する API（Redmine Studio が内部で使用）
-- **Activity Info API** - 活動履歴を取得する API（Redmine Studio が内部で使用）
+- **API** - Redmine Studio が内部で使用する API 群
+  - **Plugin API** - プラグイン情報を取得
+  - **Info API** - Redmine 環境情報を取得
+  - **Studio Settings API** - 汎用設定を管理
+  - **Activity Info API** - 活動履歴を取得
+  - **Wiki Preview API** - Wiki テキストを HTML に変換
 
 ## 対応 Redmine
 
@@ -184,29 +186,17 @@ Redmine の子チケット一覧は、階層が深くなると全体を把握し
 
 詳細は [docs/children_count.md](docs/children_count.md) をご覧ください。
 
-## Plugin API
+## API
 
-プラグイン情報を取得する API です。Redmine Studio が内部で使用します。
+Redmine Studio が内部で使用する API 群です。各 API の詳細はリンク先を参照してください。
 
-詳細は [docs/plugin_api.md](docs/plugin_api.md) をご覧ください。
-
-## Info API
-
-Redmine の環境情報を取得する API です。Redmine Studio が内部で使用します。
-
-詳細は [docs/info_api.md](docs/info_api.md) をご覧ください。
-
-## Studio Settings API
-
-汎用設定を管理する API です。Redmine Studio が内部で使用します。
-
-詳細は [docs/studio_settings_api.md](docs/studio_settings_api.md) をご覧ください。
-
-## Activity Info API
-
-活動履歴を取得する API です。Redmine Studio が内部で使用します。
-
-詳細は [docs/activity_info_api.md](docs/activity_info_api.md) をご覧ください。
+| API | 説明 | 詳細 |
+|-----|------|------|
+| Plugin API | プラグイン情報を取得 | [docs/plugin_api.md](docs/plugin_api.md) |
+| Info API | Redmine 環境情報を取得 | [docs/info_api.md](docs/info_api.md) |
+| Studio Settings API | 汎用設定を管理 | [docs/studio_settings_api.md](docs/studio_settings_api.md) |
+| Activity Info API | 活動履歴を取得 | [docs/activity_info_api.md](docs/activity_info_api.md) |
+| Wiki Preview API | Wiki テキストを HTML に変換 | [docs/wiki_preview_api.md](docs/wiki_preview_api.md) |
 
 ## アンインストール
 

@@ -15,10 +15,12 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Journals List** - Displays comment history with status and assignee in the issue list
 - **Rally Count** - Displays assignee change count (rally count) in the issue list
 - **Children Count** - Displays the number of direct child issues in the issue list
-- **Plugin API** - API to retrieve plugin information (used internally by Redmine Studio)
-- **Info API** - API to retrieve Redmine environment information (used internally by Redmine Studio)
-- **Studio Settings API** - API to manage general settings (used internally by Redmine Studio)
-- **Activity Info API** - API to retrieve activity history (used internally by Redmine Studio)
+- **API** - APIs used internally by Redmine Studio
+  - **Plugin API** - Retrieves plugin information
+  - **Info API** - Retrieves Redmine environment information
+  - **Studio Settings API** - Manages general settings
+  - **Activity Info API** - Retrieves activity history
+  - **Wiki Preview API** - Converts Wiki text to HTML
 
 ## Supported Redmine
 
@@ -182,29 +184,17 @@ Displays the number of direct child issues in the issue list. Useful for quickly
 
 For details, see [docs/children_count-en.md](docs/children_count-en.md).
 
-## Plugin API
+## API
 
-API to retrieve plugin information. Used internally by Redmine Studio.
+APIs used internally by Redmine Studio. See the linked documents for details.
 
-For details, see [docs/plugin_api-en.md](docs/plugin_api-en.md).
-
-## Info API
-
-API to retrieve Redmine environment information. Used internally by Redmine Studio.
-
-For details, see [docs/info_api-en.md](docs/info_api-en.md).
-
-## Studio Settings API
-
-API to manage general settings. Used internally by Redmine Studio.
-
-For details, see [docs/studio_settings_api-en.md](docs/studio_settings_api-en.md).
-
-## Activity Info API
-
-API to retrieve activity history. Used internally by Redmine Studio.
-
-For details, see [docs/activity_info_api-en.md](docs/activity_info_api-en.md).
+| API | Description | Details |
+|-----|-------------|---------|
+| Plugin API | Retrieves plugin information | [docs/plugin_api-en.md](docs/plugin_api-en.md) |
+| Info API | Retrieves Redmine environment information | [docs/info_api-en.md](docs/info_api-en.md) |
+| Studio Settings API | Manages general settings | [docs/studio_settings_api-en.md](docs/studio_settings_api-en.md) |
+| Activity Info API | Retrieves activity history | [docs/activity_info_api-en.md](docs/activity_info_api-en.md) |
+| Wiki Preview API | Converts Wiki text to HTML | [docs/wiki_preview_api-en.md](docs/wiki_preview_api-en.md) |
 
 ## Uninstall
 

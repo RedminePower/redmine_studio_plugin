@@ -1,0 +1,3 @@
+api.wiki_preview do
+  api.html @html
+end
