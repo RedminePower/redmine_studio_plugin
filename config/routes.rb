@@ -10,6 +10,9 @@ Rails.application.routes.draw do
   # Activity Info
   get 'activity_infos', to: 'activity_infos#index'
 
+  # Cache Bundle
+  get 'cache_bundle', to: 'cache_bundles#show'
+
   # Teams Button
   get 'teams_button/user_email/:id', to: 'teams_button#user_email'
 

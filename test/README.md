@@ -21,6 +21,7 @@
 | `features/rally_count/TEST_SPEC.md` | Rally Count（ラリー回数）テスト |
 | `features/children_count/TEST_SPEC.md` | Children Count（子チケット数）テスト |
 | `features/wiki_preview_api/TEST_SPEC.md` | Wiki Preview API（Wiki テキスト→HTML 変換）テスト |
+| `features/cache_bundle/TEST_SPEC.md` | Cache Bundle API（キャッシュ一括取得）テスト |
 
 ## テストの種類
 
@@ -124,3 +125,4 @@ Claude に以下のように依頼してください:
 - `rally_count のテストを実行してください`
 - `children_count のテストを実行してください`
 - `wiki_preview_api のテストを実行してください`
+- `cache_bundle のテストを実行してください`

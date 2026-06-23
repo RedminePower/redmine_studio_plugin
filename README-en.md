@@ -20,6 +20,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
   - **Info API** - Retrieves Redmine environment information
   - **Studio Settings API** - Manages general settings
   - **Activity Info API** - Retrieves activity history
+  - **Cache Bundle API** - Bundled retrieval that completes the Redmine Studio cache update in a single request
   - **Wiki Preview API** - Converts Wiki text to HTML
 
 ## Supported Redmine
@@ -194,6 +195,7 @@ APIs used internally by Redmine Studio. See the linked documents for details.
 | Info API | Retrieves Redmine environment information | [docs/info_api-en.md](docs/info_api-en.md) |
 | Studio Settings API | Manages general settings | [docs/studio_settings_api-en.md](docs/studio_settings_api-en.md) |
 | Activity Info API | Retrieves activity history | [docs/activity_info_api-en.md](docs/activity_info_api-en.md) |
+| Cache Bundle API | Retrieves a cache bundle | [docs/cache_bundle_api-en.md](docs/cache_bundle_api-en.md) |
 | Wiki Preview API | Converts Wiki text to HTML | [docs/wiki_preview_api-en.md](docs/wiki_preview_api-en.md) |
 
 ## Uninstall
