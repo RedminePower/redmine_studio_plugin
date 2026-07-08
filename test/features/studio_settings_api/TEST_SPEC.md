@@ -1002,7 +1002,7 @@ $response.StatusCode
 
 **期待結果:**
 - ステータスコード 422
-- errors に "Name can't be blank" を含む
+- errors に "Name" で始まるメッセージを含む（メッセージ本文はロケールにより異なるため属性名のみ確認）
 
 #### [2-2-4] 設定作成（バリデーションエラー: scope_type なし）
 
@@ -1022,7 +1022,7 @@ $response.StatusCode
 
 **期待結果:**
 - ステータスコード 422
-- errors に "Scope type can't be blank" を含む
+- errors に "Scope type" で始まるメッセージを含む（メッセージ本文はロケールにより異なるため属性名のみ確認）
 
 #### [2-2-4b] 設定作成（バリデーションエラー: schema_type なし）
 
@@ -1043,7 +1043,7 @@ $response.StatusCode
 
 **期待結果:**
 - ステータスコード 422
-- errors に "Schema type can't be blank" を含む
+- errors に "Schema type" で始まるメッセージを含む（メッセージ本文はロケールにより異なるため属性名のみ確認）
 
 #### [2-2-5] 設定取得（GET 単体）
 
@@ -2087,7 +2087,7 @@ $histories.studio_setting_histories[0].comment
 **期待結果:**
 - 最新履歴の `comment` が `Restore to v2`
 
-#### [2-9-4] 現在のバージョンに復元 → 400 エラー
+#### [2-9-4] 現在のバージョンに復元 → 422 エラー
 
 **確認方法:**
 ```powershell
@@ -2102,7 +2102,7 @@ $response.StatusCode
 ```
 
 **期待結果:**
-- ステータスコード 400
+- ステータスコード 422（Redmine 標準の `render_api_errors` を使用しているため。docs の記載とも一致）
 - errors に "Cannot restore to the current version" を含む
 
 #### [2-9-5] 存在しないバージョンに復元 → 404
@@ -2196,7 +2196,11 @@ $latestHistory.restored_from_version
 - 最新履歴の `change_type` が `undelete`
 - `restored_from_version` が 1
 
-#### [2-10-4] 更新による undelete（change_type = undelete）
+#### [2-10-4] 論理削除された設定の更新（deleted_on は更新 API で変更不可）
+
+`deleted_on` は Strong Parameters（`studio_setting_params`）で受け付けないため、更新 API 経由での復活（undelete）はできない。
+復活は restore API（[2-10-3]）で行う。
+（補足: コントローラの update には undelete 判定が存在するが、deleted_on を permit していないため API からは到達しない。更新 API 経由の undelete を仕様とするかは要判断）
 
 **確認方法:**
 ```powershell
@@ -2215,7 +2219,7 @@ $undeleteTestId = $setting.studio_setting.id
 # 論理削除
 Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$undeleteTestId.json?key=$ApiKey" -Method DELETE
 
-# 更新で復活（deleted_on を null に）
+# deleted_on = null を指定して更新（無視されることを確認する）
 $body2 = @{
     studio_setting = @{
         deleted_on = $null
@@ -2224,16 +2228,17 @@ $body2 = @{
 } | ConvertTo-Json -Depth 3
 Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$undeleteTestId.json?key=$ApiKey" -Method PUT -Body $body2 -ContentType "application/json"
 
-# 履歴を確認
+# 設定と履歴を確認
+$updated = Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$undeleteTestId.json?key=$ApiKey" -Method GET
+$updated.studio_setting.deleted_on  # null にならない（論理削除されたまま）
 $histories = Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$undeleteTestId/histories.json?key=$ApiKey" -Method GET
 $latestHistory = $histories.studio_setting_histories[0]
 $latestHistory.change_type
-$latestHistory.restored_from_version  # null（restore ではないので）
 ```
 
 **期待結果:**
-- 最新履歴の `change_type` が `undelete`
-- `restored_from_version` が null（update API 経由の復活なので）
+- `deleted_on` は null にならない（論理削除されたまま。deleted_on は更新 API で変更できない）
+- 最新履歴の `change_type` が `update`（undelete にはならない）
 
 ---
 
@@ -2260,7 +2265,7 @@ $after.total_count
 - ステータスコード 204
 - 履歴件数が 1件減少
 
-#### [2-11-2] 現在バージョンの履歴削除 → 400 エラー
+#### [2-11-2] 現在バージョンの履歴削除 → 422 エラー
 
 **確認方法:**
 ```powershell
@@ -2275,7 +2280,7 @@ $response.StatusCode
 ```
 
 **期待結果:**
-- ステータスコード 400
+- ステータスコード 422（Redmine 標準の `render_api_errors` を使用しているため。docs の記載とも一致）
 - errors に "Cannot delete the current version" を含む
 
 #### [2-11-3] 存在しないバージョンの履歴削除 → 404
