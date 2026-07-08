@@ -2199,8 +2199,7 @@ $latestHistory.restored_from_version
 #### [2-10-4] 論理削除された設定の更新（deleted_on は更新 API で変更不可）
 
 `deleted_on` は Strong Parameters（`studio_setting_params`）で受け付けないため、更新 API 経由での復活（undelete）はできない。
-復活は restore API（[2-10-3]）で行う。
-（補足: コントローラの update には undelete 判定が存在するが、deleted_on を permit していないため API からは到達しない。更新 API 経由の undelete を仕様とするかは要判断）
+復活（undelete）は restore API に一本化されている（[2-10-3]。論理削除は payload を変更しないため、削除直前のバージョンに restore すれば内容そのままで復活できる）。
 
 **確認方法:**
 ```powershell
