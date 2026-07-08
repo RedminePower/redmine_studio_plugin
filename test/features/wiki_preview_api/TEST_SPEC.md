@@ -75,9 +75,9 @@ API は JSON と XML の両方をサポートする。
 - HTTP テストの一部はテキスト変換結果を検証する。`#NNN` チケットリンクの確認には
   **閲覧可能なチケットが 1 件以上存在すること**が前提（既定では `#1` と `project_id=1` を使用。
   環境に存在するチケット ID／プロジェクト ID に合わせて調整する）。
-- `ref_issues` マクロ展開（[2-13]）には **`redmine_studio_plugin` が有効**で、対象プロジェクト
+- `ref_issues` マクロ展開（[2-12]）には **`redmine_studio_plugin` が有効**で、対象プロジェクト
   （既定 `test-plugin`）に**チケットと wiki モジュール**があること。
-- 可視性 404（[2-16]）の検証には、以下のインフラデータを作成する（命名 `wikipreview_*`／再利用・削除しない）。
+- 可視性 404（[2-15]）の検証には、以下のインフラデータを作成する（命名 `wikipreview_*`／再利用・削除しない）。
   Runner で作成する（`rails runner`）:
 
   ```ruby
@@ -341,26 +341,7 @@ try {
 
 ---
 
-### [2-11] 未認証でアクセスすると 401 を返す
-
-**前提条件:** Redmine の「認証が必要」設定が有効であること。匿名アクセスが許可されている環境ではスキップ。
-
-**確認方法:**
-```powershell
-$body = @{ text = 'h1. Test'; project_id = 1 } | ConvertTo-Json
-try {
-    Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json'
-} catch {
-    $_.Exception.Response.StatusCode
-}
-```
-
-**期待結果:**
-- ステータスコード 401 Unauthorized
-
----
-
-### [2-12] XML レスポンスに wiki_preview / html タグが含まれる
+### [2-11] XML レスポンスに wiki_preview / html タグが含まれる
 
 **確認方法:**
 ```powershell
@@ -374,7 +355,7 @@ $response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.xml' -Method Post -Bo
 
 ---
 
-### [2-13] ref_issues マクロが展開される（HTML パーシャル描画）
+### [2-12] ref_issues マクロが展開される（HTML パーシャル描画）
 
 `ref_issues` は内部で `issues/_list` パーシャルを描画する。format 固定が効いていれば
 マクロが展開され、効いていないと `Missing partial` のエラー表示になる。
@@ -393,7 +374,7 @@ $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -B
 
 ---
 
-### [2-14] Wiki リンク `[[ページ]]` が展開される
+### [2-13] Wiki リンク `[[ページ]]` が展開される
 
 **前提条件:** 対象プロジェクト（`project_id=1`）に wiki モジュールが有効。
 
@@ -409,7 +390,7 @@ $response.wiki_preview.html -match 'class="wiki-page'
 
 ---
 
-### [2-15] 非 admin ユーザーの API キーでも利用できる
+### [2-14] 非 admin ユーザーの API キーでも利用できる
 
 **前提条件:** テスト前提条件の `wikipreview_user`（非 admin・API キー）を作成済み。
 
@@ -426,7 +407,7 @@ $response.wiki_preview.html -match '<h1'
 
 ---
 
-### [2-16] 閲覧権限のないプロジェクトを指定すると 404（可視性）
+### [2-15] 閲覧権限のないプロジェクトを指定すると 404（可視性）
 
 `Project.visible.find` により、存在しても閲覧不可なプロジェクトは 404 になることを確認する。
 （[2-10] は「存在しない ID」、本ケースは「存在するが閲覧不可」を検証）

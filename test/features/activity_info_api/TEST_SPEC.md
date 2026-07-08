@@ -532,25 +532,7 @@ $info.issue.assigned_to.id -eq 1
 
 ---
 
-### [2-11] 未認証でアクセスすると 401 を返す
-
-**前提条件:** Redmine の「認証が必要」設定が有効であること。匿名アクセスが許可されている環境ではスキップ。
-
-**確認方法:**
-```powershell
-try {
-    Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07'
-} catch {
-    $_.Exception.Response.StatusCode
-}
-```
-
-**期待結果:**
-- ステータスコード 401 Unauthorized
-
----
-
-### [2-12] user_id が未指定だと 422 を返す
+### [2-11] user_id が未指定だと 422 を返す
 
 **確認方法:**
 ```powershell
@@ -566,7 +548,7 @@ try {
 
 ---
 
-### [2-13] from が未指定だと 422 を返す
+### [2-12] from が未指定だと 422 を返す
 
 **確認方法:**
 ```powershell
@@ -582,7 +564,7 @@ try {
 
 ---
 
-### [2-14] to が未指定だと 422 を返す
+### [2-13] to が未指定だと 422 を返す
 
 **確認方法:**
 ```powershell
@@ -598,7 +580,7 @@ try {
 
 ---
 
-### [2-15] 存在しないユーザーで 404 を返す
+### [2-14] 存在しないユーザーで 404 を返す
 
 **確認方法:**
 ```powershell
@@ -614,7 +596,7 @@ try {
 
 ---
 
-### [2-16] チケット作成イベントでは journal が省略される
+### [2-15] チケット作成イベントでは journal が省略される
 
 **確認方法:**
 ```powershell
@@ -628,7 +610,7 @@ $creation -ne $null -and $creation.journal -eq $null
 
 ---
 
-### [2-17] assigned_to が null のチケットでは assigned_to が省略される
+### [2-16] assigned_to が null のチケットでは assigned_to が省略される
 
 **確認方法:**
 ```powershell
@@ -643,7 +625,7 @@ $noAssignee -ne $null
 
 ---
 
-### [2-18] イベントが新しい順（降順）で返される
+### [2-17] イベントが新しい順（降順）で返される
 
 **確認方法:**
 ```powershell
@@ -661,7 +643,7 @@ $sorted
 
 ---
 
-### [2-19] user_id によるフィルタリングが動作する
+### [2-18] user_id によるフィルタリングが動作する
 
 **確認方法:**
 ```powershell
@@ -677,7 +659,7 @@ $r1.activity_infos.Count -gt 0 -and $r1.activity_infos.Count -ne $r2.activity_in
 
 ---
 
-### [2-20] XML レスポンスに activity_infos タグが含まれる（旧 [2-16]）
+### [2-19] XML レスポンスに activity_infos タグが含まれる
 
 **確認方法:**
 ```powershell

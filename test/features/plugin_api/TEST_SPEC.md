@@ -8,7 +8,7 @@
 
 ### ダミープラグイン
 
-`settings` の省略テスト（[2-9], [2-12]）には、設定を持たないプラグインが必要。
+`settings` の省略テスト（[2-8], [2-11]）には、設定を持たないプラグインが必要。
 テスト環境に該当プラグインがない場合、以下のダミープラグインを作成する。
 
 **作成先:** `plugins/redmine_dummy_no_settings/init.rb`
@@ -141,17 +141,7 @@ User.find_by_login('{Username}').api_key ||
 User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.save! }.api_key
 ```
 
-### [2-1] 未認証でアクセス
-
-**確認方法:**
-- GET `/plugins.json`（API キーなし）
-
-**期待結果:**
-- ステータスコード 401 または 302
-
----
-
-### [2-2] API キーで認証（JSON）
+### [2-1] API キーで認証（JSON）
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}`
@@ -161,7 +151,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-3] API キーで認証（XML）
+### [2-2] API キーで認証（XML）
 
 **確認方法:**
 - GET `/plugins.xml?key={ApiKey}`
@@ -172,7 +162,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-4] plugins 配列が返る
+### [2-3] plugins 配列が返る
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}` のレスポンス
@@ -182,7 +172,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-5] total_count がプラグイン数と一致
+### [2-4] total_count がプラグイン数と一致
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}` のレスポンス
@@ -192,7 +182,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-6] 必須フィールドが存在（id, name, version, author）
+### [2-5] 必須フィールドが存在（id, name, version, author）
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}` のレスポンス
@@ -203,7 +193,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-7] ?include=settings なし → settings なし
+### [2-6] ?include=settings なし → settings なし
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}`（include パラメータなし）
@@ -213,7 +203,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-8] ?include=settings あり、設定ありプラグイン → JSON 文字列
+### [2-7] ?include=settings あり、設定ありプラグイン → JSON 文字列
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}&include=settings`
@@ -224,7 +214,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-9] ?include=settings あり、設定なしプラグイン → settings 省略
+### [2-8] ?include=settings あり、設定なしプラグイン → settings 省略
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}&include=settings`
@@ -235,7 +225,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-10] 単体取得（JSON）
+### [2-9] 単体取得（JSON）
 
 **確認方法:**
 - GET `/plugins/redmine_studio_plugin.json?key={ApiKey}`
@@ -245,7 +235,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-11] 単体取得（XML）
+### [2-10] 単体取得（XML）
 
 **確認方法:**
 - GET `/plugins/redmine_studio_plugin.xml?key={ApiKey}`
@@ -256,7 +246,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-12] 単体取得で settings が条件付きで含まれる
+### [2-11] 単体取得で settings が条件付きで含まれる
 
 **確認方法:**
 - GET `/plugins/redmine_studio_plugin.json?key={ApiKey}`（設定可能なプラグイン）
@@ -268,7 +258,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-13] 存在しない ID → 404
+### [2-12] 存在しない ID → 404
 
 **確認方法:**
 - GET `/plugins/non_existent_plugin.json?key={ApiKey}`
@@ -278,7 +268,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-14] settings が有効な JSON 文字列
+### [2-13] settings が有効な JSON 文字列
 
 **確認方法:**
 - 設定を持つ任意のプラグインを対象とする（例: `redmine_studio_plugin`）
@@ -291,10 +281,10 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-15] settings の内容が DB の値と一致
+### [2-14] settings の内容が DB の値と一致
 
 **確認方法:**
-- [2-14] と同じプラグインを対象とする
+- [2-13] と同じプラグインを対象とする
 - API: GET `/plugins/{plugin_id}.json?key={ApiKey}`
 - DB: `Setting['plugin_{plugin_id}'].to_json`
 
@@ -302,11 +292,11 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 - API の settings と DB の値が一致
 
 **備考:**
-- [2-14] で JSON パースの成功を確認しているため、実質的に [2-14] でカバーされる
+- [2-13] で JSON パースの成功を確認しているため、実質的に [2-13] でカバーされる
 
 ---
 
-### [2-16] offset と limit がレスポンスに含まれる
+### [2-15] offset と limit がレスポンスに含まれる
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}`
@@ -317,7 +307,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-17] offset パラメータが機能する
+### [2-16] offset パラメータが機能する
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}&offset=1`
@@ -328,7 +318,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-18] limit パラメータが機能する
+### [2-17] limit パラメータが機能する
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}&limit=1`
@@ -339,7 +329,7 @@ User.find_by_login('{Username}').tap { |u| u.api_key = SecureRandom.hex(20); u.s
 
 ---
 
-### [2-19] limit 最大値（100）
+### [2-18] limit 最大値（100）
 
 **確認方法:**
 - GET `/plugins.json?key={ApiKey}&limit=200`

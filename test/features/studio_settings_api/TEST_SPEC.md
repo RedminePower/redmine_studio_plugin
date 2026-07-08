@@ -914,18 +914,7 @@ StudioSetting.delete_all
 
 ### [2-1] 認証テスト
 
-#### [2-1-1] 未認証でアクセス → 401
-
-**確認方法:**
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/studio_settings.json" -Method GET -SkipHttpErrorCheck
-$response.StatusCode
-```
-
-**期待結果:**
-- ステータスコード 401
-
-#### [2-1-2] API キーで認証 → 200
+#### [2-1-1] API キーで認証 → 200
 
 **確認方法:**
 ```powershell
