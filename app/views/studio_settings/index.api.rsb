@@ -20,7 +20,8 @@ api.array :studio_settings, api_meta(:total_count => @total_count, :offset => @o
       if @include_options[:include_assignments]
         api.array :assignments do
           setting.assignments.each do |assignment|
-            api.assignment do
+            # XML の要素名は単体エンドポイント（studio_setting_users 等）と統一する。redmine-net-api は XmlRoot の要素名でデシリアライズするため (#2814)
+            api.studio_setting_assignment do
               api.id assignment.id
               api.setting_id assignment.setting_id
               api.assigned_on assignment.assigned_on

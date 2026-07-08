@@ -1786,6 +1786,57 @@ $response.StatusCode
 **期待結果:**
 - ステータスコード 404
 
+#### [2-7-4] ユーザー割り当て一括置換（XML リクエストボディ）
+
+XML 形式のリクエストボディが Rails の params として解析され、割り当てが作成されることを確認する（#2814）。
+
+**確認方法:**
+```powershell
+# テスト用の設定を作成
+$body = @{ studio_setting = @{ name = "XML_Replace_Test"; schema_type = "test"; scope_type = "global"; schema_version = 1; payload = "{}" } } | ConvertTo-Json -Depth 3
+$setting = Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$ApiKey" -Method POST -Body $body -ContentType "application/json"
+$xmlTestId = $setting.studio_setting.id
+
+# XML ボディで置換
+$xmlBody = '<user_ids type="array"><user_id>1</user_id></user_ids>'
+$response = Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$xmlTestId/users.xml?key=$ApiKey" -Method PUT -Body $xmlBody -ContentType "application/xml"
+$response.StatusCode
+$response.Content -match "<studio_setting_assignment>"
+
+# 後片付け
+Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$xmlTestId.json?key=$ApiKey" -Method DELETE
+```
+
+**期待結果:**
+- ステータスコード 200
+- レスポンスに `<studio_setting_assignment>` 要素が含まれる（XML ボディの user_ids が解析され、割り当てが 1 件作成される）
+
+#### [2-7-5] 割り当て込み単体取得（XML 形式）の要素名
+
+include=assignments でネストされる割り当ての XML 要素名が、単体エンドポイントと同じ `studio_setting_assignment` であることを確認する（redmine-net-api の XmlRoot と一致させる。#2814）。
+
+**確認方法:**
+```powershell
+# テスト用の設定を作成し、ユーザーを割り当てる
+$body = @{ studio_setting = @{ name = "XML_Include_Test"; schema_type = "test"; scope_type = "global"; schema_version = 1; payload = "{}" } } | ConvertTo-Json -Depth 3
+$setting = Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$ApiKey" -Method POST -Body $body -ContentType "application/json"
+$xmlTestId = $setting.studio_setting.id
+$replaceBody = @{ user_ids = @(1) } | ConvertTo-Json -Depth 2
+Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$xmlTestId/users.json?key=$ApiKey" -Method PUT -Body $replaceBody -ContentType "application/json"
+
+# include=assignments 付きで XML 取得
+$response = Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$xmlTestId.xml?key=$ApiKey&include=assignments" -Method GET
+$response.StatusCode
+$response.Content -match "<assignments type=`"array`"><studio_setting_assignment>"
+
+# 後片付け
+Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$xmlTestId.json?key=$ApiKey" -Method DELETE
+```
+
+**期待結果:**
+- ステータスコード 200
+- ネストされた割り当ての要素名が `<studio_setting_assignment>`（`<assignment>` ではない）
+
 ---
 
 ### [2-8] 履歴 API テスト
