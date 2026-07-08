@@ -64,15 +64,15 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | セクション | 中身 | 補足 |
 |---|---|---|
 | `markup_lang` | string | `Setting.text_formatting` の値（`textile` / `common_mark` 等） |
-| `projects` | Project の配列 | 全 status（`Active` / `Closed` / `Archived`）含む。`trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` を含む |
+| `projects` | Project の配列 | 対象ユーザが可視できるプロジェクトのみ（`Project.visible` 相当。`Archived` は含まない。個別 projects API と同じスコープ）。`trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` を含む |
 | `trackers` | Tracker の配列 | `default_status` 含む |
 | `issue_statuses` | IssueStatus の配列 | `is_closed` 含む |
-| `issue_priorities` | IssuePriority の配列 | `is_default` 含む |
-| `time_entry_activities` | TimeEntryActivity の配列 | `is_default` 含む |
-| `queries` | Query の配列 | caller の可視範囲 |
-| `custom_fields` | CustomField の配列 | **admin 権限が必要**。権限がない場合は空配列 |
-| `users` | User の配列 | **admin 権限が必要**。ロックユーザを含む |
-| `roles` | Role の配列 | 各 Role の `permissions` を含む（リスト取得 + 詳細取得の N+1 をサーバ側で吸収） |
+| `issue_priorities` | IssuePriority の配列 | inactive 含む全件（個別 enumerations API と同じ）。`active` / `is_default` 含む |
+| `time_entry_activities` | TimeEntryActivity の配列 | inactive 含む全件（個別 enumerations API と同じ）。`active` / `is_default` 含む |
+| `queries` | Query の配列 | caller の可視範囲。`is_public` は visibility が public のクエリのみ true（本体 queries API と同じ） |
+| `custom_fields` | CustomField の配列 | **admin 権限が必要**。権限がない場合は空配列。`min_length` / `max_length` は未設定なら null（本体 custom_fields API と同じ）。`possible_values` は `{value, label}` のペア |
+| `users` | User の配列 | **admin 権限が必要**。active なユーザのみ（個別 users API の既定挙動と同じ） |
+| `roles` | Role の配列 | 各 Role の `permissions` を文字列配列で含む（本体 roles/:id API と同じ形式。リスト取得 + 詳細取得の N+1 をサーバ側で吸収） |
 | `groups` | Group の配列 | **admin 権限が必要**。各 Group の `users` を含む |
 | `project_memberships` | `{ project_id => [Membership...] }` | 対象ユーザが member となっているプロジェクトについて取得。ロックユーザの membership は除外 |
 | `project_versions` | `{ project_id => [Version...] }` | 対象ユーザが member となっているプロジェクト |

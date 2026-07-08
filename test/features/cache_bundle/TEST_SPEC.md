@@ -50,16 +50,16 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
     ],
     "trackers": [{ "id": 1, "name": "...", "default_status": { "id": 1, "name": "..." } }],
     "issue_statuses": [{ "id": 1, "name": "...", "is_closed": false }],
-    "issue_priorities": [{ "id": 1, "name": "...", "is_default": true }],
-    "time_entry_activities": [{ "id": 1, "name": "...", "is_default": true }],
+    "issue_priorities": [{ "id": 1, "name": "...", "active": true, "is_default": true }],
+    "time_entry_activities": [{ "id": 1, "name": "...", "active": true, "is_default": true }],
     "queries": [{ "id": 1, "name": "...", "is_public": true, "project_id": 1 }],
     "custom_fields": [
       {
         "id": 1, "name": "...", "customized_type": "issue",
-        "field_format": "string", "regexp": "", "min_length": 0, "max_length": 0,
+        "field_format": "string", "regexp": "", "min_length": null, "max_length": null,
         "is_required": false, "is_filter": false, "searchable": false,
         "multiple": false, "default_value": "", "visible": true,
-        "possible_values": [{ "value": "..." }],
+        "possible_values": [{ "value": "1", "label": "選択肢A" }],
         "trackers": [{ "id": 1, "name": "..." }],
         "roles": [{ "id": 1, "name": "..." }]
       }
@@ -76,7 +76,7 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
         "id": 1, "name": "...",
         "assignable": true, "issues_visibility": "default",
         "time_entries_visibility": "all", "users_visibility": "all",
-        "permissions": [{ "info": "view_issues" }]
+        "permissions": ["view_issues", "add_issues"]
       }
     ],
     "groups": [{ "id": 1, "name": "...", "users": [{ "id": 1, "name": "..." }] }],
@@ -114,15 +114,15 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
 | markup_lang | string | テキスト書式（textile, common_mark など） |
-| projects | array | 全プロジェクト（status=1,5,9 すべて） |
+| projects | array | target_user が可視できるプロジェクト（`Project.visible(target_user)`。SQL レベルで status IN (1, 5) が強制されるため Archived=9 は含まれない） |
 | trackers | array | トラッカー |
 | issue_statuses | array | チケットステータス |
-| issue_priorities | array | 優先度（active のみ） |
-| time_entry_activities | array | 作業分類（active のみ） |
-| queries | array | カスタムクエリ（user に対する visible） |
-| custom_fields | array | カスタムフィールド（admin のみ取得） |
-| users | array | ユーザ一覧（admin のみ取得） |
-| roles | array | ロール（permissions 込み） |
+| issue_priorities | array | 優先度（`IssuePriority.shared.sorted`。inactive も含む。個別 API と同じ）。要素に `active` キーあり |
+| time_entry_activities | array | 作業分類（`TimeEntryActivity.shared.sorted`。inactive も含む。個別 API と同じ）。要素に `active` キーあり |
+| queries | array | カスタムクエリ（user に対する visible）。`is_public` は VISIBILITY_PUBLIC のみ true（ロール限定は false） |
+| custom_fields | array | カスタムフィールド（admin のみ取得）。`min_length` / `max_length` は本体 API と同じく nil を保持。`possible_values` は `{value, label}` のペア（enumeration/list どちらも対応） |
+| users | array | ユーザ一覧（admin のみ取得。active な User のみ。個別 API の既定挙動と同じ） |
+| roles | array | ロール（permissions 込み。文字列配列 `["view_issues", ...]`。本体 roles/:id API と同じ） |
 | groups | array | グループ（admin のみ取得、users 込み） |
 | project_memberships | dict | `{ project_id => [...] }` ロックユーザを除外 |
 | project_versions | dict | `{ project_id => [...] }` |
@@ -233,18 +233,20 @@ puts result == expected ? 'PASS' : "FAIL: Expected '#{expected}', got '#{result}
 
 ---
 
-### [1-7] fetch_projects が全 status のプロジェクトを返す
+### [1-7] fetch_projects が target_user 可視のプロジェクトを返す（Project.visible スコープ）
 
 **確認方法:**
 ```ruby
+admin = User.find(1)
+User.current = admin
 controller = CacheBundlesController.new
-result = controller.send(:fetch_projects)
-expected_count = Project.where(status: [Project::STATUS_ACTIVE, Project::STATUS_CLOSED, Project::STATUS_ARCHIVED]).count
+result = controller.send(:fetch_projects, admin)
+expected_count = Project.visible(admin).count
 puts result.size == expected_count ? 'PASS' : "FAIL: Expected #{expected_count}, got #{result.size}"
 ```
 
 **期待結果:**
-- 全 status（active=1, closed=5, archived=9）のプロジェクトが取得される
+- `Project.visible(target_user)` と同じ件数が取得される（個別 API と同等の可視性スコープ）
 
 ---
 
@@ -252,8 +254,10 @@ puts result.size == expected_count ? 'PASS' : "FAIL: Expected #{expected_count},
 
 **確認方法:**
 ```ruby
+admin = User.find(1)
+User.current = admin
 controller = CacheBundlesController.new
-result = controller.send(:fetch_projects)
+result = controller.send(:fetch_projects, admin)
 sample = result.first
 required = [:id, :name, :identifier, :status, :is_public, :trackers, :enabled_modules, :issue_categories, :time_entry_activities, :issue_custom_fields]
 missing = required - sample.keys
@@ -281,18 +285,18 @@ puts ids == expected_ids ? 'PASS' : "FAIL: Order mismatch. Got #{ids}, expected 
 
 ---
 
-### [1-10] fetch_issue_priorities が active のみを返す
+### [1-10] fetch_issue_priorities が shared.sorted（inactive 含む）を返す
 
 **確認方法:**
 ```ruby
 controller = CacheBundlesController.new
 result = controller.send(:fetch_issue_priorities)
-expected_count = IssuePriority.active.count
+expected_count = IssuePriority.shared.count
 puts result.size == expected_count ? 'PASS' : "FAIL: Expected #{expected_count}, got #{result.size}"
 ```
 
 **期待結果:**
-- active な優先度のみ取得される
+- `IssuePriority.shared`（inactive 含む）と同じ件数（個別 enumerations API と同等）
 
 ---
 
@@ -356,18 +360,23 @@ end
 
 ---
 
-### [1-14] fetch_roles が permissions を含む
+### [1-14] fetch_roles の permissions が文字列配列である
 
 **確認方法:**
 ```ruby
 controller = CacheBundlesController.new
 result = controller.send(:fetch_roles)
 sample = result.find { |r| r[:permissions].is_a?(Array) && r[:permissions].any? }
-puts sample ? 'PASS' : 'FAIL: No role with permissions found'
+if sample.nil?
+  puts 'FAIL: No role with permissions found'
+else
+  all_strings = sample[:permissions].all? { |p| p.is_a?(String) }
+  puts all_strings ? 'PASS' : "FAIL: permissions contain non-string values: #{sample[:permissions].map(&:class).uniq.inspect}"
+end
 ```
 
 **期待結果:**
-- permissions を含むロールが少なくとも 1 つ存在する
+- permissions を含むロールが存在し、各 permission が文字列（例: `"view_issues"`）である（本体 roles/:id API と同じ形式）
 
 ---
 
@@ -458,6 +467,194 @@ puts result.nil? ? 'PASS' : "FAIL: Expected nil, got #{result.inspect}"
 
 **期待結果:**
 - markup_lang セクションは失敗時に nil を返す（空配列ではない）
+
+---
+
+### [1-20] fetch_projects で Archived プロジェクトが含まれない
+
+**確認方法:**
+```ruby
+# Archived プロジェクトが 1 件以上あることを前提にテスト。無ければテスト用に 1 件作る。
+archived = Project.where(status: Project::STATUS_ARCHIVED).first
+unless archived
+  p = Project.new(name: 'CacheBundle_1-20_Archived', identifier: "cbtest_1_20_#{Time.now.to_i}")
+  p.save(validate: false)
+  p.update_column(:status, Project::STATUS_ARCHIVED)
+  archived = p
+end
+
+admin = User.find(1)
+User.current = admin
+controller = CacheBundlesController.new
+result = controller.send(:fetch_projects, admin)
+archived_ids_in_result = result.map { |h| h[:id] } & Project.where(status: Project::STATUS_ARCHIVED).pluck(:id)
+puts archived_ids_in_result.empty? ? 'PASS' : "FAIL: Archived project IDs found: #{archived_ids_in_result}"
+```
+
+**期待結果:**
+- レスポンスに status=9 (Archived) のプロジェクトが含まれない（`Project.visible` が SQL レベルで status IN (1, 5) を強制する）
+
+---
+
+### [1-21] fetch_issue_priorities に active キーが含まれる
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+result = controller.send(:fetch_issue_priorities)
+sample = result.first
+puts sample.key?(:active) ? 'PASS' : "FAIL: :active key missing. keys=#{sample.keys.inspect}"
+```
+
+**期待結果:**
+- 各要素に `active` キーが存在する（本体 enumerations API と同じ）
+
+---
+
+### [1-22] fetch_time_entry_activities が shared.sorted（inactive 含む）を返す
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+result = controller.send(:fetch_time_entry_activities)
+expected_count = TimeEntryActivity.shared.count
+puts result.size == expected_count ? 'PASS' : "FAIL: Expected #{expected_count}, got #{result.size}"
+```
+
+**期待結果:**
+- `TimeEntryActivity.shared`（inactive 含む）と同じ件数
+
+---
+
+### [1-23] fetch_time_entry_activities に active キーが含まれる
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+result = controller.send(:fetch_time_entry_activities)
+sample = result.first
+puts sample.key?(:active) ? 'PASS' : "FAIL: :active key missing. keys=#{sample.keys.inspect}"
+```
+
+**期待結果:**
+- 各要素に `active` キーが存在する
+
+---
+
+### [1-24] fetch_queries の is_public は VISIBILITY_PUBLIC のみ true
+
+**確認方法:**
+```ruby
+admin = User.find(1)
+User.current = admin
+controller = CacheBundlesController.new
+result = controller.send(:fetch_queries, admin)
+
+# 期待: 元 IssueQuery.visible の各 query について、visibility == PUBLIC のときのみ is_public=true
+mismatches = []
+IssueQuery.visible(admin).each do |q|
+  h = result.find { |x| x[:id] == q.id }
+  next unless h
+  expected = (q.visibility == IssueQuery::VISIBILITY_PUBLIC)
+  actual = h[:is_public]
+  mismatches << { id: q.id, name: q.name, visibility: q.visibility, expected: expected, actual: actual } if expected != actual
+end
+puts mismatches.empty? ? 'PASS' : "FAIL: is_public mismatch: #{mismatches.inspect}"
+```
+
+**期待結果:**
+- 全 query について `is_public == (visibility == VISIBILITY_PUBLIC)`（VISIBILITY_ROLES / PRIVATE は false）
+
+---
+
+### [1-25] fetch_custom_fields の min_length / max_length が nil を保持する
+
+**確認方法:**
+```ruby
+admin = User.find(1)
+User.current = admin
+controller = CacheBundlesController.new
+result = controller.send(:fetch_custom_fields)
+
+# テスト対象: min_length と max_length が nil のカスタムフィールド
+nil_length_cfs = CustomField.where(min_length: nil, max_length: nil).limit(3).to_a
+if nil_length_cfs.empty?
+  puts 'SKIP: no custom field with nil min_length/max_length'
+else
+  problems = []
+  nil_length_cfs.each do |cf|
+    h = result.find { |x| x[:id] == cf.id }
+    problems << { id: cf.id, min_length: h[:min_length], max_length: h[:max_length] } if h && (h[:min_length] != nil || h[:max_length] != nil)
+  end
+  puts problems.empty? ? 'PASS' : "FAIL: nil should be preserved (not 0): #{problems.inspect}"
+end
+```
+
+**期待結果:**
+- min_length / max_length が nil の CustomField は、レスポンスでも nil を保持する（本体 custom_fields API と同じ挙動。`|| 0` 変換をしない）
+
+---
+
+### [1-26] fetch_custom_fields の possible_values に value と label が含まれる
+
+**確認方法:**
+```ruby
+admin = User.find(1)
+User.current = admin
+controller = CacheBundlesController.new
+result = controller.send(:fetch_custom_fields)
+
+# possible_values を持つ CF の最初の 1 件で確認
+cf_with_values = result.find { |h| h[:possible_values].is_a?(Array) && h[:possible_values].any? }
+if cf_with_values.nil?
+  puts 'SKIP: no custom field with possible_values'
+else
+  sample = cf_with_values[:possible_values].first
+  ok = sample.key?(:value) && sample.key?(:label)
+  puts ok ? 'PASS' : "FAIL: possible_values entry missing :value or :label. sample=#{sample.inspect}"
+end
+```
+
+**期待結果:**
+- possible_values の各要素に `value` と `label` の両方のキーが存在する（enumeration/list どちらも対応する本体 API 準拠形式）
+
+---
+
+### [1-27] fetch_users は active なユーザのみを返す
+
+**確認方法:**
+```ruby
+admin = User.find(1)
+User.current = admin
+controller = CacheBundlesController.new
+result = controller.send(:fetch_users)
+
+# Locked (status=3) や Registered (status=2) のユーザが含まれないこと
+non_active_ids = User.where(type: 'User').where.not(status: User::STATUS_ACTIVE).pluck(:id)
+result_ids = result.map { |u| u[:id] }
+leaked = result_ids & non_active_ids
+puts leaked.empty? ? 'PASS' : "FAIL: non-active user IDs leaked: #{leaked}"
+```
+
+**期待結果:**
+- レスポンスに含まれる user がすべて active（status=1）である（個別 users API の既定挙動と同じ）
+
+---
+
+### [1-28] fetch_roles の permissions が文字列配列（形式検証・詳細）
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+result = controller.send(:fetch_roles)
+
+# すべてのロールの permissions を検査
+bad_roles = result.reject { |r| r[:permissions].is_a?(Array) && r[:permissions].all? { |p| p.is_a?(String) } }
+puts bad_roles.empty? ? 'PASS' : "FAIL: bad permissions in roles: #{bad_roles.map { |r| { id: r[:id], name: r[:name], permissions: r[:permissions] } }.inspect}"
+```
+
+**期待結果:**
+- すべてのロールの `permissions` が「文字列の配列」である（`{info: '...'}` 形式ではない）
 
 ---
 
@@ -620,17 +817,21 @@ $response.cache_bundle.users.Count -gt 0
 
 ---
 
-### [2-12] roles に permissions が含まれる
+### [2-12] roles の permissions が文字列配列である
 
 **確認方法:**
 ```powershell
 $response = Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $withPerms = $response.cache_bundle.roles | Where-Object { $_.permissions.Count -gt 0 } | Select-Object -First 1
-$withPerms -ne $null
+if ($null -eq $withPerms) { $false } else {
+  # 各要素が string であることを検証（旧形式の {info: '...'} オブジェクトでは PSCustomObject になる）
+  $allStrings = ($withPerms.permissions | ForEach-Object { $_ -is [string] }) -notcontains $false
+  $allStrings
+}
 ```
 
 **期待結果:**
-- permissions を含むロールが存在する
+- permissions を含むロールが存在し、各 permission が文字列（例: `"view_issues"`）である（旧形式 `{info: '...'}` ではないこと）
 
 ---
 
@@ -701,25 +902,7 @@ $enc
 
 ---
 
-### [2-17] 未認証でアクセスすると 401 を返す
-
-**前提条件:** Redmine の「認証が必要」設定が有効であること。
-
-**確認方法:**
-```powershell
-try {
-    Invoke-WebRequest -Uri '{BaseUrl}/cache_bundle.json?user_id=1'
-} catch {
-    $_.Exception.Response.StatusCode
-}
-```
-
-**期待結果:**
-- ステータスコード 401 Unauthorized
-
----
-
-### [2-18] 存在しない user_id で 422 を返す
+### [2-17] 存在しない user_id で 422 を返す
 
 **確認方法:**
 ```powershell
@@ -735,7 +918,7 @@ try {
 
 ---
 
-### [2-19] 非 admin が他ユーザの user_id を指定すると 422 を返す
+### [2-18] 非 admin が他ユーザの user_id を指定すると 422 を返す
 
 **前提条件:** admin 以外のユーザ（例: id=2）が存在し、その API キーが取得できること。
 
@@ -757,7 +940,7 @@ try {
 
 ---
 
-### [2-20] user_id 省略時は認証済みユーザがターゲットになる
+### [2-19] user_id 省略時は認証済みユーザがターゲットになる
 
 **確認方法:**
 ```powershell

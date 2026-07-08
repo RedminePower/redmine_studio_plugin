@@ -24,7 +24,7 @@ class CacheBundlesController < ApplicationController
 
     bundle = {
       markup_lang:              with_error_handling('markup_lang')              { fetch_markup_lang },
-      projects:                 with_error_handling('projects')                 { fetch_projects },
+      projects:                 with_error_handling('projects')                 { fetch_projects(target_user) },
       trackers:                 with_error_handling('trackers')                 { fetch_trackers },
       issue_statuses:           with_error_handling('issue_statuses')           { fetch_issue_statuses },
       issue_priorities:         with_error_handling('issue_priorities')         { fetch_issue_priorities },
@@ -96,10 +96,11 @@ class CacheBundlesController < ApplicationController
     Setting.text_formatting
   end
 
-  # Project 一覧（全 status、include: trackers / enabled_modules / issue_categories / time_entry_activities / issue_custom_fields）。
-  # アプリ側（RedmineTimePuncher の CacheService.projectsPrms）と同等の include 構成。
-  def fetch_projects
-    Project.where(status: [Project::STATUS_ACTIVE, Project::STATUS_CLOSED, Project::STATUS_ARCHIVED])
+  # Project 一覧（target_user が可視できるプロジェクトのみ。include: trackers / enabled_modules / issue_categories / time_entry_activities / issue_custom_fields）。
+  # 個別 API (GET /projects.json) と同等の可視性スコープ (Project.visible)。
+  # SQL レベルで status IN (1, 5) が強制されるため、Archived (status=9) は含まれない。
+  def fetch_projects(target_user)
+    Project.visible(target_user)
            .preload(:trackers, :enabled_modules, :issue_categories, :parent)
            .map do |p|
       hash = {
@@ -139,26 +140,32 @@ class CacheBundlesController < ApplicationController
     end
   end
 
+  # 個別 API (GET /enumerations/issue_priorities.json) と同じく shared.sorted で全件（inactive 含む）を返し、
+  # active キーも付与する。
   def fetch_issue_priorities
-    IssuePriority.active.map do |p|
-      hash = { id: p.id, name: p.name }
+    IssuePriority.shared.sorted.map do |p|
+      hash = { id: p.id, name: p.name, active: p.active }
       hash[:is_default] = true if p.is_default?
       hash
     end
   end
 
+  # 個別 API (GET /enumerations/time_entry_activities.json) と同じく shared.sorted で全件（inactive 含む）を返し、
+  # active キーも付与する。
   def fetch_time_entry_activities
-    TimeEntryActivity.active.map do |a|
-      hash = { id: a.id, name: a.name }
+    TimeEntryActivity.shared.sorted.map do |a|
+      hash = { id: a.id, name: a.name, active: a.active }
       hash[:is_default] = true if a.is_default?
       hash
     end
   end
 
+  # 本体 queries API と同じく、is_public は VISIBILITY_PUBLIC のみ true とする。
+  # （VISIBILITY_ROLES は「特定ロールにのみ公開」で is_public=false 扱い）
   def fetch_queries(user)
     base = IssueQuery.visible(user)
     base.map do |q|
-      hash = { id: q.id, name: q.name, is_public: q.visibility != IssueQuery::VISIBILITY_PRIVATE }
+      hash = { id: q.id, name: q.name, is_public: q.visibility == IssueQuery::VISIBILITY_PUBLIC }
       hash[:project_id] = q.project_id if q.project_id
       hash
     end
@@ -175,8 +182,8 @@ class CacheBundlesController < ApplicationController
         customized_type: cf.class.customized_class.name.underscore,
         field_format: cf.field_format,
         regexp: cf.regexp,
-        min_length: cf.min_length || 0,
-        max_length: cf.max_length || 0,
+        min_length: cf.min_length,
+        max_length: cf.max_length,
         is_required: cf.is_required,
         is_filter: cf.is_filter,
         searchable: cf.searchable,
@@ -184,8 +191,11 @@ class CacheBundlesController < ApplicationController
         default_value: cf.default_value,
         visible: cf.visible
       }
-      if cf.possible_values.is_a?(Array) && cf.possible_values.any?
-        hash[:possible_values] = cf.possible_values.map { |v| { value: v } }
+      values = cf.possible_values_options
+      if values.present?
+        hash[:possible_values] = values.map do |label, value|
+          { value: value || label, label: label }
+        end
       end
       if cf.respond_to?(:trackers) && cf.trackers.any?
         hash[:trackers] = cf.trackers.map { |t| { id: t.id, name: t.name } }
@@ -197,11 +207,12 @@ class CacheBundlesController < ApplicationController
     end
   end
 
-  # 全 User（ロックユーザ含む）。admin 権限が必要。caller が admin でなければ空配列で返す。
+  # active な User のみ。admin 権限が必要。caller が admin でなければ空配列で返す。
+  # 個別 API (GET /users.json) の既定挙動 (status=1) に合わせる。
   def fetch_users
     return [] unless User.current.admin?
 
-    User.where(type: 'User').preload(:memberships).map { |u| user_to_hash(u) }
+    User.where(type: 'User', status: User::STATUS_ACTIVE).preload(:memberships).map { |u| user_to_hash(u) }
   end
 
   def user_to_hash(u)
@@ -232,8 +243,9 @@ class CacheBundlesController < ApplicationController
         time_entries_visibility: r.time_entries_visibility,
         users_visibility: r.users_visibility
       }
-      # 個別取得（GetObject<Role>(id)）で取れる permissions を含める
-      hash[:permissions] = (r.permissions || []).map { |p| { info: p.to_s } }
+      # 個別取得（GetObject<Role>(id)）で取れる permissions を含める。
+      # 本体 roles/:id API と同じく文字列配列 (["add_issues", ...]) 形式で返す。
+      hash[:permissions] = (r.permissions || []).map(&:to_s)
       hash
     end
   end

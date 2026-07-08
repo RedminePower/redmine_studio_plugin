@@ -64,15 +64,15 @@ The root has a single fixed key `cache_bundle`. Each section's content follows r
 | Section | Content | Notes |
 |---|---|---|
 | `markup_lang` | string | Value of `Setting.text_formatting` (`textile` / `common_mark`, etc.) |
-| `projects` | Array of Project | Includes all statuses (`Active` / `Closed` / `Archived`). Includes `trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` |
+| `projects` | Array of Project | Only projects visible to the target user (equivalent to `Project.visible`; `Archived` is not included — same scope as the individual projects API). Includes `trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` |
 | `trackers` | Array of Tracker | Includes `default_status` |
 | `issue_statuses` | Array of IssueStatus | Includes `is_closed` |
-| `issue_priorities` | Array of IssuePriority | Includes `is_default` |
-| `time_entry_activities` | Array of TimeEntryActivity | Includes `is_default` |
-| `queries` | Array of Query | Caller's visibility scope |
-| `custom_fields` | Array of CustomField | **Admin privilege required**. Empty array if not authorized |
-| `users` | Array of User | **Admin privilege required**. Includes locked users |
-| `roles` | Array of Role | Includes `permissions` of each Role (absorbing the list-then-details N+1 on the server side) |
+| `issue_priorities` | Array of IssuePriority | All entries including inactive ones (same as the individual enumerations API). Includes `active` / `is_default` |
+| `time_entry_activities` | Array of TimeEntryActivity | All entries including inactive ones (same as the individual enumerations API). Includes `active` / `is_default` |
+| `queries` | Array of Query | Caller's visibility scope. `is_public` is true only for queries with public visibility (same as the core queries API) |
+| `custom_fields` | Array of CustomField | **Admin privilege required**. Empty array if not authorized. `min_length` / `max_length` are null when unset (same as the core custom_fields API). `possible_values` are `{value, label}` pairs |
+| `users` | Array of User | **Admin privilege required**. Active users only (same as the default behavior of the individual users API) |
+| `roles` | Array of Role | Includes `permissions` of each Role as an array of strings (same format as the core roles/:id API; absorbing the list-then-details N+1 on the server side) |
 | `groups` | Array of Group | **Admin privilege required**. Includes `users` of each Group |
 | `project_memberships` | `{ project_id => [Membership...] }` | Retrieved for projects where the target user is a member. Locked-user memberships are excluded |
 | `project_versions` | `{ project_id => [Version...] }` | Projects where the target user is a member |
