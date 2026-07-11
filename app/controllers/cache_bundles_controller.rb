@@ -233,8 +233,10 @@ class CacheBundlesController < ApplicationController
 
   # Role 一覧 + 各 Role の詳細（permissions）。
   # 現状 CacheService は GetObjects + 各 GetObject(id) の N+1 だが、ここでサーバ側でまとめて返す。
+  # givable（builtin=0）のみ。個別 API (GET /roles.json) はビルトインロール
+  # （Non member / Anonymous）を除外するため、それに揃える（#2779）。
   def fetch_roles
-    Role.all.map do |r|
+    Role.givable.map do |r|
       hash = {
         id: r.id,
         name: r.name,
@@ -251,10 +253,12 @@ class CacheBundlesController < ApplicationController
   end
 
   # Group 一覧 + 各 Group の詳細（users 含む）。admin 権限が必要。
+  # givable（type='Group'）のみ。個別 API (GET /groups.json) はビルトイングループ
+  # （Anonymous / Non member）を builtin=1 指定時以外は除外するため、それに揃える（#2779）。
   def fetch_groups
     return [] unless User.current.admin?
 
-    Group.preload(:users).map do |g|
+    Group.givable.preload(:users).map do |g|
       hash = { id: g.id, name: g.name }
       hash[:users] = g.users.map { |u| { id: u.id, name: u.name } }
       hash
@@ -334,10 +338,21 @@ class CacheBundlesController < ApplicationController
 
   # ProjectIssueCategories: { project_id => [...] }
   # Active なプロジェクトのみが対象（現状 CacheService.updateProjectIssueCategoriesAsync の Status == Active フィルタ相当）。
+  #
+  # 個別 API (GET /projects/:id/issue_categories.json) はコアで manage_categories 権限を要求する
+  # （view_members / view_issues のような閲覧用の緩い権限が存在しない）。cache_bundle は本来サーバ側で
+  # 権限判定して個別 API と等価な結果を返す契約のため、ここでも対象ユーザの manage_categories を確認し、
+  # 権限が無いプロジェクトは空で返す（過剰露出の是正・最小権限化 #2779）。
   def fetch_per_project_issue_categories(user)
     result = {}
-    active_project_ids = Project.where(id: visible_project_ids(user), status: Project::STATUS_ACTIVE).pluck(:id)
-    active_project_ids.each do |pid|
+    active_projects = Project.where(id: visible_project_ids(user), status: Project::STATUS_ACTIVE)
+    active_projects.each do |project|
+      pid = project.id
+      # manage_categories を持たないロールは個別 API では 403 になるため、cache_bundle でも空を返す。
+      unless user.allowed_to?(:manage_categories, project)
+        result[pid.to_s] = []
+        next
+      end
       begin
         categories = IssueCategory.where(project_id: pid).preload(:assigned_to).map do |c|
           h = {

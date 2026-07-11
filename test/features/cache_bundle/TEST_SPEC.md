@@ -126,12 +126,13 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
 | groups | array | グループ（admin のみ取得、users 込み） |
 | project_memberships | dict | `{ project_id => [...] }` ロックユーザを除外 |
 | project_versions | dict | `{ project_id => [...] }` |
-| project_issue_categories | dict | `{ project_id => [...] }` Active プロジェクトのみ |
+| project_issue_categories | dict | `{ project_id => [...] }` Active プロジェクトのみ。対象ユーザが manage_categories 権限を持つプロジェクトのみカテゴリを返す（権限が無ければ空配列。個別 API と同じゲート・#2779） |
 | errors | array | 部分失敗時のメタデータ。成功時は空配列 |
 
 **非 admin ユーザの場合:**
 - `custom_fields` / `users` / `groups` は空配列で返る
 - `project_memberships` / `project_versions` / `project_issue_categories` は対象ユーザが member となっているプロジェクトのみ
+- `project_issue_categories` はさらに manage_categories 権限を持つプロジェクトのみ（権限が無いプロジェクトは空配列）
 
 ---
 
@@ -360,6 +361,27 @@ end
 
 ---
 
+### [1-13-2] fetch_groups はビルトイングループを除外する
+
+個別 API (GET /groups.json) は builtin=1 指定時以外ビルトイングループ（Anonymous / Non member）を除外する。
+cache_bundle も `Group.givable` に揃える（#2779）。
+
+**確認方法:**
+```ruby
+User.current = User.where(admin: true).first
+controller = CacheBundlesController.new
+result = controller.send(:fetch_groups)
+ids = result.map { |g| g[:id] }
+builtin_ids = Group.where.not(type: 'Group').pluck(:id)
+overlap = ids & builtin_ids
+puts overlap.empty? ? 'PASS' : "FAIL: builtin group(s) included: #{overlap}"
+```
+
+**期待結果:**
+- 返却されるグループにビルトイングループ（type != 'Group'）が含まれない
+
+---
+
 ### [1-14] fetch_roles の permissions が文字列配列である
 
 **確認方法:**
@@ -377,6 +399,26 @@ end
 
 **期待結果:**
 - permissions を含むロールが存在し、各 permission が文字列（例: `"view_issues"`）である（本体 roles/:id API と同じ形式）
+
+---
+
+### [1-14-2] fetch_roles はビルトインロールを除外する
+
+個別 API (GET /roles.json) はビルトインロール（Non member / Anonymous）を除外する（`Role.givable`）。
+cache_bundle も揃える（#2779）。
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+result = controller.send(:fetch_roles)
+ids = result.map { |r| r[:id] }
+builtin_ids = Role.where.not(builtin: 0).pluck(:id)
+overlap = ids & builtin_ids
+puts overlap.empty? ? 'PASS' : "FAIL: builtin role(s) included: #{overlap}"
+```
+
+**期待結果:**
+- 返却されるロールにビルトインロール（builtin != 0）が含まれない
 
 ---
 
@@ -435,6 +477,45 @@ puts intersect.empty? ? 'PASS' : "FAIL: non-active project IDs found: #{intersec
 
 **期待結果:**
 - Active 以外のプロジェクト ID は project_issue_categories のキーに含まれない
+
+---
+
+### [1-17-2] fetch_per_project_issue_categories は manage_categories 権限で出し分ける
+
+個別 API (GET /projects/:id/issue_categories.json) はコアで manage_categories 権限を要求するため、
+cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正・#2779）。
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+controller.instance_variable_set(:@errors, [])
+
+# カテゴリを持つ Active プロジェクトの中から、manage_categories を「持つ member」と「持たない member」を探す
+target = nil
+Project.where(status: Project::STATUS_ACTIVE).each do |p|
+  next if IssueCategory.where(project_id: p.id).empty?
+  members = p.members.map(&:user).select { |u| u.is_a?(User) && u.status == User::STATUS_ACTIVE }
+  with_perm    = members.find { |u|  u.allowed_to?(:manage_categories, p) }
+  without_perm = members.find { |u| !u.allowed_to?(:manage_categories, p) }
+  if with_perm && without_perm
+    target = [p, with_perm, without_perm]; break
+  end
+end
+
+if target.nil?
+  puts 'SKIP: manage_categories 権限の有無で分かれる member を持つプロジェクトが無い'
+else
+  p, with_perm, without_perm = target
+  res_with    = controller.send(:fetch_per_project_issue_categories, with_perm)
+  res_without = controller.send(:fetch_per_project_issue_categories, without_perm)
+  ok = res_with[p.id.to_s].present? && res_without[p.id.to_s] == []
+  puts ok ? 'PASS' : "FAIL: with=#{res_with[p.id.to_s].inspect} without=#{res_without[p.id.to_s].inspect}"
+end
+```
+
+**期待結果:**
+- manage_categories を持つユーザ: 当該プロジェクトのカテゴリが全件返る
+- manage_categories を持たないユーザ: 当該プロジェクトは空配列（キーは存在する）
 
 ---
 

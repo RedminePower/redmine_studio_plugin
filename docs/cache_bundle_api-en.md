@@ -72,11 +72,11 @@ The root has a single fixed key `cache_bundle`. Each section's content follows r
 | `queries` | Array of Query | Caller's visibility scope. `is_public` is true only for queries with public visibility (same as the core queries API) |
 | `custom_fields` | Array of CustomField | **Admin privilege required**. Empty array if not authorized. `min_length` / `max_length` are null when unset (same as the core custom_fields API). `possible_values` are `{value, label}` pairs |
 | `users` | Array of User | **Admin privilege required**. Active users only (same as the default behavior of the individual users API) |
-| `roles` | Array of Role | Includes `permissions` of each Role as an array of strings (same format as the core roles/:id API; absorbing the list-then-details N+1 on the server side) |
-| `groups` | Array of Group | **Admin privilege required**. Includes `users` of each Group |
+| `roles` | Array of Role | Only givable roles (builtin=0); builtin roles (Non member / Anonymous) are excluded (same as the individual API `GET /roles.json`; #2779). Includes `permissions` of each Role as an array of strings (same format as the core roles/:id API; absorbing the list-then-details N+1 on the server side) |
+| `groups` | Array of Group | **Admin privilege required**. Only givable groups (type='Group'); builtin groups (Anonymous / Non member) are excluded (same as the individual API `GET /groups.json`; #2779). Includes `users` of each Group |
 | `project_memberships` | `{ project_id => [Membership...] }` | Retrieved for projects where the target user is a member. Locked-user memberships are excluded |
 | `project_versions` | `{ project_id => [Version...] }` | Projects where the target user is a member |
-| `project_issue_categories` | `{ project_id => [IssueCategory...] }` | Only **Active** projects where the target user is a member |
+| `project_issue_categories` | `{ project_id => [IssueCategory...] }` | Only **Active** projects where the target user is a member, and further only projects where the target user has the **`manage_categories`** permission (same gate as the individual API `GET /projects/:id/issue_categories.json`; projects without the permission return an empty array) |
 | `errors` | Array of `{ section, project_id?, code, message }` | Partial failure metadata. Empty array means full success |
 
 ## Partial Failure Behavior
