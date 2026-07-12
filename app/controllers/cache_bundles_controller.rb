@@ -121,7 +121,10 @@ class CacheBundlesController < ApplicationController
   # 個別 API (GET /projects.json) と同等の可視性スコープ (Project.visible)。
   # SQL レベルで status IN (1, 5) が強制されるため、Archived (status=9) は含まれない。
   def fetch_projects(target_user)
+    # 並び順も個別 API に揃える。projects#index は ProjectQuery 経由で lft 順（Project.sorted）で返すため、
+    # ここでも .sorted（order(:lft)）を適用して要素順を一致させる。
     Project.visible(target_user)
+           .sorted
            .preload(:enabled_modules, :issue_categories, :parent)
            .map do |p|
       hash = {
@@ -192,7 +195,8 @@ class CacheBundlesController < ApplicationController
   # 本体 queries API と同じく、is_public は VISIBILITY_PUBLIC のみ true とする。
   # （VISIBILITY_ROLES は「特定ロールにのみ公開」で is_public=false 扱い）
   def fetch_queries(user)
-    base = IssueQuery.visible(user)
+    # 並び順も個別 API に揃える（queries#index は order("#{Query.table_name}.name") で name 順）。
+    base = IssueQuery.visible(user).order(:name)
     base.map do |q|
       hash = { id: q.id, name: q.name, is_public: q.visibility == IssueQuery::VISIBILITY_PUBLIC }
       hash[:project_id] = q.project_id if q.project_id
@@ -241,7 +245,8 @@ class CacheBundlesController < ApplicationController
   def fetch_users
     return [] unless User.current.admin?
 
-    User.where(type: 'User', status: User::STATUS_ACTIVE).preload(:memberships).map { |u| user_to_hash(u) }
+    # 並び順も個別 API に揃える（users#index は UserQuery の既定ソート login asc）。
+    User.where(type: 'User', status: User::STATUS_ACTIVE).order(:login).preload(:memberships).map { |u| user_to_hash(u) }
   end
 
   def user_to_hash(u)
@@ -291,7 +296,8 @@ class CacheBundlesController < ApplicationController
   def fetch_groups
     return [] unless User.current.admin?
 
-    Group.givable.preload(:users).map do |g|
+    # 並び順も個別 API に揃える（groups#index は Group.sorted = order(type, lastname)）。
+    Group.givable.sorted.preload(:users).map do |g|
       hash = { id: g.id, name: g.name }
       hash[:users] = g.users.map { |u| { id: u.id, name: u.name } }
       hash

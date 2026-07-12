@@ -79,6 +79,10 @@ The root has a single fixed key `cache_bundle`. Each section's content follows r
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | Only **Active** projects where the target user is a member, and further only projects where the target user has the **`manage_categories`** permission (same gate as the individual API `GET /projects/:id/issue_categories.json`; projects without the permission return an empty array) |
 | `errors` | Array of `{ section, project_id?, code, message }` | Partial failure metadata. Empty array means full success |
 
+### Ordering
+
+Each array is returned in the **same order** as when fetched individually — cache_bundle yields the same content and ordering as the individual API.
+
 ## Partial Failure Behavior
 
 Exceptions are caught per section / per project, filled with empty arrays, and entries are added to the `errors` array. HTTP status is always 200 (to avoid the client falling back to the N+1 individual API fetches).

@@ -79,6 +79,10 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | 対象ユーザが member となっている **Active** プロジェクトのみ。さらに対象ユーザが **`manage_categories` 権限**を持つプロジェクトのみカテゴリを返す（個別 API `GET /projects/:id/issue_categories.json` と同じゲート。権限が無いプロジェクトは空配列） |
 | `errors` | `{ section, project_id?, code, message }` の配列 | 部分失敗のメタデータ。空配列なら全成功 |
 
+### 並び順
+
+各配列は個別に取得した場合と**同じ並び順**で返す（cache_bundle は個別 API で取得した場合と同一の内容・並び順になるよう揃えている）。
+
 ## 部分失敗時の挙動
 
 セクション単位 / プロジェクト単位で例外を catch し、空配列で埋めつつ `errors` 配列にエントリを追加する。HTTP ステータスは常に 200 を返す（クライアント側でフォールバックして N+1 個別 API 取得に戻ってしまうのを避けるため）。
