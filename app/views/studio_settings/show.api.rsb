@@ -17,7 +17,7 @@ api.studio_setting do
   if @include_options && @include_options[:include_assignments]
     api.array :assignments do
       @studio_setting.assignments.each do |assignment|
-        # XML の要素名は単体エンドポイント（studio_setting_users 等）と統一する。redmine-net-api は XmlRoot の要素名でデシリアライズするため (#2814)
+        # XML の要素名は単体エンドポイント（studio_setting_users 等）と統一する。redmine-net-api は XmlRoot の要素名でデシリアライズするため
         api.studio_setting_assignment do
           api.id assignment.id
           api.setting_id assignment.setting_id

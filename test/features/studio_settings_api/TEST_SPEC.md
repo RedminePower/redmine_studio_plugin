@@ -1788,7 +1788,7 @@ $response.StatusCode
 
 #### [2-7-4] ユーザー割り当て一括置換（XML リクエストボディ）
 
-XML 形式のリクエストボディが Rails の params として解析され、割り当てが作成されることを確認する（#2814）。
+XML 形式のリクエストボディが Rails の params として解析され、割り当てが作成されることを確認する。
 
 **確認方法:**
 ```powershell
@@ -1813,7 +1813,7 @@ Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$xmlTestId.json?key=$ApiKey" -
 
 #### [2-7-5] 割り当て込み単体取得（XML 形式）の要素名
 
-include=assignments でネストされる割り当ての XML 要素名が、単体エンドポイントと同じ `studio_setting_assignment` であることを確認する（redmine-net-api の XmlRoot と一致させる。#2814）。
+include=assignments でネストされる割り当ての XML 要素名が、単体エンドポイントと同じ `studio_setting_assignment` であることを確認する（redmine-net-api の XmlRoot と一致させる）。
 
 **確認方法:**
 ```powershell

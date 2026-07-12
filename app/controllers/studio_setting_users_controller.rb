@@ -22,7 +22,7 @@ class StudioSettingUsersController < ApplicationController
 
   # PUT /studio_settings/:id/users
   def replace
-    # JSON / XML どちらのリクエストボディも受けられるよう、生ボディの JSON.parse ではなく Rails の params 経由で取得する (#2814)
+    # JSON / XML どちらのリクエストボディも受けられるよう、生ボディの JSON.parse ではなく Rails の params 経由で取得する
     user_ids = params[:user_ids] || []
 
     # Ensure user_ids is an array
