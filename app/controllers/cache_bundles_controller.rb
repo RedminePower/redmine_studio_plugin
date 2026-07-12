@@ -90,6 +90,27 @@ class CacheBundlesController < ApplicationController
     end
   end
 
+  # 日時を Redmine コア API (Redmine::Views::Builders::Structure の xmlschema(0)) と同じ
+  # 「小数秒なし」で整形する。to_json 既定（ミリ秒付き）だと個別 API とタイムスタンプ表現が
+  # 食い違い、クライアントの日時パースがずれるため揃える。
+  def to_api_time(t)
+    t&.xmlschema(0)
+  end
+
+  # カスタムフィールド値を Redmine コア API (render_api_custom_values) と同じ形で出力する。
+  # 個別 API (XML) の custom_fields と同一構造にすることで、cache_bundle 経由でも
+  # redmine-net-api が同じ CacheBundle を復元できるようにする。
+  # value は単一値ならスカラー、複数値なら配列。値が無い（visible な CF が 0 件）の場合は
+  # 空配列を返し、呼び出し側で custom_fields キー自体を省略する（コアの unless empty? と揃える）。
+  def to_api_custom_field_values(custom_values)
+    custom_values.map do |cv|
+      h = { id: cv.custom_field_id, name: cv.custom_field.name }
+      h[:multiple] = true if cv.custom_field.multiple?
+      h[:value] = cv.value
+      h
+    end
+  end
+
   # ---- 各セクションの取得 -----------------------------------------------
 
   def fetch_markup_lang
@@ -101,7 +122,7 @@ class CacheBundlesController < ApplicationController
   # SQL レベルで status IN (1, 5) が強制されるため、Archived (status=9) は含まれない。
   def fetch_projects(target_user)
     Project.visible(target_user)
-           .preload(:trackers, :enabled_modules, :issue_categories, :parent)
+           .preload(:enabled_modules, :issue_categories, :parent)
            .map do |p|
       hash = {
         id: p.id,
@@ -112,15 +133,23 @@ class CacheBundlesController < ApplicationController
         status: p.status,
         is_public: p.is_public,
         inherit_members: p.inherit_members,
-        created_on: p.created_on,
-        updated_on: p.updated_on,
-        trackers: p.trackers.map { |t| { id: t.id, name: t.name } },
+        created_on: to_api_time(p.created_on),
+        updated_on: to_api_time(p.updated_on),
+        # 個別 API (render_api_includes) と揃える。trackers は rolled_up_trackers(false).visible
+        # （issue_tracking モジュール有効＋対象ユーザの view_issues 可視性でフィルタ）、
+        # time_entry_activities は activities（アクティブのみ）。
+        trackers: p.rolled_up_trackers(false).visible(target_user).map { |t| { id: t.id, name: t.name } },
         enabled_modules: p.enabled_modules.map { |m| { id: m.id, name: m.name } },
         issue_categories: p.issue_categories.map { |c| { id: c.id, name: c.name } },
-        time_entry_activities: p.activities(true).map { |a| { id: a.id, name: a.name } },
-        issue_custom_fields: p.issue_custom_fields.map { |cf| { id: cf.id, name: cf.name } }
+        time_entry_activities: p.activities.map { |a| { id: a.id, name: a.name } },
+        # 個別 API (GET /projects.json?include=issue_custom_fields) は all_issue_custom_fields
+        # （is_for_all の CF も含む）を返す。issue_custom_fields（明示有効化のみ）では is_for_all が
+        # 欠落し個別 API と食い違うため all_issue_custom_fields に揃える。
+        issue_custom_fields: p.all_issue_custom_fields.map { |cf| { id: cf.id, name: cf.name } }
       }
-      hash[:parent] = { id: p.parent.id, name: p.parent.name } if p.parent
+      # 個別 API (projects/index.api.rsb) は parent.visible? のときだけ親を出す。
+      # 対象ユーザに不可視な親（private な親等）の名前を漏らさないよう、可視性でゲートして揃える。
+      hash[:parent] = { id: p.parent.id, name: p.parent.name } if p.parent && p.parent.visible?(target_user)
       hash
     end
   end
@@ -221,20 +250,24 @@ class CacheBundlesController < ApplicationController
       login: u.login,
       firstname: u.firstname,
       lastname: u.lastname,
-      created_on: u.created_on
+      created_on: to_api_time(u.created_on)
     }
     hash[:mail] = u.mail if u.mail.present?
-    hash[:last_login_on] = u.last_login_on if u.last_login_on
+    hash[:last_login_on] = to_api_time(u.last_login_on) if u.last_login_on
     hash[:status] = u.status if u.status
     hash[:admin] = u.admin? if u.admin?
-    # API キーと auth_source などは現状の app 側で使っていないので含めない
+    # 個別 API (GET /users.json) が返すフィールドに揃える。
+    hash[:updated_on] = to_api_time(u.updated_on)
+    hash[:passwd_changed_on] = to_api_time(u.passwd_changed_on)
+    hash[:twofa_scheme] = u.twofa_scheme
+    # API キーと auth_source などは個別 API も返さないため含めない
     hash
   end
 
   # Role 一覧 + 各 Role の詳細（permissions）。
   # 現状 CacheService は GetObjects + 各 GetObject(id) の N+1 だが、ここでサーバ側でまとめて返す。
   # givable（builtin=0）のみ。個別 API (GET /roles.json) はビルトインロール
-  # （Non member / Anonymous）を除外するため、それに揃える（#2779）。
+  # （Non member / Anonymous）を除外するため、それに揃える。
   def fetch_roles
     Role.givable.map do |r|
       hash = {
@@ -254,7 +287,7 @@ class CacheBundlesController < ApplicationController
 
   # Group 一覧 + 各 Group の詳細（users 含む）。admin 権限が必要。
   # givable（type='Group'）のみ。個別 API (GET /groups.json) はビルトイングループ
-  # （Anonymous / Non member）を builtin=1 指定時以外は除外するため、それに揃える（#2779）。
+  # （Anonymous / Non member）を builtin=1 指定時以外は除外するため、それに揃える。
   def fetch_groups
     return [] unless User.current.admin?
 
@@ -309,7 +342,7 @@ class CacheBundlesController < ApplicationController
   # ProjectVersions: { project_id => [...] }
   # 個別 API (GET /projects/:id/versions.json) はコアで view_issues 権限を要求する
   # （versions#index は view_issues 配下）。cache_bundle でも対象ユーザの view_issues を確認し、
-  # 権限が無いプロジェクトは空で返す（過剰露出の是正・#2779）。
+  # 権限が無いプロジェクトは空で返す（過剰露出の是正）。
   def fetch_per_project_versions(user)
     result = {}
     Project.where(id: visible_project_ids(user)).each do |project|
@@ -328,11 +361,15 @@ class CacheBundlesController < ApplicationController
             description: v.description,
             status: v.status,
             sharing: v.sharing,
-            created_on: v.created_on,
-            updated_on: v.updated_on
+            created_on: to_api_time(v.created_on),
+            updated_on: to_api_time(v.updated_on)
           }
           h[:due_date] = v.due_date if v.due_date
           h[:wiki_page_title] = v.wiki_page_title if v.wiki_page_title.present?
+          # 個別 API (GET /projects/:id/versions.json) は render_api_custom_values で
+          # 対象ユーザに可視な CF 値を返す。cache_bundle でも同じ値を同じ形で返して揃える。
+          cf_values = to_api_custom_field_values(v.visible_custom_field_values(user))
+          h[:custom_fields] = cf_values if cf_values.present?
           h
         end
         result[pid.to_s] = versions
@@ -351,7 +388,7 @@ class CacheBundlesController < ApplicationController
   # 個別 API (GET /projects/:id/issue_categories.json) はコアで manage_categories 権限を要求する
   # （view_members / view_issues のような閲覧用の緩い権限が存在しない）。cache_bundle は本来サーバ側で
   # 権限判定して個別 API と等価な結果を返す契約のため、ここでも対象ユーザの manage_categories を確認し、
-  # 権限が無いプロジェクトは空で返す（過剰露出の是正・最小権限化 #2779）。
+  # 権限が無いプロジェクトは空で返す（過剰露出の是正・最小権限化）。
   def fetch_per_project_issue_categories(user)
     result = {}
     active_projects = Project.where(id: visible_project_ids(user), status: Project::STATUS_ACTIVE)

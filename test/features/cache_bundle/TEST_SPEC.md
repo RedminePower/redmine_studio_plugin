@@ -125,8 +125,8 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
 | roles | array | ロール（permissions 込み。文字列配列 `["view_issues", ...]`。本体 roles/:id API と同じ） |
 | groups | array | グループ（admin のみ取得、users 込み） |
 | project_memberships | dict | `{ project_id => [...] }` ロックユーザを除外 |
-| project_versions | dict | `{ project_id => [...] }` 対象ユーザが view_issues 権限を持つプロジェクトのみ版を返す（権限が無ければ空配列。個別 API と同じゲート・#2779） |
-| project_issue_categories | dict | `{ project_id => [...] }` Active プロジェクトのみ。対象ユーザが manage_categories 権限を持つプロジェクトのみカテゴリを返す（権限が無ければ空配列。個別 API と同じゲート・#2779） |
+| project_versions | dict | `{ project_id => [...] }` 対象ユーザが view_issues 権限を持つプロジェクトのみ版を返す（権限が無ければ空配列。個別 API と同じゲート） |
+| project_issue_categories | dict | `{ project_id => [...] }` Active プロジェクトのみ。対象ユーザが manage_categories 権限を持つプロジェクトのみカテゴリを返す（権限が無ければ空配列。個別 API と同じゲート） |
 | errors | array | 部分失敗時のメタデータ。成功時は空配列 |
 
 **非 admin ユーザの場合:**
@@ -271,6 +271,41 @@ puts missing.empty? ? 'PASS' : "FAIL: Missing keys: #{missing.join(', ')}"
 
 ---
 
+### [1-8-2] fetch_projects の埋め込み includes が個別 API (render_api_includes) と一致する
+
+`issue_custom_fields` は `all_issue_custom_fields`（is_for_all 込み）、`time_entry_activities` は
+`activities`（アクティブのみ）、`trackers` は `rolled_up_trackers(false).visible(対象ユーザ)` と揃える。
+
+**確認方法:**
+```ruby
+admin = User.find(1)
+User.current = admin
+controller = CacheBundlesController.new
+result = controller.send(:fetch_projects, admin)
+
+ok = true
+Project.visible(admin).each do |p|
+  row = result.find { |h| h[:id] == p.id }
+  next if row.nil?
+  cf = row[:issue_custom_fields].map { |x| x[:id] }.sort
+  exp_cf = p.all_issue_custom_fields.map(&:id).sort
+  act = row[:time_entry_activities].map { |x| x[:id] }.sort
+  exp_act = p.activities.map(&:id).sort
+  tr = row[:trackers].map { |x| x[:id] }.sort
+  exp_tr = p.rolled_up_trackers(false).visible(admin).map(&:id).sort
+  if cf != exp_cf || act != exp_act || tr != exp_tr
+    ok = false
+    puts "FAIL project=#{p.id} cf=#{cf}/#{exp_cf} act=#{act}/#{exp_act} tr=#{tr}/#{exp_tr}"
+  end
+end
+puts ok ? 'PASS' : 'FAIL: 埋め込み includes が render_api_includes と不一致'
+```
+
+**期待結果:**
+- 各プロジェクトの `issue_custom_fields` / `time_entry_activities` / `trackers` が個別 API と一致する（is_for_all CF を含み、inactive activity を含まず、trackers は view_issues 可視性で絞られる）
+
+---
+
 ### [1-9] fetch_issue_statuses が sorted 順を返す
 
 **確認方法:**
@@ -365,7 +400,7 @@ end
 ### [1-13-2] fetch_groups はビルトイングループを除外する
 
 個別 API (GET /groups.json) は builtin=1 指定時以外ビルトイングループ（Anonymous / Non member）を除外する。
-cache_bundle も `Group.givable` に揃える（#2779）。
+cache_bundle も `Group.givable` に揃える。
 
 **確認方法:**
 ```ruby
@@ -406,7 +441,7 @@ end
 ### [1-14-2] fetch_roles はビルトインロールを除外する
 
 個別 API (GET /roles.json) はビルトインロール（Non member / Anonymous）を除外する（`Role.givable`）。
-cache_bundle も揃える（#2779）。
+cache_bundle も揃える。
 
 **確認方法:**
 ```ruby
@@ -465,7 +500,7 @@ puts ok ? 'PASS' : 'FAIL: locked users found in memberships'
 ### [1-16-2] fetch_per_project_versions は view_issues 権限で出し分ける
 
 個別 API (GET /projects/:id/versions.json) はコアで view_issues 権限を要求する（versions#index は view_issues 配下）。
-cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正・#2779）。
+cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正）。
 
 **確認方法:**
 ```ruby
@@ -501,6 +536,77 @@ end
 
 ---
 
+### [1-16-3] fetch_per_project_versions は Version のカスタムフィールド値を出力する
+
+個別 API (GET /projects/:id/versions.json) は `render_api_custom_values` で対象ユーザに可視な
+Version のカスタムフィールド値を返す。cache_bundle でも同じ値を同じ形（単一値はスカラー、複数値は
+配列＋`multiple`）で返し、個別経路と cache_bundle 経路の CacheBundle を完全一致させる。
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+controller.instance_variable_set(:@errors, [])
+
+# 可視な CF 値を持つ Version と、その版が見えるユーザを探す
+target = nil
+Version.all.each do |v|
+  next if v.visible_custom_field_values.reject { |cv| cv.value.blank? }.empty?
+  u = v.project.members.map(&:user).find { |m| m.is_a?(User) && m.allowed_to?(:view_issues, v.project) }
+  (target = [v, u]; break) if u
+end
+
+if target.nil?
+  puts 'SKIP: 可視な CF 値を持つ Version が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
+else
+  v, u = target
+  res = controller.send(:fetch_per_project_versions, u)
+  row = res[v.project_id.to_s].find { |r| r[:id] == v.id }
+  ok  = row[:custom_fields].present? && row[:custom_fields].all? { |cf| cf.key?(:id) && cf.key?(:name) && cf.key?(:value) }
+  puts ok ? 'PASS' : "FAIL: #{row[:custom_fields].inspect}"
+end
+```
+
+**期待結果:**
+- CF 値を持つ Version の行に `custom_fields` が含まれ、各要素が `{id, name, value}`（複数値時は `multiple: true` と value 配列）である
+- CF 値が無い Version は `custom_fields` キーを持たない（個別 API の `unless custom_values.empty?` と同じ）
+
+---
+
+### [1-16-4] fetch_projects は対象ユーザに不可視な親を出力しない（parent 可視性ゲート）
+
+個別 API (projects/index.api.rsb) は `parent.visible?` のときだけ `parent` を出力する。
+cache_bundle でも対象ユーザに不可視な親（private な親等）の名前を漏らさないよう可視性でゲートする。
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+
+# 親が「見えるユーザ」と「見えないユーザ」で出し分くプロジェクトを探す
+target = nil
+Project.where.not(parent_id: nil).each do |c|
+  members = c.members.map(&:user).select { |m| m.is_a?(User) }
+  seer   = members.find { |m|  c.parent.visible?(m) }
+  hidden = members.find { |m| !c.parent.visible?(m) }
+  (target = [c, seer, hidden]; break) if seer && hidden
+end
+
+if target.nil?
+  puts 'SKIP: 親可視性が分かれる member を持つ子プロジェクトが無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
+else
+  c, seer, hidden = target
+  row_seer   = controller.send(:fetch_projects, seer).find   { |r| r[:id] == c.id }
+  row_hidden = controller.send(:fetch_projects, hidden).find { |r| r[:id] == c.id }
+  ok = row_seer[:parent].present? && !row_hidden.key?(:parent)
+  puts ok ? 'PASS' : "FAIL: seer=#{row_seer[:parent].inspect} hidden=#{row_hidden[:parent].inspect}"
+end
+```
+
+**期待結果:**
+- 親が可視なユーザ: 子プロジェクトの行に `parent` が含まれる
+- 親が不可視なユーザ: 子プロジェクトの行に `parent` キーが含まれない（親名を漏らさない）
+
+---
+
 ### [1-17] fetch_per_project_issue_categories は Active プロジェクトのみが対象
 
 **確認方法:**
@@ -523,7 +629,7 @@ puts intersect.empty? ? 'PASS' : "FAIL: non-active project IDs found: #{intersec
 ### [1-17-2] fetch_per_project_issue_categories は manage_categories 権限で出し分ける
 
 個別 API (GET /projects/:id/issue_categories.json) はコアで manage_categories 権限を要求するため、
-cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正・#2779）。
+cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正）。
 
 **確認方法:**
 ```ruby
