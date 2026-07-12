@@ -75,7 +75,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `roles` | Role の配列 | givable（builtin=0）のみ。ビルトインロール（Non member / Anonymous）は含まない（個別 API `GET /roles.json` と同じ・#2779）。各 Role の `permissions` を文字列配列で含む（本体 roles/:id API と同じ形式。リスト取得 + 詳細取得の N+1 をサーバ側で吸収） |
 | `groups` | Group の配列 | **admin 権限が必要**。givable（type='Group'）のみ。ビルトイングループ（Anonymous / Non member）は含まない（個別 API `GET /groups.json` と同じ・#2779）。各 Group の `users` を含む |
 | `project_memberships` | `{ project_id => [Membership...] }` | 対象ユーザが member となっているプロジェクトについて取得。ロックユーザの membership は除外 |
-| `project_versions` | `{ project_id => [Version...] }` | 対象ユーザが member となっているプロジェクト |
+| `project_versions` | `{ project_id => [Version...] }` | 対象ユーザが member となっているプロジェクト。さらに対象ユーザが **`view_issues` 権限**を持つプロジェクトのみ版を返す（個別 API `GET /projects/:id/versions.json` と同じゲート。権限が無いプロジェクトは空配列・#2779） |
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | 対象ユーザが member となっている **Active** プロジェクトのみ。さらに対象ユーザが **`manage_categories` 権限**を持つプロジェクトのみカテゴリを返す（個別 API `GET /projects/:id/issue_categories.json` と同じゲート。権限が無いプロジェクトは空配列） |
 | `errors` | `{ section, project_id?, code, message }` の配列 | 部分失敗のメタデータ。空配列なら全成功 |
 

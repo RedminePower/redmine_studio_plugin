@@ -125,13 +125,14 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
 | roles | array | ロール（permissions 込み。文字列配列 `["view_issues", ...]`。本体 roles/:id API と同じ） |
 | groups | array | グループ（admin のみ取得、users 込み） |
 | project_memberships | dict | `{ project_id => [...] }` ロックユーザを除外 |
-| project_versions | dict | `{ project_id => [...] }` |
+| project_versions | dict | `{ project_id => [...] }` 対象ユーザが view_issues 権限を持つプロジェクトのみ版を返す（権限が無ければ空配列。個別 API と同じゲート・#2779） |
 | project_issue_categories | dict | `{ project_id => [...] }` Active プロジェクトのみ。対象ユーザが manage_categories 権限を持つプロジェクトのみカテゴリを返す（権限が無ければ空配列。個別 API と同じゲート・#2779） |
 | errors | array | 部分失敗時のメタデータ。成功時は空配列 |
 
 **非 admin ユーザの場合:**
 - `custom_fields` / `users` / `groups` は空配列で返る
 - `project_memberships` / `project_versions` / `project_issue_categories` は対象ユーザが member となっているプロジェクトのみ
+- `project_versions` はさらに view_issues 権限を持つプロジェクトのみ（権限が無いプロジェクトは空配列）
 - `project_issue_categories` はさらに manage_categories 権限を持つプロジェクトのみ（権限が無いプロジェクトは空配列）
 
 ---
@@ -458,6 +459,45 @@ puts ok ? 'PASS' : 'FAIL: locked users found in memberships'
 
 **期待結果:**
 - 返ってきた membership の `user` にロックユーザが含まれない
+
+---
+
+### [1-16-2] fetch_per_project_versions は view_issues 権限で出し分ける
+
+個別 API (GET /projects/:id/versions.json) はコアで view_issues 権限を要求する（versions#index は view_issues 配下）。
+cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正・#2779）。
+
+**確認方法:**
+```ruby
+controller = CacheBundlesController.new
+controller.instance_variable_set(:@errors, [])
+
+# 版を持つプロジェクトの中から、view_issues を「持つ member」と「持たない member」を探す
+target = nil
+Project.where(status: Project::STATUS_ACTIVE).each do |p|
+  next if Version.where(project_id: p.id).empty?
+  members = p.members.map(&:user).select { |u| u.is_a?(User) && u.status == User::STATUS_ACTIVE }
+  with_perm    = members.find { |u|  u.allowed_to?(:view_issues, p) }
+  without_perm = members.find { |u| !u.allowed_to?(:view_issues, p) }
+  if with_perm && without_perm
+    target = [p, with_perm, without_perm]; break
+  end
+end
+
+if target.nil?
+  puts 'SKIP: view_issues 権限の有無で分かれる member を持つプロジェクトが無い'
+else
+  p, with_perm, without_perm = target
+  res_with    = controller.send(:fetch_per_project_versions, with_perm)
+  res_without = controller.send(:fetch_per_project_versions, without_perm)
+  ok = res_with[p.id.to_s].present? && res_without[p.id.to_s] == []
+  puts ok ? 'PASS' : "FAIL: with=#{res_with[p.id.to_s].inspect} without=#{res_without[p.id.to_s].inspect}"
+end
+```
+
+**期待結果:**
+- view_issues を持つユーザ: 当該プロジェクトの版が全件返る
+- view_issues を持たないユーザ: 当該プロジェクトは空配列（キーは存在する）
 
 ---
 

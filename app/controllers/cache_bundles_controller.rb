@@ -307,9 +307,18 @@ class CacheBundlesController < ApplicationController
   end
 
   # ProjectVersions: { project_id => [...] }
+  # 個別 API (GET /projects/:id/versions.json) はコアで view_issues 権限を要求する
+  # （versions#index は view_issues 配下）。cache_bundle でも対象ユーザの view_issues を確認し、
+  # 権限が無いプロジェクトは空で返す（過剰露出の是正・#2779）。
   def fetch_per_project_versions(user)
     result = {}
-    visible_project_ids(user).each do |pid|
+    Project.where(id: visible_project_ids(user)).each do |project|
+      pid = project.id
+      # view_issues を持たないロールは個別 API では 403 になるため、cache_bundle でも空を返す。
+      unless user.allowed_to?(:view_issues, project)
+        result[pid.to_s] = []
+        next
+      end
       begin
         versions = Version.where(project_id: pid).map do |v|
           h = {

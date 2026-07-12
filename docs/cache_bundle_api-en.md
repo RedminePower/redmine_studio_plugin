@@ -75,7 +75,7 @@ The root has a single fixed key `cache_bundle`. Each section's content follows r
 | `roles` | Array of Role | Only givable roles (builtin=0); builtin roles (Non member / Anonymous) are excluded (same as the individual API `GET /roles.json`; #2779). Includes `permissions` of each Role as an array of strings (same format as the core roles/:id API; absorbing the list-then-details N+1 on the server side) |
 | `groups` | Array of Group | **Admin privilege required**. Only givable groups (type='Group'); builtin groups (Anonymous / Non member) are excluded (same as the individual API `GET /groups.json`; #2779). Includes `users` of each Group |
 | `project_memberships` | `{ project_id => [Membership...] }` | Retrieved for projects where the target user is a member. Locked-user memberships are excluded |
-| `project_versions` | `{ project_id => [Version...] }` | Projects where the target user is a member |
+| `project_versions` | `{ project_id => [Version...] }` | Projects where the target user is a member, and further only projects where the target user has the **`view_issues`** permission (same gate as the individual API `GET /projects/:id/versions.json`; projects without the permission return an empty array; #2779) |
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | Only **Active** projects where the target user is a member, and further only projects where the target user has the **`manage_categories`** permission (same gate as the individual API `GET /projects/:id/issue_categories.json`; projects without the permission return an empty array) |
 | `errors` | Array of `{ section, project_id?, code, message }` | Partial failure metadata. Empty array means full success |
 
