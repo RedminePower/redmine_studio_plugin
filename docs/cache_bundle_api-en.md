@@ -104,18 +104,3 @@ Example:
 ```
 
 Fatal errors (e.g., HTTP 500 where the request itself fails) are expected to be handled on the client side by falling back to the individual API flow.
-
-## Version
-
-This endpoint was added in redmine_studio_plugin **1.6.0**. Redmine Studio side confirms via the `Plugin API` that `redmine_studio_plugin >= 1.6.0` before calling this endpoint.
-
-## Client-Side Usage Example
-
-Example code calling from the C# client (redmine-net-api) of Redmine Studio:
-
-```csharp
-var prm = new NameValueCollection { { RedmineKeys.USER_ID, "42" } };
-var bundle = await masterServiceAsync.GetCacheBundleAsync(prm);
-```
-
-The returned `CacheBundle` instance from `GetCacheBundleAsync` is poured into `Data.*` by `CacheService.applyCacheBundle()`.

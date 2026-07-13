@@ -104,18 +104,3 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 ```
 
 致命的エラー（HTTP 500 など、リクエストそのものが失敗した場合）はクライアント側で個別 API フローへフォールバックする想定。
-
-## バージョン
-
-このエンドポイントは redmine_studio_plugin **1.6.0** で追加された。Redmine Studio 側は `redmine_studio_plugin >= 1.6.0` であることを `Plugin API` で確認してから本エンドポイントを呼び出す。
-
-## クライアント側の使用例
-
-Redmine Studio の C# クライアント（redmine-net-api）から呼び出すコード例:
-
-```csharp
-var prm = new NameValueCollection { { RedmineKeys.USER_ID, "42" } };
-var bundle = await masterServiceAsync.GetCacheBundleAsync(prm);
-```
-
-`GetCacheBundleAsync` の戻り値の `CacheBundle` インスタンスを `CacheService.applyCacheBundle()` で `Data.*` に流し込む。
