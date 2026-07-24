@@ -11,6 +11,13 @@ module RedmineStudioPlugin
         attr_writer :rally_tooltip
       end
 
+      # ラリー回数の値を返す。
+      # IssueRallyCount レコードが未生成のチケット（担当者変更が一度もない）は 0 を返す。
+      # children_count_value と対の位置づけで、カラム表示・API レスポンス双方から本メソッドを呼ぶ。
+      def rally_count_value
+        rally_count_record&.count || 0
+      end
+
       # プリロード済みのツールチップを返す。
       # プリロードされていない場合は個別にロードする。
       def rally_tooltip

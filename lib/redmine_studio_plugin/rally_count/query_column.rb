@@ -13,7 +13,7 @@ module RedmineStudioPlugin
       end
 
       def value_object(issue)
-        issue.rally_count_record&.count || 0
+        issue.rally_count_value
       end
     end
   end

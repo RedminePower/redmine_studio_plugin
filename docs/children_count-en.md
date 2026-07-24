@@ -12,6 +12,7 @@ Displays the number of direct child issues for each issue in the list. A high ch
 - Sortable by children count (default: descending)
 - Click the count to navigate to a list of issues whose parent is the current issue
 - Hover over the count to see child issue IDs and subjects in a tooltip
+- Provide a plugin-specific endpoint (`GET /issues_with_extras/:id.json` / `.xml`, `GET /issues_with_extras.json` / `.xml`) that returns responses including the `children_count` field
 
 ## How to Use
 

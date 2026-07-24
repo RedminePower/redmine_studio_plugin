@@ -11,6 +11,7 @@ Displays the number of times an issue's assignee has been changed as "Rally Coun
 - Display rally count as an inline column in the issue list
 - Sortable by rally count (default: descending)
 - Hover over the rally count to see the assignee change history in a tooltip
+- Provide a plugin-specific endpoint (`GET /issues_with_extras/:id.json` / `.xml`, `GET /issues_with_extras.json` / `.xml`) that returns responses including the `rally_count` field
 
 ## How to Use
 

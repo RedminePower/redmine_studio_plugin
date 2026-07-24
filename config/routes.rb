@@ -13,6 +13,9 @@ Rails.application.routes.draw do
   # Cache Bundle
   get 'cache_bundle', to: 'cache_bundles#show'
 
+  # Issues With Extras (issues API with plugin-provided extra fields: rally_count / children_count)
+  resources :issues_with_extras, only: [:index, :show]
+
   # Teams Button
   get 'teams_button/user_email/:id', to: 'teams_button#user_email'
 
