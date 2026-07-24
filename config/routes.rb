@@ -13,6 +13,9 @@ Rails.application.routes.draw do
   # Cache Bundle
   get 'cache_bundle', to: 'cache_bundles#show'
 
+  # Issues Bulk Write (create/update multiple issues in one request)
+  post 'issues/bulk_write', to: 'issues_bulk_write#create'
+
   # Issues With Extras (issues API with plugin-provided extra fields: rally_count / children_count)
   resources :issues_with_extras, only: [:index, :show]
 
