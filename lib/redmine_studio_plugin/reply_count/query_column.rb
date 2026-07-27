@@ -1,19 +1,19 @@
 # frozen_string_literal: true
 
 module RedmineStudioPlugin
-  module RallyCount
+  module ReplyCount
     class QueryColumn < ::QueryColumn
       def initialize
         super(
-          :rally_count,
-          sortable: "COALESCE(#{IssueRallyCount.table_name}.count, 0)",
+          :reply_count,
+          sortable: "COALESCE(#{IssueReplyCount.table_name}.count, 0)",
           default_order: 'desc',
-          caption: :field_rally_count
+          caption: :field_reply_count
         )
       end
 
       def value_object(issue)
-        issue.rally_count_value
+        issue.reply_count_value
       end
     end
   end

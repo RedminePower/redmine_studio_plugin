@@ -1,22 +1,22 @@
-# Rally Count（ラリー回数）テスト仕様書
+# Reply Count（返答回数）テスト仕様書
 
 ## 概要
 
-チケット一覧に「ラリー回数」カラムを追加する機能のテスト仕様。担当者の切り替え回数を表示し、ツールチップで担当者の変更履歴を確認できる。
+チケット一覧に「返答回数」カラムを追加する機能のテスト仕様。担当者の切り替え回数を表示し、ツールチップで担当者の変更履歴を確認できる。
 
 ## 機能の内部実装
 
 | 項目 | 値 |
 |------|-----|
 | プラグインID | `:redmine_studio_plugin` |
-| カラム名 | `:rally_count` |
-| カラムクラス | `RedmineStudioPlugin::RallyCount::QueryColumn` |
-| Issue パッチ | `RedmineStudioPlugin::RallyCount::IssuePatch` |
-| IssueQuery パッチ | `RedmineStudioPlugin::RallyCount::IssueQueryPatch` |
-| QueriesHelper パッチ | `RedmineStudioPlugin::RallyCount::QueriesHelperPatch` |
-| モデル | `IssueRallyCount` |
-| テーブル | `issue_rally_counts` |
-| ロケールファイル | `config/locales/rally_count_ja.yml`, `config/locales/rally_count_en.yml` |
+| カラム名 | `:reply_count` |
+| カラムクラス | `RedmineStudioPlugin::ReplyCount::QueryColumn` |
+| Issue パッチ | `RedmineStudioPlugin::ReplyCount::IssuePatch` |
+| IssueQuery パッチ | `RedmineStudioPlugin::ReplyCount::IssueQueryPatch` |
+| QueriesHelper パッチ | `RedmineStudioPlugin::ReplyCount::QueriesHelperPatch` |
+| モデル | `IssueReplyCount` |
+| テーブル | `issue_reply_counts` |
+| ロケールファイル | `config/locales/reply_count_ja.yml`, `config/locales/reply_count_en.yml` |
 
 ---
 
@@ -26,7 +26,7 @@
 
 **確認方法:**
 ```ruby
-puts ActiveRecord::Base.connection.table_exists?(:issue_rally_counts)
+puts ActiveRecord::Base.connection.table_exists?(:issue_reply_counts)
 ```
 
 **期待結果:** `true`
@@ -35,7 +35,7 @@ puts ActiveRecord::Base.connection.table_exists?(:issue_rally_counts)
 
 **確認方法:**
 ```ruby
-columns = ActiveRecord::Base.connection.columns(:issue_rally_counts)
+columns = ActiveRecord::Base.connection.columns(:issue_reply_counts)
 columns.each { |c| puts "#{c.name}: #{c.type}" }
 ```
 
@@ -48,8 +48,8 @@ columns.each { |c| puts "#{c.name}: #{c.type}" }
 
 **確認方法:**
 ```ruby
-puts defined?(IssueRallyCount)
-puts IssueRallyCount.ancestors.include?(ActiveRecord::Base)
+puts defined?(IssueReplyCount)
+puts IssueReplyCount.ancestors.include?(ActiveRecord::Base)
 ```
 
 **期待結果:** 両方 `true` または `constant` と `true`
@@ -58,7 +58,7 @@ puts IssueRallyCount.ancestors.include?(ActiveRecord::Base)
 
 **確認方法:**
 ```ruby
-puts Issue.included_modules.map(&:name).include?('RedmineStudioPlugin::RallyCount::IssuePatch')
+puts Issue.included_modules.map(&:name).include?('RedmineStudioPlugin::ReplyCount::IssuePatch')
 ```
 
 **期待結果:** `true`
@@ -67,7 +67,7 @@ puts Issue.included_modules.map(&:name).include?('RedmineStudioPlugin::RallyCoun
 
 **確認方法:**
 ```ruby
-puts IssueQuery.ancestors.map(&:name).include?('RedmineStudioPlugin::RallyCount::IssueQueryPatch')
+puts IssueQuery.ancestors.map(&:name).include?('RedmineStudioPlugin::ReplyCount::IssueQueryPatch')
 ```
 
 **期待結果:** `true`
@@ -76,7 +76,7 @@ puts IssueQuery.ancestors.map(&:name).include?('RedmineStudioPlugin::RallyCount:
 
 **確認方法:**
 ```ruby
-puts QueriesHelper.instance_methods.include?(:column_value_with_rally_count)
+puts QueriesHelper.instance_methods.include?(:column_value_with_reply_count)
 ```
 
 **期待結果:** `true`
@@ -85,7 +85,7 @@ puts QueriesHelper.instance_methods.include?(:column_value_with_rally_count)
 
 **確認方法:**
 ```ruby
-col = IssueQuery.available_columns.find { |c| c.name == :rally_count }
+col = IssueQuery.available_columns.find { |c| c.name == :reply_count }
 puts "found: #{col ? true : false}"
 puts "inline: #{col ? col.inline? : 'N/A'}"
 puts "sortable: #{col ? col.sortable? : 'N/A'}"
@@ -101,13 +101,13 @@ puts "sortable: #{col ? col.sortable? : 'N/A'}"
 **確認方法:**
 ```ruby
 I18n.locale = :ja
-puts "field_rally_count: #{I18n.t(:field_rally_count)}"
-puts "label_rally_count_no_assignee: #{I18n.t(:label_rally_count_no_assignee)}"
+puts "field_reply_count: #{I18n.t(:field_reply_count)}"
+puts "label_reply_count_no_assignee: #{I18n.t(:label_reply_count_no_assignee)}"
 ```
 
 **期待結果:**
-- `field_rally_count: ラリー回数`
-- `label_rally_count_no_assignee: （担当者なし）`
+- `field_reply_count: 返答回数`
+- `label_reply_count_no_assignee: （担当者なし）`
 
 ### [1-9] 担当者変更時にカウントがインクリメントされる
 
@@ -120,7 +120,7 @@ user_b = User.where(status: 1).where.not(id: 1).first
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'RC_1-9_Increment', author: user_a)
 # 作成時はカウントなし
-count_after_create = IssueRallyCount.find_by(issue_id: issue.id)&.count || 0
+count_after_create = IssueReplyCount.find_by(issue_id: issue.id)&.count || 0
 puts "after_create: #{count_after_create}"
 
 # 担当者変更1回目
@@ -128,7 +128,7 @@ issue.reload
 issue.init_journal(user_a)
 issue.assigned_to = user_b
 issue.save
-count_after_first = IssueRallyCount.find_by(issue_id: issue.id)&.count || 0
+count_after_first = IssueReplyCount.find_by(issue_id: issue.id)&.count || 0
 puts "after_first_change: #{count_after_first}"
 
 # 担当者変更2回目
@@ -136,7 +136,7 @@ issue.reload
 issue.init_journal(user_a)
 issue.assigned_to = user_a
 issue.save
-count_after_second = IssueRallyCount.find_by(issue_id: issue.id)&.count || 0
+count_after_second = IssueReplyCount.find_by(issue_id: issue.id)&.count || 0
 puts "after_second_change: #{count_after_second}"
 ```
 
@@ -154,7 +154,7 @@ project = Project.first
 user_a = User.find(1)
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'RC_1-10_CreateWithAssignee', author: user_a, assigned_to: user_a)
-count = IssueRallyCount.find_by(issue_id: issue.id)&.count || 0
+count = IssueReplyCount.find_by(issue_id: issue.id)&.count || 0
 puts "count: #{count}"
 ```
 
@@ -174,7 +174,7 @@ issue.reload
 issue.init_journal(user_a)
 issue.assigned_to = nil
 issue.save
-count = IssueRallyCount.find_by(issue_id: issue.id)&.count || 0
+count = IssueReplyCount.find_by(issue_id: issue.id)&.count || 0
 puts "count: #{count}"
 ```
 
@@ -196,9 +196,9 @@ issue.assigned_to = user_b
 issue.save
 
 issue_id = issue.id
-exists_before = IssueRallyCount.exists?(issue_id: issue_id)
+exists_before = IssueReplyCount.exists?(issue_id: issue_id)
 issue.destroy
-exists_after = IssueRallyCount.exists?(issue_id: issue_id)
+exists_after = IssueReplyCount.exists?(issue_id: issue_id)
 
 puts "before_delete: #{exists_before}"
 puts "after_delete: #{exists_after}"
@@ -230,7 +230,7 @@ issue.assigned_to = user_a
 issue.save
 
 fresh = Issue.find(issue.id)
-tooltip = fresh.rally_tooltip
+tooltip = fresh.reply_tooltip
 puts tooltip
 ```
 
@@ -247,9 +247,9 @@ puts tooltip
 ```ruby
 User.current = User.find(1)
 q = IssueQuery.new(name: 'test', filters: {})
-q.column_names = [:id, :subject, :rally_count]
+q.column_names = [:id, :subject, :reply_count]
 issues = q.issues(limit: 5)
-preloaded = issues.select { |i| i.instance_variable_defined?(:@rally_tooltip) }
+preloaded = issues.select { |i| i.instance_variable_defined?(:@reply_tooltip) }
 puts "preloaded: #{preloaded.size}"
 puts "total: #{issues.size}"
 ```
@@ -261,8 +261,8 @@ puts "total: #{issues.size}"
 **確認方法:**
 ```ruby
 q = IssueQuery.new(name: 'test', filters: {})
-q.column_names = [:id, :rally_count]
-q.sort_criteria = [['rally_count', 'desc']]
+q.column_names = [:id, :reply_count]
+q.sort_criteria = [['reply_count', 'desc']]
 # ソート実行でエラーが出ないことを確認
 issues = q.issues(limit: 5)
 puts "sort_ok: true"
@@ -277,7 +277,7 @@ puts "count: #{issues.size}"
 
 **確認方法:**
 ```ruby
-col = IssueQuery.available_columns.find { |c| c.name == :rally_count }
+col = IssueQuery.available_columns.find { |c| c.name == :reply_count }
 puts "default_order: #{col.default_order}"
 ```
 
@@ -310,11 +310,11 @@ temp_user.destroy
 
 # ツールチップを確認（エラーにならないこと）
 fresh = Issue.find(issue.id)
-tooltip = fresh.rally_tooltip
+tooltip = fresh.reply_tooltip
 puts "tooltip: #{tooltip}"
 puts "no_error: true"
 
-no_assignee = I18n.t(:label_rally_count_no_assignee)
+no_assignee = I18n.t(:label_reply_count_no_assignee)
 puts "contains_no_assignee: #{tooltip.include?(no_assignee)}"
 ```
 
@@ -326,31 +326,31 @@ puts "contains_no_assignee: #{tooltip.include?(no_assignee)}"
 
 ## 2. HTTP テスト
 
-### [2-1] チケット一覧で rally_count カラムを指定して表示できる
+### [2-1] チケット一覧で reply_count カラムを指定して表示できる
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count' `
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=reply_count' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
 
 **期待結果:** `200`
 
-### [2-2] rally_count カラムがチケット一覧のカラムオプションに表示される
+### [2-2] reply_count カラムがチケット一覧のカラムオプションに表示される
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1' `
   -Credential $cred -AllowUnencryptedAuthentication
-$response.Content -match 'rally_count'
+$response.Content -match 'reply_count'
 ```
 
 **期待結果:** `True`
 
-### [2-3] ラリー回数の値が HTML に出力される
+### [2-3] 返答回数の値が HTML に出力される
 
 **前提条件:**
 - 担当者変更のあるチケットが存在すること
@@ -358,9 +358,9 @@ $response.Content -match 'rally_count'
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:desc' `
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=reply_count&sort=reply_count:desc' `
   -Credential $cred -AllowUnencryptedAuthentication
-$response.Content -match 'class="rally-count"'
+$response.Content -match 'class="reply-count"'
 ```
 
 **期待結果:** `True`
@@ -370,46 +370,46 @@ $response.Content -match 'class="rally-count"'
 **確認方法:**
 ```powershell
 # [2-3] と同じリクエスト
-$response.Content -match 'title=.*class="rally-count"'
+$response.Content -match 'title=.*class="reply-count"'
 ```
 
 **期待結果:** `True`
 
-### [2-5] ラリー回数でソートできる（降順）
+### [2-5] 返答回数でソートできる（降順）
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:desc' `
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=reply_count&sort=reply_count:desc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
 
 **期待結果:** `200`（エラーなくソートされた一覧が表示）
 
-### [2-6] ラリー回数でソートできる（昇順）
+### [2-6] 返答回数でソートできる（昇順）
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&sort=rally_count:asc' `
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=reply_count&sort=reply_count:asc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
 
 **期待結果:** `200`
 
-### [2-7] ラリー回数 0 のチケットも表示される
+### [2-7] 返答回数 0 のチケットも表示される
 
 **前提条件:**
-- 担当者変更のないチケットが存在すること（チケットID を `{NO_RALLY_ID}` とする）
+- 担当者変更のないチケットが存在すること（チケットID を `{NO_REPLY_ID}` とする）
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=rally_count&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_RALLY_ID}' `
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=reply_count&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_REPLY_ID}' `
   -Credential $cred -AllowUnencryptedAuthentication
-$response.Content -match 'rally-count.*title=.*>0<'
+$response.Content -match 'reply-count.*title=.*>0<'
 ```
 
 **期待結果:** `True`

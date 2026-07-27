@@ -2,7 +2,7 @@
 
 ## 概要
 
-`GET /issues_with_extras/:id` および `GET /issues_with_extras` のテスト仕様。Redmine 標準の `GET /issues/:id.json` / `/issues.json` のレスポンスに、本 Plugin が提供する `rally_count` / `children_count` を追加で含めて返す専用エンドポイント。
+`GET /issues_with_extras/:id` および `GET /issues_with_extras` のテスト仕様。Redmine 標準の `GET /issues/:id.json` / `/issues.json` のレスポンスに、本 Plugin が提供する `reply_count` / `children_count` を追加で含めて返す専用エンドポイント。
 
 標準の `IssuesController` を継承し、view (`app/views/issues_with_extras/*.api.rsb`) で 2 フィールドを追加している。標準の `/issues` エンドポイントは変更しないため、他 Plugin と共存可能。
 
@@ -20,7 +20,7 @@
 
 ### 追加されるフィールド
 
-- `rally_count`: `issue.rally_count_value`（担当者変更回数、rally_count 機能と同じ値）
+- `reply_count`: `issue.reply_count_value`（担当者変更回数、reply_count 機能と同じ値）
 - `children_count`: `issue.children_count_value`（直下の子チケット数、children_count 機能と同じ値）
 
 ---
@@ -74,7 +74,7 @@ puts "index_exists: #{File.exist?(index_view)}"
 
 `{BaseUrl}` は `http://localhost:3061/redmine_61`、`{Username}` / `{Password}` は Redmine 管理者アカウント（`admin` / `password123` など）。
 
-### [2-1] GET /issues_with_extras/:id.json で rally_count / children_count が返る
+### [2-1] GET /issues_with_extras/:id.json で reply_count / children_count が返る
 
 **前提条件:**
 - 任意の Issue が存在すること（チケットID を `{ISSUE_ID}` とする）
@@ -83,63 +83,63 @@ puts "index_exists: #{File.exist?(index_view)}"
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras/{ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
-Write-Host "has_rally_count: $($r.issue.PSObject.Properties.Name -contains 'rally_count')"
+Write-Host "has_reply_count: $($r.issue.PSObject.Properties.Name -contains 'reply_count')"
 Write-Host "has_children_count: $($r.issue.PSObject.Properties.Name -contains 'children_count')"
-Write-Host "rally_count: $($r.issue.rally_count)"
+Write-Host "reply_count: $($r.issue.reply_count)"
 Write-Host "children_count: $($r.issue.children_count)"
 ```
 
 **期待結果:**
-- `has_rally_count: True`
+- `has_reply_count: True`
 - `has_children_count: True`
-- `rally_count` の値は整数
+- `reply_count` の値は整数
 - `children_count` の値は整数
 
-### [2-2] GET /issues_with_extras/:id.xml で rally_count / children_count が返る
+### [2-2] GET /issues_with_extras/:id.xml で reply_count / children_count が返る
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues_with_extras/{ISSUE_ID}.xml' -Credential $cred -AllowUnencryptedAuthentication
-Write-Host "rally_count_matched: $($response.Content -match '<rally_count[^>]*>\d+</rally_count>')"
+Write-Host "reply_count_matched: $($response.Content -match '<reply_count[^>]*>\d+</reply_count>')"
 Write-Host "children_count_matched: $($response.Content -match '<children_count[^>]*>\d+</children_count>')"
 ```
 
 **期待結果:**
-- `rally_count_matched: True`
+- `reply_count_matched: True`
 - `children_count_matched: True`
 
-### [2-3] GET /issues_with_extras.json で issues 配列に rally_count / children_count が返る
+### [2-3] GET /issues_with_extras.json で issues 配列に reply_count / children_count が返る
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras.json?limit=3' -Credential $cred -AllowUnencryptedAuthentication
 Write-Host "issues_count: $($r.issues.Count)"
-Write-Host "first_has_rally_count: $($r.issues[0].PSObject.Properties.Name -contains 'rally_count')"
+Write-Host "first_has_reply_count: $($r.issues[0].PSObject.Properties.Name -contains 'reply_count')"
 Write-Host "first_has_children_count: $($r.issues[0].PSObject.Properties.Name -contains 'children_count')"
 ```
 
 **期待結果:**
 - `issues_count`: 3 (または 3 未満、DB のチケット数による)
-- `first_has_rally_count: True`
+- `first_has_reply_count: True`
 - `first_has_children_count: True`
 
-### [2-4] GET /issues_with_extras.xml で issue 要素に rally_count / children_count が返る
+### [2-4] GET /issues_with_extras.xml で issue 要素に reply_count / children_count が返る
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues_with_extras.xml?limit=3' -Credential $cred -AllowUnencryptedAuthentication
-Write-Host "rally_count_matched: $($response.Content -match '<rally_count[^>]*>\d+</rally_count>')"
+Write-Host "reply_count_matched: $($response.Content -match '<reply_count[^>]*>\d+</reply_count>')"
 Write-Host "children_count_matched: $($response.Content -match '<children_count[^>]*>\d+</children_count>')"
 ```
 
 **期待結果:**
-- `rally_count_matched: True`
+- `reply_count_matched: True`
 - `children_count_matched: True`
 
-### [2-5] 標準 GET /issues/:id.json では rally_count / children_count が返らない（副作用ゼロ確認）
+### [2-5] 標準 GET /issues/:id.json では reply_count / children_count が返らない（副作用ゼロ確認）
 
 Plugin が標準エンドポイントを変更していないことを確認する回帰テスト。
 
@@ -147,26 +147,26 @@ Plugin が標準エンドポイントを変更していないことを確認す�
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $r = Invoke-RestMethod -Uri '{BaseUrl}/issues/{ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
-Write-Host "has_rally_count: $($r.issue.PSObject.Properties.Name -contains 'rally_count')"
+Write-Host "has_reply_count: $($r.issue.PSObject.Properties.Name -contains 'reply_count')"
 Write-Host "has_children_count: $($r.issue.PSObject.Properties.Name -contains 'children_count')"
 ```
 
 **期待結果:**
-- `has_rally_count: False`
+- `has_reply_count: False`
 - `has_children_count: False`
 
-### [2-6] 標準 GET /issues.json では rally_count / children_count が返らない（副作用ゼロ確認）
+### [2-6] 標準 GET /issues.json では reply_count / children_count が返らない（副作用ゼロ確認）
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $r = Invoke-RestMethod -Uri '{BaseUrl}/issues.json?limit=1' -Credential $cred -AllowUnencryptedAuthentication
-Write-Host "first_has_rally_count: $($r.issues[0].PSObject.Properties.Name -contains 'rally_count')"
+Write-Host "first_has_reply_count: $($r.issues[0].PSObject.Properties.Name -contains 'reply_count')"
 Write-Host "first_has_children_count: $($r.issues[0].PSObject.Properties.Name -contains 'children_count')"
 ```
 
 **期待結果:**
-- `first_has_rally_count: False`
+- `first_has_reply_count: False`
 - `first_has_children_count: False`
 
 ### [2-7] 認証は標準 IssuesController と同一挙動
@@ -211,7 +211,7 @@ Write-Host "only_in_std: $($onlyInStd -join ',')"
 ```
 
 **期待結果:**
-- `only_in_extras: rally_count,children_count`（追加した 2 フィールドのみ差分）
+- `only_in_extras: reply_count,children_count`（追加した 2 フィールドのみ差分）
 - `only_in_std:` (空)
 
 ### [2-9] Issue API レスポンスの他フィールドが Redmine 本体と同一（等価性検証、index）
@@ -234,7 +234,7 @@ Write-Host "only_in_std: $($onlyInStd -join ',')"
 ```
 
 **期待結果:**
-- `only_in_extras: rally_count,children_count`
+- `only_in_extras: reply_count,children_count`
 - `only_in_std:` (空)
 
 ### [2-10] pagination が動作する

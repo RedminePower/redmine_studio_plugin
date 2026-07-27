@@ -13,7 +13,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Wiki Lists** - Macros to display wiki pages and issue lists
 - **Subtask List Accordion** - Adds accordion functionality to the subtask list
 - **Journals List** - Displays comment history with status and assignee in the issue list
-- **Rally Count** - Displays assignee change count (rally count) in the issue list
+- **Reply Count** - Displays assignee change count (reply count) in the issue list
 - **Children Count** - Displays the number of direct child issues in the issue list
 - **API** - APIs used internally by Redmine Studio
   - **Plugin API** - Retrieves plugin information
@@ -167,14 +167,14 @@ Adds a "Comment History" display option to the issue list. When enabled, a table
 
 For details, see [docs/journals_list-en.md](docs/journals_list-en.md).
 
-## Rally Count
+## Reply Count
 
-Displays the number of times an issue's assignee has been changed as "Rally Count". A high rally count may indicate misalignment in requirements or a large number of review comments, serving as a useful metric for analysis.
+Displays the number of times an issue's assignee has been changed as "Reply Count". A high reply count may indicate misalignment in requirements or a large number of review comments, serving as a useful metric for analysis.
 
-- Sortable by rally count
-- Hover over the rally count to see the assignee change history in a tooltip
+- Sortable by reply count
+- Hover over the reply count to see the assignee change history in a tooltip
 
-For details, see [docs/rally_count-en.md](docs/rally_count-en.md).
+For details, see [docs/reply_count-en.md](docs/reply_count-en.md).
 
 ## Children Count
 

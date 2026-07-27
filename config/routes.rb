@@ -16,7 +16,7 @@ Rails.application.routes.draw do
   # Issues Bulk Write (create/update multiple issues in one request)
   post 'issues/bulk_write', to: 'issues_bulk_write#create'
 
-  # Issues With Extras (issues API with plugin-provided extra fields: rally_count / children_count)
+  # Issues With Extras (issues API with plugin-provided extra fields: reply_count / children_count)
   resources :issues_with_extras, only: [:index, :show]
 
   # Teams Button

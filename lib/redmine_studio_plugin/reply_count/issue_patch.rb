@@ -1,32 +1,32 @@
 # frozen_string_literal: true
 
 module RedmineStudioPlugin
-  module RallyCount
+  module ReplyCount
     module IssuePatch
       extend ActiveSupport::Concern
 
       included do
-        after_save :update_rally_count
-        has_one :rally_count_record, class_name: 'IssueRallyCount', dependent: :destroy
-        attr_writer :rally_tooltip
+        after_save :update_reply_count
+        has_one :reply_count_record, class_name: 'IssueReplyCount', dependent: :destroy
+        attr_writer :reply_tooltip
       end
 
-      # ラリー回数の値を返す。
-      # IssueRallyCount レコードが未生成のチケット（担当者変更が一度もない）は 0 を返す。
+      # 返答回数の値を返す。
+      # IssueReplyCount レコードが未生成のチケット（担当者変更が一度もない）は 0 を返す。
       # children_count_value と対の位置づけで、カラム表示・API レスポンス双方から本メソッドを呼ぶ。
-      def rally_count_value
-        rally_count_record&.count || 0
+      def reply_count_value
+        reply_count_record&.count || 0
       end
 
       # プリロード済みのツールチップを返す。
       # プリロードされていない場合は個別にロードする。
-      def rally_tooltip
-        @rally_tooltip || load_rally_tooltip
+      def reply_tooltip
+        @reply_tooltip || load_reply_tooltip
       end
 
       class_methods do
-        # チケット一覧に対して、ラリー回数のツールチップを一括プリロードする。
-        def load_rally_tooltips(issues)
+        # チケット一覧に対して、返答回数のツールチップを一括プリロードする。
+        def load_reply_tooltips(issues)
           return unless issues.any?
 
           issue_ids = issues.map(&:id)
@@ -43,7 +43,7 @@ module RedmineStudioPlugin
           user_ids = changes.flat_map { |_, ov, v| [ov, v] }.compact.reject(&:empty?).map(&:to_i).uniq
           user_names = User.where(id: user_ids).map { |u| [u.id, u.name] }.to_h
 
-          no_assignee = I18n.t(:label_rally_count_no_assignee)
+          no_assignee = I18n.t(:label_reply_count_no_assignee)
 
           # チケットごとにツールチップを構築
           changes_by_issue = {}
@@ -57,7 +57,7 @@ module RedmineStudioPlugin
             if issue_changes.nil? || issue_changes.empty?
               # 変更なし: 現在の担当者のみ
               name = issue.assigned_to ? issue.assigned_to.name : no_assignee
-              issue.rally_tooltip = name
+              issue.reply_tooltip = name
             else
               # 初期担当者（最初の変更の old_value）
               first_old = issue_changes.first[:old]
@@ -70,7 +70,7 @@ module RedmineStudioPlugin
                 lines << " - #{name}"
               end
 
-              issue.rally_tooltip = lines.join("\n")
+              issue.reply_tooltip = lines.join("\n")
             end
           end
         end
@@ -78,16 +78,16 @@ module RedmineStudioPlugin
 
       private
 
-      def update_rally_count
+      def update_reply_count
         return unless saved_change_to_assigned_to_id?
         return if id_previously_changed? # 新規作成時は除外
 
-        record = IssueRallyCount.find_or_initialize_by(issue_id: id)
+        record = IssueReplyCount.find_or_initialize_by(issue_id: id)
         record.count = (record.count || 0) + 1
         record.save
       end
 
-      def load_rally_tooltip
+      def load_reply_tooltip
         changes = JournalDetail
           .joins(:journal)
           .where(journals: { journalized_type: 'Issue', journalized_id: id })
@@ -95,7 +95,7 @@ module RedmineStudioPlugin
           .order('journals.id')
           .pluck(:old_value, :value)
 
-        no_assignee = I18n.t(:label_rally_count_no_assignee)
+        no_assignee = I18n.t(:label_reply_count_no_assignee)
 
         if changes.empty?
           name = assigned_to ? assigned_to.name : no_assignee

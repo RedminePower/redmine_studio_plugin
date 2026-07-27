@@ -1,4 +1,4 @@
-# Redmine 本体の app/views/issues/index.api.rsb を写し取ったコピー + api.rally_count / api.children_count 2 行追加。
+# Redmine 本体の app/views/issues/index.api.rsb を写し取ったコピー + api.reply_count / api.children_count 2 行追加。
 # 本体 view は override せず、専用エンドポイント issues_with_extras のみに適用する。
 # Redmine 本体 index.api.rsb 更新時は本ファイルも追従が必要（TEST_SPEC の等価性テストで検知する）。
 api.array :issues, api_meta(:total_count => @issue_count, :offset => @offset, :limit => @limit) do
@@ -34,8 +34,8 @@ api.array :issues, api_meta(:total_count => @issue_count, :offset => @offset, :l
       api.updated_on issue.updated_on
       api.closed_on  issue.closed_on
 
-      # redmine_studio_plugin: rally_count / children_count を返す
-      api.rally_count(issue.rally_count_value)
+      # redmine_studio_plugin: reply_count / children_count を返す
+      api.reply_count(issue.reply_count_value)
       api.children_count(issue.children_count_value)
 
       api.array :attachments do

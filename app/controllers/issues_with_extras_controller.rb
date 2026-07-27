@@ -3,7 +3,7 @@
 # Issues With Extras API
 #
 # Redmine 標準の GET /issues.json / /issues/:id.json のレスポンスに、
-# 本 Plugin が提供する rally_count / children_count を追加で含めて返す専用エンドポイント。
+# 本 Plugin が提供する reply_count / children_count を追加で含めて返す専用エンドポイント。
 #
 # 実装方針:
 # - 標準の IssuesController を継承。index / show の filter・pagination・include= 処理をそのまま流用する

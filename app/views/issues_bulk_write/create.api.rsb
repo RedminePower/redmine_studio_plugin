@@ -37,8 +37,8 @@ api.array :results do
           api.updated_on issue.updated_on
           api.closed_on issue.closed_on
 
-          # redmine_studio_plugin: rally_count / children_count を返す
-          api.rally_count(issue.rally_count_value)
+          # redmine_studio_plugin: reply_count / children_count を返す
+          api.reply_count(issue.reply_count_value)
           api.children_count(issue.children_count_value)
         end
       else
