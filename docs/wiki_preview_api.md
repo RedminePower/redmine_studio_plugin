@@ -69,7 +69,8 @@ Wiki 記法のテキストを HTML に変換する。
 ```json
 {
   "wiki_preview": {
-    "html": "<h1>見出し</h1>\n\n<ul>\n<li>項目1</li>\n<li>項目2</li>\n</ul>\n\n<p>関連: <a class=\"issue\" href=\"/issues/123\">#123</a></p>"
+    "html": "<h1>見出し</h1>\n\n<ul>\n<li>項目1</li>\n<li>項目2</li>\n</ul>\n\n<p>関連: <a class=\"issue\" href=\"/issues/123\">#123</a></p>",
+    "stylesheets": ["/assets/application-33e739e5.css"]
   }
 }
 ```
@@ -83,6 +84,13 @@ Wiki 記法のテキストを HTML に変換する。
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
 | `html` | string | 変換後の HTML |
+| `stylesheets` | string[] | HTML の表示に使うスタイルシートの URL（相対パス）。ダイジェスト付きパスと現在の UI テーマを解決済み |
+
+### stylesheets の詳細
+
+- Redmine 本体のレイアウトと同じ解決規則に従う。テーマ（`application.css` を持つもの）が設定されていればテーマ側の URL、未設定ならコアの `application.css` の URL を返す
+- スタイルシートは認証不要の静的ファイルとして配信されるため、クライアントは返された URL をそのまま `<link rel="stylesheet">` で参照できる（API キーやログインは不要）
+- URL はホスト相対パスで返る。クライアント側で Redmine の URL と組み合わせて解決する（`<base href>` を使う場合はそのまま埋め込める）
 
 ---
 

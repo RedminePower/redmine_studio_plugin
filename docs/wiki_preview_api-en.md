@@ -69,7 +69,8 @@ Response:
 ```json
 {
   "wiki_preview": {
-    "html": "<h1>Heading</h1>\n\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n\n<p>Related: <a class=\"issue\" href=\"/issues/123\">#123</a></p>"
+    "html": "<h1>Heading</h1>\n\n<ul>\n<li>Item 1</li>\n<li>Item 2</li>\n</ul>\n\n<p>Related: <a class=\"issue\" href=\"/issues/123\">#123</a></p>",
+    "stylesheets": ["/assets/application-33e739e5.css"]
   }
 }
 ```
@@ -83,6 +84,13 @@ Response:
 | Field | Type | Description |
 |-------|------|-------------|
 | `html` | string | The converted HTML |
+| `stylesheets` | string[] | URLs (relative paths) of the stylesheets used to display the HTML. Digested asset paths and the current UI theme are already resolved |
+
+### Details on stylesheets
+
+- Follows the same resolution rule as Redmine's own layout: when a theme that provides `application.css` is configured, the theme's URL is returned; otherwise the core `application.css` URL is returned
+- Stylesheets are served as static files without authentication, so clients can reference the returned URLs directly with `<link rel="stylesheet">` (no API key or login required)
+- URLs are returned as host-relative paths. Resolve them against the Redmine URL on the client side (they can be embedded as-is when using `<base href>`)
 
 ---
 

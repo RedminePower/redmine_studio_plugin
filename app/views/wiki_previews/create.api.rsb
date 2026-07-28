@@ -1,3 +1,8 @@
 api.wiki_preview do
   api.html @html
+  api.array :stylesheets do
+    @stylesheets.each do |url|
+      api.stylesheet url
+    end
+  end
 end

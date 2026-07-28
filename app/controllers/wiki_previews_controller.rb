@@ -9,6 +9,7 @@ class WikiPreviewsController < ApplicationController
 
     project = find_project
     @html = render_wiki(params[:text].to_s, project)
+    @stylesheets = stylesheet_urls
 
     respond_to do |format|
       format.api
@@ -55,5 +56,19 @@ class WikiPreviewsController < ApplicationController
     return nil if params[:project_id].blank?
 
     Project.visible.find(params[:project_id])
+  end
+
+  # プレビュー表示に使うスタイルシートの URL を返す。
+  # ダイジェスト付きパスや現在テーマの解決はサーバー側でしか行えないため、ここで解決して返す。
+  # asset は認証不要の静的ファイルなので、クライアントは URL をそのまま <link> で参照できる。
+  def stylesheet_urls
+    view = view_context
+    source = 'application'
+    theme = view.current_theme
+    if theme && theme.stylesheets.include?(source)
+      # Redmine 本体のレイアウトと同じ解決規則（application.css を持つテーマはテーマ側を採用）
+      source = theme.stylesheet_path(source)
+    end
+    [view.stylesheet_path(source)]
   end
 end

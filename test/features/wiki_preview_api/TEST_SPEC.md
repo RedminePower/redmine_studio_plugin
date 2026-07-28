@@ -23,6 +23,7 @@ Redmine 本体のプレビュー画面と同じ `textilizable` を使用し、�
 | 認証 | API キー必須（未認証で 401） |
 | レンダリング | `view_context.textilizable(text, :project => project)` |
 | フォーマット固定 | textilizable 実行中だけ `lookup_context.formats = [:html]`（ensure で復元）。マクロが描画する HTML パーシャル（`issues/_list` 等）を解決するため。固定しないと JSON/XML 応答の format で `Missing partial` になる |
+| スタイルシート解決 | `stylesheet_urls` が表示用 CSS の URL を返す。Redmine 本体のレイアウトと同じ規則（`application.css` を持つテーマが設定されていればテーマ側、なければコアの `application.css`）で `view_context.stylesheet_path` により解決する |
 
 ### パラメータ
 
@@ -46,7 +47,8 @@ API は JSON と XML の両方をサポートする。
 ```json
 {
   "wiki_preview": {
-    "html": "<h1>見出し</h1>"
+    "html": "<h1>見出し</h1>",
+    "stylesheets": ["/assets/application-33e739e5.css"]
   }
 }
 ```
@@ -58,6 +60,7 @@ API は JSON と XML の両方をサポートする。
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
 | html | string | 変換後の HTML |
+| stylesheets | string[] | 表示用スタイルシートの URL（相対パス、ダイジェスト・テーマ解決済み） |
 
 ### エラーレスポンス
 
@@ -182,6 +185,20 @@ puts html.include?('<h1') ? "PASS (fmt=#{fmt})" : "FAIL: <h1> not found (fmt=#{f
 
 > 補足: マクロ・`#123` リンク・`[[Wiki]]` リンクの展開と空文字の挙動は、実リクエストを通る
 > HTTP テスト（[2-4]〜[2-8]）で検証する。
+
+---
+
+### [1-6] 利用可能なテーマが存在する（[2-17] の前提確認）
+
+**確認方法:**
+```ruby
+themes = Redmine::Themes.themes.map(&:id)
+puts themes.any? ? "PASS (themes=#{themes.inspect}, current=#{Setting.ui_theme.inspect})" : 'FAIL: no themes available'
+```
+
+**期待結果:**
+- テーマが 1 件以上存在する（標準では `alternate` / `classic`）。[2-17] ではこのいずれかを使用する
+- 現在のテーマ設定値も記録し、[2-17] の復元で使用する
 
 ---
 
@@ -428,6 +445,65 @@ try {
 
 **期待結果:**
 - ステータスコード 404 Not Found（admin の API キーで同じ project_id を叩くと 200 になる＝存在はする）
+
+---
+
+### [2-16] stylesheets フィールドにコア CSS の URL が含まれる
+
+**前提条件:** UI テーマが未設定（既定）であること。
+
+**確認方法:**
+```powershell
+$body = @{ text = '* item' } | ConvertTo-Json
+$response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+($response.wiki_preview.stylesheets.Count -ge 1) -and ($response.wiki_preview.stylesheets[0] -match 'application[^/]*\.css')
+```
+
+**期待結果:**
+- `stylesheets` が 1 件以上の配列で、`application*.css`（ダイジェスト付き可）の URL を含む
+
+---
+
+### [2-17] テーマ設定時はテーマの CSS URL を返す
+
+**確認方法:**
+Runner でテーマを設定 → HTTP で確認 → Runner で復元する。
+
+```bash
+# 1. テーマを設定（環境に存在するテーマ ID を使用。[1-6] 参照）
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner 'Setting.ui_theme = %(classic)'"
+```
+
+```powershell
+# 2. stylesheets がテーマのパスを含むことを確認
+$body = @{ text = '* item' } | ConvertTo-Json
+$response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response.wiki_preview.stylesheets[0] -match 'themes/classic'
+```
+
+```bash
+# 3. テーマを復元（元の値に戻す。既定は空文字）
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner 'Setting.ui_theme = %()'"
+```
+
+**期待結果:**
+- 手順 2 で `stylesheets[0]` に `themes/classic` が含まれる
+- 復元後は [2-16] と同じくコア CSS の URL に戻る
+
+---
+
+### [2-18] XML レスポンスに stylesheets 配列が含まれる
+
+**確認方法:**
+```powershell
+$body = @{ text = '* item' } | ConvertTo-Json
+$response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.xml' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+($response.Content -match '<stylesheets type="array">') -and ($response.Content -match '<stylesheet>[^<]*application[^<]*\.css[^<]*</stylesheet>')
+```
+
+**期待結果:**
+- `<stylesheets type="array">` 配下に `<stylesheet>` 要素として CSS の URL が含まれる
+- URL の形式は環境により異なる（Redmine 6.x はダイジェスト付き `application-xxxx.css`、5.x はクエリ付き `application.css?タイムスタンプ`）ため、`.css` の後のクエリ文字列を許容して判定する
 
 ---
 
