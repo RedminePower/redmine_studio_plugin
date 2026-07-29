@@ -241,7 +241,9 @@ puts tooltip
  - {user_a の名前}
 ```
 
-### [1-14] ツールチップのプリロード確認
+### [1-14] reply_items のプリロード確認
+
+reply_count カラム表示時に reply_items (担当者の遷移) が一括プリロードされ、ツールチップは reply_items から導出できることを確認する。
 
 **確認方法:**
 ```ruby
@@ -249,12 +251,15 @@ User.current = User.find(1)
 q = IssueQuery.new(name: 'test', filters: {})
 q.column_names = [:id, :subject, :reply_count]
 issues = q.issues(limit: 5)
-preloaded = issues.select { |i| i.instance_variable_defined?(:@reply_tooltip) }
+preloaded = issues.select { |i| i.instance_variable_get(:@reply_items) }
 puts "preloaded: #{preloaded.size}"
 puts "total: #{issues.size}"
+puts "tooltip_ok: #{issues.all? { |i| i.reply_tooltip.is_a?(String) }}"
 ```
 
-**期待結果:** `preloaded` と `total` が同じ値
+**期待結果:**
+- `preloaded` と `total` が同じ値
+- `tooltip_ok: true`（reply_items から導出したツールチップが文字列で得られる）
 
 ### [1-15] ソート実行確認（joins_for_order_statement）
 

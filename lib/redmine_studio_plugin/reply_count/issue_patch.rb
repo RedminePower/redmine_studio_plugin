@@ -8,7 +8,7 @@ module RedmineStudioPlugin
       included do
         after_save :update_reply_count
         has_one :reply_count_record, class_name: 'IssueReplyCount', dependent: :destroy
-        attr_writer :reply_tooltip
+        attr_writer :reply_items
       end
 
       # 返答回数の値を返す。
@@ -18,15 +18,22 @@ module RedmineStudioPlugin
         reply_count_record&.count || 0
       end
 
-      # プリロード済みのツールチップを返す。
+      # 担当者の遷移（初期担当者 → 変更ごとの新担当者）を { id:, name: } の配列で返す。
+      # 担当者なしは id: 0, name: ''、削除済み等の無効ユーザーは id: 元のID, name: '' で表現する。
+      # 変更履歴がないチケットは現在の担当者 1 件を返す。
       # プリロードされていない場合は個別にロードする。
+      def reply_items
+        @reply_items || load_own_reply_items
+      end
+
+      # HTML カラム表示用のツールチップ。reply_items から組み立てる。
       def reply_tooltip
-        @reply_tooltip || load_reply_tooltip
+        self.class.build_reply_tooltip(reply_items)
       end
 
       class_methods do
-        # チケット一覧に対して、返答回数のツールチップを一括プリロードする。
-        def load_reply_tooltips(issues)
+        # チケット一覧に対して、担当者の遷移 (reply_items) を一括プリロードする。
+        def load_reply_items(issues)
           return unless issues.any?
 
           issue_ids = issues.map(&:id)
@@ -43,36 +50,42 @@ module RedmineStudioPlugin
           user_ids = changes.flat_map { |_, ov, v| [ov, v] }.compact.reject(&:empty?).map(&:to_i).uniq
           user_names = User.where(id: user_ids).map { |u| [u.id, u.name] }.to_h
 
-          no_assignee = I18n.t(:label_reply_count_no_assignee)
-
-          # チケットごとにツールチップを構築
-          changes_by_issue = {}
-          changes.each do |issue_id, old_value, new_value|
-            changes_by_issue[issue_id] ||= []
-            changes_by_issue[issue_id] << { old: old_value, new: new_value }
-          end
+          changes_by_issue = changes.group_by(&:first)
 
           issues.each do |issue|
             issue_changes = changes_by_issue[issue.id]
             if issue_changes.nil? || issue_changes.empty?
               # 変更なし: 現在の担当者のみ
-              name = issue.assigned_to ? issue.assigned_to.name : no_assignee
-              issue.reply_tooltip = name
+              issue.reply_items = [current_assignee_item(issue)]
             else
-              # 初期担当者（最初の変更の old_value）
-              first_old = issue_changes.first[:old]
-              initial = first_old.present? ? (user_names[first_old.to_i] || no_assignee) : no_assignee
-
-              lines = [initial]
-              issue_changes.each do |change|
-                new_val = change[:new]
-                name = new_val.present? ? (user_names[new_val.to_i] || no_assignee) : no_assignee
-                lines << " - #{name}"
+              # 初期担当者（最初の変更の old_value）→ 変更ごとの新担当者
+              items = [to_reply_item(issue_changes.first[1], user_names)]
+              issue_changes.each do |_, _, new_value|
+                items << to_reply_item(new_value, user_names)
               end
-
-              issue.reply_tooltip = lines.join("\n")
+              issue.reply_items = items
             end
           end
+        end
+
+        # reply_items からツールチップ文字列を構築する。
+        # 名前が引けない要素（担当者なし・無効ユーザー）はラベルに置き換える。
+        def build_reply_tooltip(items)
+          no_assignee = I18n.t(:label_reply_count_no_assignee)
+          names = items.map { |item| item[:name].presence || no_assignee }
+          ([names.first] + names.drop(1).map { |n| " - #{n}" }).join("\n")
+        end
+
+        # user id (文字列) を reply_items の 1 要素に変換する。
+        def to_reply_item(value, user_names)
+          return { id: 0, name: '' } if value.blank?
+
+          { id: value.to_i, name: user_names[value.to_i] || '' }
+        end
+
+        # 現在の担当者を reply_items の 1 要素に変換する。
+        def current_assignee_item(issue)
+          issue.assigned_to ? { id: issue.assigned_to.id, name: issue.assigned_to.name } : { id: 0, name: '' }
         end
       end
 
@@ -87,7 +100,8 @@ module RedmineStudioPlugin
         record.save
       end
 
-      def load_reply_tooltip
+      # 単一チケット用: 担当者変更履歴から reply_items を構築する。
+      def load_own_reply_items
         changes = JournalDetail
           .joins(:journal)
           .where(journals: { journalized_type: 'Issue', journalized_id: id })
@@ -95,23 +109,17 @@ module RedmineStudioPlugin
           .order('journals.id')
           .pluck(:old_value, :value)
 
-        no_assignee = I18n.t(:label_reply_count_no_assignee)
+        return [self.class.current_assignee_item(self)] if changes.empty?
 
-        if changes.empty?
-          name = assigned_to ? assigned_to.name : no_assignee
-          return name
+        user_ids = changes.flatten.compact.reject(&:empty?).map(&:to_i).uniq
+        user_names = User.where(id: user_ids).map { |u| [u.id, u.name] }.to_h
+
+        # 初期担当者（最初の変更の old_value）→ 変更ごとの新担当者
+        items = [self.class.to_reply_item(changes.first[0], user_names)]
+        changes.each do |_, new_value|
+          items << self.class.to_reply_item(new_value, user_names)
         end
-
-        first_old = changes.first[0]
-        initial = first_old.present? ? (User.find_by(id: first_old.to_i)&.name || no_assignee) : no_assignee
-
-        lines = [initial]
-        changes.each do |old_value, new_value|
-          name = new_value.present? ? (User.find_by(id: new_value.to_i)&.name || no_assignee) : no_assignee
-          lines << " - #{name}"
-        end
-
-        lines.join("\n")
+        items
       end
     end
   end

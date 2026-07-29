@@ -1,6 +1,11 @@
-# Redmine 本体の app/views/issues/index.api.rsb を写し取ったコピー + api.reply_count / api.children_count 2 行追加。
+# Redmine 本体の app/views/issues/index.api.rsb を写し取ったコピー + api.reply_count / api.children_count ブロック追加。
 # 本体 view は override せず、専用エンドポイント issues_with_extras のみに適用する。
 # Redmine 本体 index.api.rsb 更新時は本ファイルも追従が必要（TEST_SPEC の等価性テストで検知する）。
+
+# reply_items / children_items を一括プリロードして N+1 を避ける
+Issue.load_reply_items(@issues)
+Issue.load_children_counts(@issues)
+
 api.array :issues, api_meta(:total_count => @issue_count, :offset => @offset, :limit => @limit) do
   @issues.each do |issue|
     api.issue do
@@ -35,8 +40,24 @@ api.array :issues, api_meta(:total_count => @issue_count, :offset => @offset, :l
       api.closed_on  issue.closed_on
 
       # redmine_studio_plugin: reply_count / children_count を返す
-      api.reply_count(issue.reply_count_value)
-      api.children_count(issue.children_count_value)
+      # count は件数、items は表示の元情報 (reply: 担当者の遷移、children: 子チケット先頭 10 件)。
+      # 整形 (ラベル化・省略・他N件) はクライアント側の責務とする。
+      api.reply_count do
+        api.count issue.reply_count_value
+        api.array :items do
+          issue.reply_items.each do |item|
+            api.item(:id => item[:id], :name => item[:name])
+          end
+        end
+      end
+      api.children_count do
+        api.count issue.children_count_value
+        api.array :items do
+          issue.children_items.each do |item|
+            api.item(:id => item[:id], :name => item[:name])
+          end
+        end
+      end
 
       api.array :attachments do
         issue.attachments.each do |attachment|

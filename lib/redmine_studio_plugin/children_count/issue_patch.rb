@@ -7,11 +7,11 @@ module RedmineStudioPlugin
 
       # ツールチップに表示する件名の最大文字数（全角）
       SUBJECT_MAX_LENGTH = 30
-      # ツールチップに表示する子チケットの最大件数
-      TOOLTIP_MAX_CHILDREN = 10
+      # items（API レスポンス）とツールチップ表示に含める子チケットの最大件数
+      MAX_ITEMS = 10
 
       included do
-        attr_writer :children_count_value, :children_tooltip
+        attr_writer :children_count_value, :children_items
       end
 
       # プリロード済みの子チケット数を返す。
@@ -22,16 +22,21 @@ module RedmineStudioPlugin
         @children_count_value = Issue.visible.where(parent_id: id).count
       end
 
-      # プリロード済みのツールチップを返す。
+      # 子チケット（先頭 MAX_ITEMS 件）を { id:, name: 件名 } の配列で返す。
       # プリロードされていない場合は個別にロードする。
-      def children_tooltip
-        return @children_tooltip if defined?(@children_tooltip)
+      def children_items
+        return @children_items if defined?(@children_items)
 
-        @children_tooltip = self.class.build_children_tooltip(load_visible_children)
+        @children_items = load_visible_children.first(MAX_ITEMS).map { |cid, subject| { id: cid, name: subject } }
+      end
+
+      # HTML カラム表示用のツールチップ。children_items から組み立てる。
+      def children_tooltip
+        self.class.build_children_tooltip(children_items, children_count_value)
       end
 
       class_methods do
-        # チケット一覧に対して、子チケット数とツールチップを一括プリロードする。
+        # チケット一覧に対して、子チケット数と children_items を一括プリロードする。
         def load_children_counts(issues)
           return unless issues.any?
 
@@ -47,19 +52,17 @@ module RedmineStudioPlugin
           issues.each do |issue|
             rows = children_by_parent[issue.id] || []
             issue.children_count_value = rows.size
-            issue.children_tooltip = build_children_tooltip(rows.map { |_, id, subject| [id, subject] })
+            issue.children_items = rows.first(MAX_ITEMS).map { |_, id, subject| { id: id, name: subject } }
           end
         end
 
-        # 子チケットのツールチップ文字列を構築する。
-        # rows: [[child_id, subject], ...]
-        def build_children_tooltip(rows)
-          return '' if rows.empty?
+        # children_items とトータル件数からツールチップ文字列を構築する。
+        def build_children_tooltip(items, total_count)
+          return '' if items.empty?
 
-          displayed = rows.first(TOOLTIP_MAX_CHILDREN)
-          lines = displayed.map { |child_id, subject| "##{child_id} #{truncate_subject(subject)}" }
+          lines = items.map { |item| "##{item[:id]} #{truncate_subject(item[:name])}" }
 
-          remaining = rows.size - displayed.size
+          remaining = total_count - items.size
           lines << "...#{I18n.t(:label_children_count_others, count: remaining)}" if remaining > 0
 
           lines.join("\n")

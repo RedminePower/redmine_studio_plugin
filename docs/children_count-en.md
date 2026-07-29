@@ -14,6 +14,24 @@ Displays the number of direct child issues for each issue in the list. A high ch
 - Hover over the count to see child issue IDs and subjects in a tooltip
 - Provide a plugin-specific endpoint (`GET /issues_with_extras/:id.json` / `.xml`, `GET /issues_with_extras.json` / `.xml`) that returns responses including the `children_count` field
 
+### API Response Format
+
+`children_count` is returned as a nested object with `count` (the number of child issues) and `items` (child issue IDs and subjects). `items` carries the raw source data for display; formatting such as subject truncation and "N more" is the client's responsibility.
+
+```json
+"children_count": {
+  "count": 12,
+  "items": [
+    { "id": 1234, "name": "Review finding 1" },
+    { "id": 1235, "name": "Review finding 2" }
+  ]
+}
+```
+
+- `items` contains up to the first 10 children (even if `count` exceeds 10; the remainder can be calculated as `count - number of items`)
+- `name` is the full subject (not truncated)
+- Only child issues visible to the logged-in user are included
+
 ## How to Use
 
 ### Issue List

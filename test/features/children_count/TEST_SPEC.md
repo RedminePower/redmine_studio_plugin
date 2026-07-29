@@ -331,7 +331,9 @@ puts "total: #{issues.size}"
 
 **期待結果:** `preloaded` と `total` が同じ値
 
-### [1-15b] プリロード時に children_tooltip もセットされる
+### [1-15b] プリロード時に children_items もセットされる
+
+children_count カラム表示時に children_items (子チケット一覧) が一括プリロードされ、ツールチップは children_items から導出できることを確認する。
 
 **確認方法:**
 ```ruby
@@ -342,13 +344,16 @@ q.column_names = [:id, :subject, :children_count]
 issues = q.issues(limit: 5)
 
 with_count = issues.select { |i| i.instance_variable_defined?(:@children_count_value) }
-with_tooltip = issues.select { |i| i.instance_variable_defined?(:@children_tooltip) }
+with_items = issues.select { |i| i.instance_variable_defined?(:@children_items) }
 puts "with_count: #{with_count.size}"
-puts "with_tooltip: #{with_tooltip.size}"
+puts "with_items: #{with_items.size}"
 puts "total: #{issues.size}"
+puts "tooltip_ok: #{issues.all? { |i| i.children_tooltip.is_a?(String) }}"
 ```
 
-**期待結果:** `with_count`、`with_tooltip`、`total` がすべて同じ値（プリロードで両方セット済み）
+**期待結果:**
+- `with_count`、`with_items`、`total` がすべて同じ値（プリロードで両方セット済み）
+- `tooltip_ok: true`（children_items から導出したツールチップが文字列で得られる）
 
 ### [1-16] ソート実行確認（joins_for_order_statement）
 

@@ -6,7 +6,7 @@ module RedmineStudioPlugin
       def issues(options = {})
         issues = super(options)
         if has_column?(:reply_count)
-          Issue.load_reply_tooltips(issues)
+          Issue.load_reply_items(issues)
         end
         issues
       end

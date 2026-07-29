@@ -1,3 +1,7 @@
+# 成功した issue の reply_items / children_items を一括プリロードして N+1 を避ける
+Issue.load_reply_items(@results.select { |r| r[:success] }.map { |r| r[:issue] })
+Issue.load_children_counts(@results.select { |r| r[:success] }.map { |r| r[:issue] })
+
 api.array :results do
   @results.each do |result|
     api.result do
@@ -38,8 +42,24 @@ api.array :results do
           api.closed_on issue.closed_on
 
           # redmine_studio_plugin: reply_count / children_count を返す
-          api.reply_count(issue.reply_count_value)
-          api.children_count(issue.children_count_value)
+          # count は件数、items は表示の元情報 (reply: 担当者の遷移、children: 子チケット先頭 10 件)。
+          # 整形 (ラベル化・省略・他N件) はクライアント側の責務とする。
+          api.reply_count do
+            api.count issue.reply_count_value
+            api.array :items do
+              issue.reply_items.each do |item|
+                api.item(:id => item[:id], :name => item[:name])
+              end
+            end
+          end
+          api.children_count do
+            api.count issue.children_count_value
+            api.array :items do
+              issue.children_items.each do |item|
+                api.item(:id => item[:id], :name => item[:name])
+              end
+            end
+          end
         end
       else
         api.array :errors do

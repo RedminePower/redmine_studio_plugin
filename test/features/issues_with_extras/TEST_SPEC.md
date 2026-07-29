@@ -6,6 +6,8 @@
 
 標準の `IssuesController` を継承し、view (`app/views/issues_with_extras/*.api.rsb`) で 2 フィールドを追加している。標準の `/issues` エンドポイントは変更しないため、他 Plugin と共存可能。
 
+`reply_count` / `children_count` は `count` + `items` のネストオブジェクトで返す。`items` は表示の元情報（id + name の配列）で、整形（ラベル化・件名の省略・「他N件」）はクライアント側の責務とする。
+
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -20,8 +22,12 @@
 
 ### 追加されるフィールド
 
-- `reply_count`: `issue.reply_count_value`（担当者変更回数、reply_count 機能と同じ値）
-- `children_count`: `issue.children_count_value`（直下の子チケット数、children_count 機能と同じ値）
+- `reply_count`: ネストオブジェクト
+  - `count`: `issue.reply_count_value`（担当者変更回数、reply_count 機能と同じ値）
+  - `items`: 担当者の遷移（初期担当者 → 変更ごとの新担当者）の `{ id, name }` 配列。担当者なしは `id=0, name=''`、削除済み等の無効ユーザーは `id=元のID, name=''`。変更履歴がないチケットは現在の担当者 1 件
+- `children_count`: ネストオブジェクト
+  - `count`: `issue.children_count_value`（直下の子チケット数、children_count 機能と同じ値）
+  - `items`: 子チケットの `{ id, name=件名 }` 配列（先頭 10 件、`MAX_ITEMS` キャップ、visible スコープ適用）
 
 ---
 
@@ -85,15 +91,17 @@ $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password
 $r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras/{ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
 Write-Host "has_reply_count: $($r.issue.PSObject.Properties.Name -contains 'reply_count')"
 Write-Host "has_children_count: $($r.issue.PSObject.Properties.Name -contains 'children_count')"
-Write-Host "reply_count: $($r.issue.reply_count)"
-Write-Host "children_count: $($r.issue.children_count)"
+Write-Host "reply_count_count: $($r.issue.reply_count.count)"
+Write-Host "reply_items_is_array: $($r.issue.reply_count.items -is [array] -or $r.issue.reply_count.items -eq $null -or $r.issue.reply_count.items.Count -ge 0)"
+Write-Host "children_count_count: $($r.issue.children_count.count)"
 ```
 
 **期待結果:**
 - `has_reply_count: True`
 - `has_children_count: True`
-- `reply_count` の値は整数
-- `children_count` の値は整数
+- `reply_count_count` の値は整数（`count` プロパティ）
+- `reply_items_is_array: True`（`items` プロパティが配列）
+- `children_count_count` の値は整数
 
 ### [2-2] GET /issues_with_extras/:id.xml で reply_count / children_count が返る
 
@@ -101,12 +109,12 @@ Write-Host "children_count: $($r.issue.children_count)"
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues_with_extras/{ISSUE_ID}.xml' -Credential $cred -AllowUnencryptedAuthentication
-Write-Host "reply_count_matched: $($response.Content -match '<reply_count[^>]*>\d+</reply_count>')"
-Write-Host "children_count_matched: $($response.Content -match '<children_count[^>]*>\d+</children_count>')"
+Write-Host "reply_count_matched: $($response.Content -match '<reply_count><count>\d+</count><items type=\"array\">')"
+Write-Host "children_count_matched: $($response.Content -match '<children_count><count>\d+</count><items type=\"array\">')"
 ```
 
 **期待結果:**
-- `reply_count_matched: True`
+- `reply_count_matched: True`（`<reply_count><count>N</count><items type="array">` のネスト構造）
 - `children_count_matched: True`
 
 ### [2-3] GET /issues_with_extras.json で issues 配列に reply_count / children_count が返る
@@ -131,12 +139,12 @@ Write-Host "first_has_children_count: $($r.issues[0].PSObject.Properties.Name -c
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues_with_extras.xml?limit=3' -Credential $cred -AllowUnencryptedAuthentication
-Write-Host "reply_count_matched: $($response.Content -match '<reply_count[^>]*>\d+</reply_count>')"
-Write-Host "children_count_matched: $($response.Content -match '<children_count[^>]*>\d+</children_count>')"
+Write-Host "reply_count_matched: $($response.Content -match '<reply_count><count>\d+</count><items type=\"array\">')"
+Write-Host "children_count_matched: $($response.Content -match '<children_count><count>\d+</count><items type=\"array\">')"
 ```
 
 **期待結果:**
-- `reply_count_matched: True`
+- `reply_count_matched: True`（ネスト構造）
 - `children_count_matched: True`
 
 ### [2-5] 標準 GET /issues/:id.json では reply_count / children_count が返らない（副作用ゼロ確認）
@@ -287,6 +295,47 @@ try {
 ```
 
 **期待結果:** `status: 404`
+
+### [2-13] reply_count.items が担当者の遷移を表す
+
+**前提条件:**
+- 担当者変更が 1 回以上あるチケットが存在すること（チケットID を `{CHANGED_ISSUE_ID}` とする）
+
+**確認方法:**
+```powershell
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras/{CHANGED_ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
+$rc = $r.issue.reply_count
+Write-Host "count: $($rc.count)"
+Write-Host "items_count: $($rc.items.Count)"
+Write-Host "chain: $($rc.items | ForEach-Object { "$($_.id):$($_.name)" } | Join-String -Separator ' -> ')"
+```
+
+**期待結果:**
+- `items_count` = `count + 1`（初期担当者 + 変更ごとの新担当者）
+- `chain` が実際の担当者変更履歴と一致する（各要素に `id` と `name` がある）
+- 担当者変更がないチケットでは `count: 0`、`items` は現在の担当者 1 件（担当者未設定なら `id=0, name=''`）
+
+### [2-14] children_count.items が子チケット一覧（最大 10 件）を表す
+
+**前提条件:**
+- 子チケットを持つチケットが存在すること（チケットID を `{PARENT_ISSUE_ID}` とする）
+
+**確認方法:**
+```powershell
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras/{PARENT_ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
+$cc = $r.issue.children_count
+Write-Host "count: $($cc.count)"
+Write-Host "items_count: $($cc.items.Count)"
+Write-Host "first_item: id=$($cc.items[0].id) name=$($cc.items[0].name)"
+Write-Host "capped: $($cc.items.Count -le 10)"
+```
+
+**期待結果:**
+- `count` = 直下の子チケット数（visible スコープ適用）
+- `items` の各要素は `id` = 子チケット ID、`name` = 件名（省略なしの全文）
+- `capped: True`（`items` は最大 10 件。`count` が 10 超でも `items` は 10 件まで）
 
 ---
 
