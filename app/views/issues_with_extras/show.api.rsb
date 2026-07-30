@@ -2,6 +2,12 @@
 # 本体 view は override せず、専用エンドポイント issues_with_extras のみに適用する。
 # Redmine 本体 show.api.rsb 更新時は本ファイルも追従が必要（TEST_SPEC の等価性テストで検知する）。
 # 5.x では journal に updated_on / updated_by が存在しないため Redmine::VERSION::MAJOR で分岐する。
+
+# 最終更新者は可視性を反映するため core の preload 経由で解決する (未プリロード時の last_updated_by は
+# visible フィルタを通らないため)。last_notes は preload しなくても visible だが、対で揃える。
+Issue.load_visible_last_updated_by([@issue])
+Issue.load_visible_last_notes([@issue])
+
 api.issue do
   api.id @issue.id
   api.project(:id => @issue.project_id, :name => @issue.project.name) unless @issue.project.nil?
@@ -52,6 +58,11 @@ api.issue do
       end
     end
   end
+
+  # redmine_studio_plugin: 最終更新者 / 最新コメントを返す (core の last_updated_by / last_notes を利用)
+  last_updated_by = @issue.last_updated_by
+  api.last_updated_by(:id => last_updated_by.id, :name => last_updated_by.name) if last_updated_by.present?
+  api.last_notes @issue.last_notes
 
   render_api_issue_children(@issue, api) if include_in_api_response?('children')
 

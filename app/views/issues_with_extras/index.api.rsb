@@ -2,9 +2,11 @@
 # 本体 view は override せず、専用エンドポイント issues_with_extras のみに適用する。
 # Redmine 本体 index.api.rsb 更新時は本ファイルも追従が必要（TEST_SPEC の等価性テストで検知する）。
 
-# reply_items / children_items を一括プリロードして N+1 を避ける
+# reply_items / children_items / 最終更新者・最新コメントを一括プリロードして N+1 を避ける
 Issue.load_reply_items(@issues)
 Issue.load_children_counts(@issues)
+Issue.load_visible_last_updated_by(@issues)
+Issue.load_visible_last_notes(@issues)
 
 api.array :issues, api_meta(:total_count => @issue_count, :offset => @offset, :limit => @limit) do
   @issues.each do |issue|
@@ -58,6 +60,11 @@ api.array :issues, api_meta(:total_count => @issue_count, :offset => @offset, :l
           end
         end
       end
+
+      # redmine_studio_plugin: 最終更新者 / 最新コメントを返す (core の last_updated_by / last_notes を利用)
+      last_updated_by = issue.last_updated_by
+      api.last_updated_by(:id => last_updated_by.id, :name => last_updated_by.name) if last_updated_by.present?
+      api.last_notes issue.last_notes
 
       api.array :attachments do
         issue.attachments.each do |attachment|

@@ -1,6 +1,9 @@
-# 成功した issue の reply_items / children_items を一括プリロードして N+1 を避ける
-Issue.load_reply_items(@results.select { |r| r[:success] }.map { |r| r[:issue] })
-Issue.load_children_counts(@results.select { |r| r[:success] }.map { |r| r[:issue] })
+# 成功した issue の reply_items / children_items / 最終更新者・最新コメントを一括プリロードして N+1 を避ける
+succeeded_issues = @results.select { |r| r[:success] }.map { |r| r[:issue] }
+Issue.load_reply_items(succeeded_issues)
+Issue.load_children_counts(succeeded_issues)
+Issue.load_visible_last_updated_by(succeeded_issues)
+Issue.load_visible_last_notes(succeeded_issues)
 
 api.array :results do
   @results.each do |result|
@@ -60,6 +63,11 @@ api.array :results do
               end
             end
           end
+
+          # redmine_studio_plugin: 最終更新者 / 最新コメントを返す (core の last_updated_by / last_notes を利用)
+          last_updated_by = issue.last_updated_by
+          api.last_updated_by(:id => last_updated_by.id, :name => last_updated_by.name) if last_updated_by.present?
+          api.last_notes issue.last_notes
         end
       else
         api.array :errors do

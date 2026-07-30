@@ -22,6 +22,7 @@
   - **Activity Info API** - 活動履歴を取得
   - **Cache Bundle API** - Redmine Studio のキャッシュ更新を 1 リクエストで完結させる一括取得
   - **Issues Bulk Write API** - 複数チケットの作成/更新を 1 リクエストで完結させる
+  - **Issues With Extras API** - Issue 取得に Redmine Studio 用の追加フィールドを含めて返す
   - **Wiki Preview API** - Wiki テキストを HTML に変換
 
 ## 対応 Redmine
@@ -200,6 +201,7 @@ Redmine Studio が内部で使用する API 群です。各 API の詳細はリ�
 | Activity Info API | 活動履歴を取得 | [docs/activity_info_api.md](docs/activity_info_api.md) |
 | Cache Bundle API | キャッシュバンドルを取得 | [docs/cache_bundle_api.md](docs/cache_bundle_api.md) |
 | Issues Bulk Write API | 複数チケットの作成/更新を 1 リクエストで実行 | [docs/issues_bulk_write_api.md](docs/issues_bulk_write_api.md) |
+| Issues With Extras API | Issue 取得に Redmine Studio 用の追加フィールドを含めて返す | [docs/issues_with_extras_api.md](docs/issues_with_extras_api.md) |
 | Wiki Preview API | Wiki テキストを HTML に変換 | [docs/wiki_preview_api.md](docs/wiki_preview_api.md) |
 
 ## アンインストール

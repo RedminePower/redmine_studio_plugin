@@ -2,11 +2,13 @@
 
 ## 概要
 
-`GET /issues_with_extras/:id` および `GET /issues_with_extras` のテスト仕様。Redmine 標準の `GET /issues/:id.json` / `/issues.json` のレスポンスに、本 Plugin が提供する `reply_count` / `children_count` を追加で含めて返す専用エンドポイント。
+`GET /issues_with_extras/:id` および `GET /issues_with_extras` のテスト仕様。Redmine 標準の `GET /issues/:id.json` / `/issues.json` のレスポンスに、本 Plugin が提供する `reply_count` / `children_count` と、Redmine 標準の一覧カラム（標準 API では返らない）である `last_updated_by` / `last_notes` を追加で含めて返す専用エンドポイント。
 
-標準の `IssuesController` を継承し、view (`app/views/issues_with_extras/*.api.rsb`) で 2 フィールドを追加している。標準の `/issues` エンドポイントは変更しないため、他 Plugin と共存可能。
+標準の `IssuesController` を継承し、view (`app/views/issues_with_extras/*.api.rsb`) でフィールドを追加している。標準の `/issues` エンドポイントは変更しないため、他 Plugin と共存可能。
 
 `reply_count` / `children_count` は `count` + `items` のネストオブジェクトで返す。`items` は表示の元情報（id + name の配列）で、整形（ラベル化・件名の省略・「他N件」）はクライアント側の責務とする。
+
+`last_updated_by` / `last_notes` は Redmine 本体の `Issue#last_updated_by` / `Issue#last_notes`（およびプリロード `load_visible_last_updated_by` / `load_visible_last_notes`）をそのまま利用する。プラグインでの再実装はしない。
 
 ## 機能の内部実装
 
@@ -28,6 +30,8 @@
 - `children_count`: ネストオブジェクト
   - `count`: `issue.children_count_value`（直下の子チケット数、children_count 機能と同じ値）
   - `items`: 子チケットの `{ id, name=件名 }` 配列（先頭 10 件、`MAX_ITEMS` キャップ、visible スコープ適用）
+- `last_updated_by`: `{ id, name }`（`issue.last_updated_by`＝可視ジャーナルの最新更新者）。更新履歴が無い、または最新ジャーナルの投稿者が実在しない場合は **プロパティごと省略**（nullable ネストの標準パターン）
+- `last_notes`: 文字列（`issue.last_notes`＝可視の最新コメント本文）。コメントが無い場合は空文字 `""`（単純文字列なので常に出力する）
 
 ---
 
@@ -218,9 +222,11 @@ Write-Host "only_in_extras: $($onlyInExt -join ',')"
 Write-Host "only_in_std: $($onlyInStd -join ',')"
 ```
 
-**期待結果:**
-- `only_in_extras: reply_count,children_count`（追加した 2 フィールドのみ差分）
+**期待結果（`{ISSUE_ID}` は更新履歴が 1 件以上あるチケットを使う）:**
+- `only_in_extras: children_count,last_notes,last_updated_by,reply_count`（追加した 4 フィールドのみ差分）
 - `only_in_std:` (空)
+
+※ `last_updated_by` は最終更新者が居るときだけ出力される。更新履歴が無いチケットを使うと `last_updated_by` が差分に現れず 3 フィールドになる。
 
 ### [2-9] Issue API レスポンスの他フィールドが Redmine 本体と同一（等価性検証、index）
 
@@ -242,7 +248,7 @@ Write-Host "only_in_std: $($onlyInStd -join ',')"
 ```
 
 **期待結果:**
-- `only_in_extras: reply_count,children_count`
+- `only_in_extras` は `children_count,last_notes,reply_count` を必ず含む。先頭チケットに更新履歴があれば `last_updated_by` も加わる（最大 `children_count,last_notes,last_updated_by,reply_count`）
 - `only_in_std:` (空)
 
 ### [2-10] pagination が動作する
@@ -336,6 +342,59 @@ Write-Host "capped: $($cc.items.Count -le 10)"
 - `count` = 直下の子チケット数（visible スコープ適用）
 - `items` の各要素は `id` = 子チケット ID、`name` = 件名（省略なしの全文）
 - `capped: True`（`items` は最大 10 件。`count` が 10 超でも `items` は 10 件まで）
+
+### [2-15] show で last_updated_by / last_notes が返る
+
+**前提条件:**
+- 更新履歴（担当者変更やコメント）が 1 件以上あるチケットが存在すること（チケットID を `{UPDATED_ISSUE_ID}` とする）
+
+**確認方法:**
+```powershell
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras/{UPDATED_ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
+Write-Host "has_last_updated_by: $($r.issue.PSObject.Properties.Name -contains 'last_updated_by')"
+Write-Host "last_updated_by: id=$($r.issue.last_updated_by.id) name=$($r.issue.last_updated_by.name)"
+Write-Host "has_last_notes: $($r.issue.PSObject.Properties.Name -contains 'last_notes')"
+Write-Host "last_notes: $($r.issue.last_notes)"
+```
+
+**期待結果:**
+- `has_last_updated_by: True`（最終更新者が居るチケットの場合。id / name を持つ）
+- `has_last_notes: True`（コメントが無いチケットでも空文字で必ず出力される）
+- `last_updated_by` の name が実際の最終更新者と一致、`last_notes` が最新コメント本文と一致
+
+### [2-16] index で last_updated_by / last_notes が返る（プリロード経路）
+
+デフォルトの並び順に依存しないよう、更新履歴ありの `{UPDATED_ISSUE_ID}` と履歴なしの `{NO_JOURNAL_ISSUE_ID}` を `issue_id` フィルタで明示して一覧取得し、プリロード経路（`load_visible_last_updated_by` / `load_visible_last_notes`）が正しく値を配ることを確認する。
+
+**確認方法:**
+```powershell
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras.json?issue_id={UPDATED_ISSUE_ID},{NO_JOURNAL_ISSUE_ID}' -Credential $cred -AllowUnencryptedAuthentication
+foreach ($i in $r.issues) {
+  $hasLub = $i.PSObject.Properties.Name -contains 'last_updated_by'
+  Write-Host "#$($i.id) has_last_updated_by=$hasLub last_notes='$($i.last_notes)'"
+}
+```
+
+**期待結果:**
+- `last_notes` は全 issue で出力される（コメント無しは空文字）
+- `last_updated_by` は更新履歴のある issue でのみ出力される（`{UPDATED_ISSUE_ID}` は True、`{NO_JOURNAL_ISSUE_ID}` は省略）
+- 値が show（[2-15]）と一致する = プリロード経路と単一取得経路で同値
+
+### [2-17] 標準 GET /issues では last_updated_by / last_notes が返らない（副作用ゼロ確認）
+
+**確認方法:**
+```powershell
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues/{ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
+Write-Host "has_last_updated_by: $($r.issue.PSObject.Properties.Name -contains 'last_updated_by')"
+Write-Host "has_last_notes: $($r.issue.PSObject.Properties.Name -contains 'last_notes')"
+```
+
+**期待結果:**
+- `has_last_updated_by: False`
+- `has_last_notes: False`
 
 ---
 
