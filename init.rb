@@ -118,6 +118,9 @@ else
   require_relative 'lib/redmine_studio_plugin/children_count/issue_query_patch'
   require_relative 'lib/redmine_studio_plugin/children_count/queries_helper_patch'
 
+  # Load Spent Hours By User (API 専用。HTML 一覧カラムではないため query_column 等は無し)
+  require_relative 'lib/redmine_studio_plugin/spent_hours_by_user/issue_patch'
+
   # Apply patches directly (init.rb is already executed inside to_prepare)
   Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
   Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
@@ -140,6 +143,9 @@ else
   Issue.include RedmineStudioPlugin::ChildrenCount::IssuePatch
   IssueQuery.prepend RedmineStudioPlugin::ChildrenCount::IssueQueryPatch
   QueriesHelper.include RedmineStudioPlugin::ChildrenCount::QueriesHelperPatch
+
+  # Spent Hours By User patch
+  Issue.include RedmineStudioPlugin::SpentHoursByUser::IssuePatch
 
   # Register columns (QueryColumn が利用可能になった後にロード)
   require_relative 'lib/redmine_studio_plugin/journals_list/query_column'

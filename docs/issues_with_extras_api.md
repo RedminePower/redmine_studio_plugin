@@ -23,7 +23,7 @@ filter・pagination・`include=` などのクエリパラメータは、標準 `
 
 ## 追加されるフィールド
 
-標準 Issue レスポンスに以下の 4 フィールドを追加する。
+標準 Issue レスポンスに以下の 5 フィールドを追加する。
 
 | フィールド | 型 | 由来 | 説明 |
 |-----------|-----|------|------|
@@ -31,6 +31,7 @@ filter・pagination・`include=` などのクエリパラメータは、標準 `
 | `children_count` | object | プラグイン（Children Count 機能） | 直下の子チケット数と一覧 |
 | `last_updated_by` | object | Redmine 標準カラム | 最終更新者 |
 | `last_notes` | string | Redmine 標準カラム | 最新コメント本文 |
+| `spent_hours_by_user` | array | プラグイン（Spent Hours By User 機能） | 担当者ごとの作業時間 |
 
 `last_updated_by` / `last_notes` は Redmine 本体の一覧カラム（`Issue#last_updated_by` / `Issue#last_notes`、プリロード `load_visible_last_updated_by` / `load_visible_last_notes`）をそのまま利用する。標準 API のレスポンスには含まれないが、機能自体は Redmine 標準のものであり、プラグインでの再実装はしていない。
 
@@ -84,9 +85,24 @@ filter・pagination・`include=` などのクエリパラメータは、標準 `
 - 可視の最新コメント本文
 - コメントが 1 件も無い場合は空文字 `""`（単純文字列のため常に出力）
 
+### `spent_hours_by_user`
+
+```json
+"spent_hours_by_user": [
+  { "user_id": 1, "hours": 8.0 },
+  { "user_id": 5, "hours": 2.0 }
+]
+```
+
+- チケットとその**子孫**（subtree）に紐づく作業時間を、担当者（ユーザー）ごとに合計した配列。要素は `{ user_id, hours }`
+- 集計範囲は Redmine 本体の `total_spent_hours` と同じ subtree（nested set の `root_id` 一致 + `lft`/`rgt` 包含）。したがって `hours` の総和は `total_spent_hours` に一致する
+- 可視な作業時間のみ対象（`TimeEntry.visible`）。この self-guard があるため `view_time_entries` 権限で追加のガードはせず常に出力する。権限の無いユーザーには作業時間が見えないため空配列になる
+- 作業時間が 1 件も無いチケットは空配列 `[]`（常に出力）
+- アプリ（表編集）は担当者を切り替えるたびにこの配列から工数を引き、チケットごとの作業時間再取得（N+1）を避ける
+
 ## レスポンス例（JSON, show）
 
-標準 `GET /issues/:id.json` の全フィールドに加えて上記 4 フィールドを含む。
+標準 `GET /issues/:id.json` の全フィールドに加えて上記 5 フィールドを含む。
 
 ```json
 {
@@ -98,7 +114,8 @@ filter・pagination・`include=` などのクエリパラメータは、標準 `
     "reply_count": { "count": 0, "items": [ { "id": 0, "name": "" } ] },
     "children_count": { "count": 2, "items": [ { "id": 1223, "name": "..." } ] },
     "last_updated_by": { "id": 1, "name": "Redmine Admin" },
-    "last_notes": "最新のコメント本文"
+    "last_notes": "最新のコメント本文",
+    "spent_hours_by_user": [ { "user_id": 1, "hours": 8.0 } ]
   }
 }
 ```
@@ -113,14 +130,15 @@ filter・pagination・`include=` などのクエリパラメータは、標準 `
   <children_count><count>2</count><items type="array"><item id="1223" name="..."/></items></children_count>
   <last_updated_by id="1" name="Redmine Admin"/>
   <last_notes>最新のコメント本文</last_notes>
+  <spent_hours_by_user type="array"><item user_id="1" hours="8.0"/></spent_hours_by_user>
 </issue>
 ```
 
-`last_updated_by` は `author` / `assigned_to` と同じ `id` / `name` 属性形式。
+`last_updated_by` は `author` / `assigned_to` と同じ `id` / `name` 属性形式。`spent_hours_by_user` の各 `item` は `user_id` / `hours` 属性を持つ。
 
 ## 標準エンドポイントとの関係
 
-- `issues_with_extras/*.api.rsb` は Redmine 本体の `issues/*.api.rsb` を写し取ったコピーに 4 フィールドを追加したもの。本体 view は override しないため、標準 `GET /issues` は 4 フィールドを返さない（副作用ゼロ）。
+- `issues_with_extras/*.api.rsb` は Redmine 本体の `issues/*.api.rsb` を写し取ったコピーに 5 フィールドを追加したもの。本体 view は override しないため、標準 `GET /issues` は 5 フィールドを返さない（副作用ゼロ）。
 - 本体 view の更新には追従が必要（TEST_SPEC の等価性テストで差分を検知する）。
 
 ## クライアント側の使い方（redmine-net-api）

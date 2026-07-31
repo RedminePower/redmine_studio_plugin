@@ -2,7 +2,7 @@
 
 ## 概要
 
-`GET /issues_with_extras/:id` および `GET /issues_with_extras` のテスト仕様。Redmine 標準の `GET /issues/:id.json` / `/issues.json` のレスポンスに、本 Plugin が提供する `reply_count` / `children_count` と、Redmine 標準の一覧カラム（標準 API では返らない）である `last_updated_by` / `last_notes` を追加で含めて返す専用エンドポイント。
+`GET /issues_with_extras/:id` および `GET /issues_with_extras` のテスト仕様。Redmine 標準の `GET /issues/:id.json` / `/issues.json` のレスポンスに、本 Plugin が提供する `reply_count` / `children_count` / `spent_hours_by_user` と、Redmine 標準の一覧カラム（標準 API では返らない）である `last_updated_by` / `last_notes` を追加で含めて返す専用エンドポイント。
 
 標準の `IssuesController` を継承し、view (`app/views/issues_with_extras/*.api.rsb`) でフィールドを追加している。標準の `/issues` エンドポイントは変更しないため、他 Plugin と共存可能。
 
@@ -32,6 +32,7 @@
   - `items`: 子チケットの `{ id, name=件名 }` 配列（先頭 10 件、`MAX_ITEMS` キャップ、visible スコープ適用）
 - `last_updated_by`: `{ id, name }`（`issue.last_updated_by`＝可視ジャーナルの最新更新者）。更新履歴が無い、または最新ジャーナルの投稿者が実在しない場合は **プロパティごと省略**（nullable ネストの標準パターン）
 - `last_notes`: 文字列（`issue.last_notes`＝可視の最新コメント本文）。コメントが無い場合は空文字 `""`（単純文字列なので常に出力する）
+- `spent_hours_by_user`: `{ user_id, hours }` の配列（`issue.spent_hours_by_user_items`）。チケットとその子孫（subtree）に紐づく作業時間を担当者ごとに合計したもの。集計範囲は `total_spent_hours` と同じ subtree（nested set の `root_id` 一致 + `lft`/`rgt` 包含）で、`hours` の総和は `total_spent_hours` に一致する。可視な作業時間のみ対象（`TimeEntry.visible`）で self-guard のため権限ガードは付けず常に出力（作業時間ゼロは空配列）
 
 ---
 
@@ -223,10 +224,10 @@ Write-Host "only_in_std: $($onlyInStd -join ',')"
 ```
 
 **期待結果（`{ISSUE_ID}` は更新履歴が 1 件以上あるチケットを使う）:**
-- `only_in_extras: children_count,last_notes,last_updated_by,reply_count`（追加した 4 フィールドのみ差分）
+- `only_in_extras: children_count,last_notes,last_updated_by,reply_count,spent_hours_by_user`（追加した 5 フィールドのみ差分）
 - `only_in_std:` (空)
 
-※ `last_updated_by` は最終更新者が居るときだけ出力される。更新履歴が無いチケットを使うと `last_updated_by` が差分に現れず 3 フィールドになる。
+※ `last_updated_by` は最終更新者が居るときだけ出力される。更新履歴が無いチケットを使うと `last_updated_by` が差分に現れず 4 フィールドになる。`spent_hours_by_user` は作業時間ゼロでも空配列で常に出力される。
 
 ### [2-9] Issue API レスポンスの他フィールドが Redmine 本体と同一（等価性検証、index）
 
@@ -248,7 +249,7 @@ Write-Host "only_in_std: $($onlyInStd -join ',')"
 ```
 
 **期待結果:**
-- `only_in_extras` は `children_count,last_notes,reply_count` を必ず含む。先頭チケットに更新履歴があれば `last_updated_by` も加わる（最大 `children_count,last_notes,last_updated_by,reply_count`）
+- `only_in_extras` は `children_count,last_notes,reply_count,spent_hours_by_user` を必ず含む。先頭チケットに更新履歴があれば `last_updated_by` も加わる（最大 `children_count,last_notes,last_updated_by,reply_count,spent_hours_by_user`）
 - `only_in_std:` (空)
 
 ### [2-10] pagination が動作する
@@ -395,6 +396,40 @@ Write-Host "has_last_notes: $($r.issue.PSObject.Properties.Name -contains 'last_
 **期待結果:**
 - `has_last_updated_by: False`
 - `has_last_notes: False`
+
+### [2-18] spent_hours_by_user が担当者ごとの subtree 作業時間を表す
+
+**前提条件:**
+- 子孫を含めて作業時間が登録されたチケットが存在すること（親チケット ID を `{SPENT_PARENT_ID}` とする。子孫にも別ユーザーの作業時間があると分離を確認できる）
+
+**確認方法:**
+```powershell
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues_with_extras/{SPENT_PARENT_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
+$sh = $r.issue.spent_hours_by_user
+$sum = ($sh | Measure-Object -Property hours -Sum).Sum
+Write-Host "has_field: $($r.issue.PSObject.Properties.Name -contains 'spent_hours_by_user')"
+Write-Host "entries: $($sh | ForEach-Object { "$($_.user_id):$($_.hours)" } | Join-String -Separator ',')"
+Write-Host "sum: $sum / total_spent_hours: $($r.issue.total_spent_hours) / match: $($sum -eq $r.issue.total_spent_hours)"
+```
+
+**期待結果:**
+- `has_field: True`（配列で常に出力される）
+- 各要素は `user_id` = ユーザー ID、`hours` = そのユーザーの subtree 合計時間
+- `match: True`（`hours` の総和 = `total_spent_hours`。subtree 集計が正しい）
+- 作業時間が 1 件も無いチケットでは空配列 `[]`
+
+### [2-19] 標準 GET /issues では spent_hours_by_user が返らない（副作用ゼロ確認）
+
+**確認方法:**
+```powershell
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues/{ISSUE_ID}.json' -Credential $cred -AllowUnencryptedAuthentication
+Write-Host "has_spent_hours_by_user: $($r.issue.PSObject.Properties.Name -contains 'spent_hours_by_user')"
+```
+
+**期待結果:**
+- `has_spent_hours_by_user: False`
 
 ---
 

@@ -4,6 +4,7 @@ Issue.load_reply_items(succeeded_issues)
 Issue.load_children_counts(succeeded_issues)
 Issue.load_visible_last_updated_by(succeeded_issues)
 Issue.load_visible_last_notes(succeeded_issues)
+Issue.load_spent_hours_by_user(succeeded_issues)
 
 api.array :results do
   @results.each do |result|
@@ -68,6 +69,14 @@ api.array :results do
           last_updated_by = issue.last_updated_by
           api.last_updated_by(:id => last_updated_by.id, :name => last_updated_by.name) if last_updated_by.present?
           api.last_notes issue.last_notes
+
+          # redmine_studio_plugin: 担当者(ユーザー)ごとの subtree 作業時間を返す
+          # アプリは担当者切り替え時にこの配列から工数を引き、per-issue の作業時間再取得を避ける。
+          api.array :spent_hours_by_user do
+            issue.spent_hours_by_user_items.each do |item|
+              api.item(:user_id => item[:user_id], :hours => item[:hours])
+            end
+          end
         end
       else
         api.array :errors do
