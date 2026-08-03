@@ -66,7 +66,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | セクション | 中身 | 補足 |
 |---|---|---|
 | `markup_lang` | string | `Setting.text_formatting` の値（`textile` / `common_mark` 等） |
-| `projects` | Project の配列 | 対象ユーザが可視できるプロジェクトのみ（`Project.visible` 相当。`Archived` は含まない。個別 projects API と同じスコープ）。`trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` を含む。埋め込み要素は個別 API `render_api_includes` に揃える: `trackers`=`rolled_up_trackers(false).visible(対象ユーザ)`（issue_tracking モジュール＋view_issues 可視性）、`time_entry_activities`=`activities`（アクティブのみ）、`issue_custom_fields`=`all_issue_custom_fields`（is_for_all 込み）。`parent` は対象ユーザに**可視な親のみ**出力する（個別 API `projects/index` の `parent.visible?` ゲートと同じ。不可視な private 親の名前を漏らさない） |
+| `projects` | Project の配列 | 対象ユーザが Redmine 上で見られるプロジェクトのみ（アーカイブ済みは含まない。個別 projects API と同じ範囲）。各プロジェクトに `trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` を含み、内容は個別 projects API の include と揃える（トラッカーは対象ユーザがチケットを見られるもの、作業分類はアクティブなもの、カスタムフィールドは全プロジェクト共通のものも含む）。`parent`（親プロジェクト）は対象ユーザに**見える親のみ**出力する（見えない非公開の親の名前を漏らさない） |
 | `trackers` | Tracker の配列 | `default_status` 含む |
 | `issue_statuses` | IssueStatus の配列 | `is_closed` 含む |
 | `issue_priorities` | IssuePriority の配列 | inactive 含む全件（個別 enumerations API と同じ）。`active` / `is_default` 含む |
@@ -79,7 +79,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `project_memberships` | `{ project_id => [Membership...] }` | 対象ユーザが member となっているプロジェクトについて取得。ロックユーザの membership は除外 |
 | `project_versions` | `{ project_id => [Version...] }` | 対象ユーザが member となっているプロジェクト。さらに対象ユーザが **`view_issues` 権限**を持つプロジェクトのみ版を返す（個別 API `GET /projects/:id/versions.json` と同じゲート。権限が無いプロジェクトは空配列）。各 Version は対象ユーザに可視な **カスタムフィールド値**（`custom_fields`）を含む（個別 API の `render_api_custom_values` と同じ。単一値はスカラー、複数値は配列＋`multiple`） |
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | 対象ユーザが member となっている **Active** プロジェクトのみ。さらに対象ユーザが **`manage_categories` 権限**を持つプロジェクトのみカテゴリを返す（個別 API `GET /projects/:id/issue_categories.json` と同じゲート。権限が無いプロジェクトは空配列） |
-| `errors` | `{ section, project_id?, code, message }` の配列 | 部分失敗のメタデータ。空配列なら全成功 |
+| `errors` | `{ section, code, message }` の配列 | 部分失敗のメタデータ。空配列なら全成功 |
 
 ### 並び順
 
@@ -87,7 +87,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 
 ## 部分失敗時の挙動
 
-セクション単位 / プロジェクト単位で例外を catch し、空配列で埋めつつ `errors` 配列にエントリを追加する。HTTP ステータスは常に 200 を返す（クライアント側でフォールバックして N+1 個別 API 取得に戻ってしまうのを避けるため）。
+セクション単位で例外を catch し、そのセクションを空配列で埋めつつ `errors` 配列にエントリを追加する。HTTP ステータスは常に 200 を返す（クライアント側でフォールバックして N+1 個別 API 取得に戻ってしまうのを避けるため）。
 
 例:
 ```json
@@ -95,11 +95,11 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
   "cache_bundle": {
     "projects": [...],
     "project_memberships": {
-      "207": [...],
+      "207": [],
       "208": []
     },
     "errors": [
-      { "section": "project_memberships", "project_id": 208, "code": 500, "message": "ActiveRecord::StatementInvalid: ..." }
+      { "section": "project_memberships", "code": 500, "message": "ActiveRecord::StatementInvalid: ..." }
     ]
   }
 }

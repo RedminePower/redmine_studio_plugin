@@ -1111,6 +1111,207 @@ end
 
 ---
 
+### [1-35] N+1 バッチ化はコアの per-project 版と等価（projects / memberships / versions / issue_categories）
+
+projects の埋め込み（activities / issue_custom_fields / parent）と per-project 3 種を「まとめて 1 クエリ＋group_by/preload」で
+畳んだ結果が、コアの per-project メソッド（`Project#activities` / `#all_issue_custom_fields` / `parent.visible?` /
+per-pid の `Member`・`Version`・`IssueCategory` ＋各ハッシュ生成ヘルパ）と**完全一致**することを、同一 DB で突き合わせる。
+コア側の仕様変更で赤くなる契約テスト（#2797 規律）。
+
+**確認方法:**
+```ruby
+# admin と、複数プロジェクトの member 非 admin を対象にする
+targets = [User.find(1)]
+mu = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect { |u| u.memberships.map(&:project_id).uniq.size >= 2 }
+targets << mu if mu
+
+bad = []
+targets.each do |user|
+  User.current = user
+  c = CacheBundlesController.new
+  c.instance_variable_set(:@errors, [])
+
+  # projects: activities / issue_custom_fields / parent の等価
+  batched = c.send(:fetch_projects, user)
+  Project.visible(user).sorted.each do |p|
+    row = batched.find { |h| h[:id] == p.id }
+    act = row[:time_entry_activities].map { |x| x[:id] }.sort
+    cf  = row[:issue_custom_fields].map { |x| x[:id] }.sort
+    par = row[:parent] && row[:parent][:id]
+    exp_par = (p.parent && p.parent.visible?(user)) ? p.parent.id : nil
+    bad << "proj p=#{p.id}(#{user.login})" if act != p.activities.map(&:id).sort || cf != p.all_issue_custom_fields.map(&:id).sort || par != exp_par
+  end
+
+  # memberships / versions / issue_categories: バッチ vs per-pid（同一ハッシュ生成ヘルパで突き合わせ）
+  pids = c.send(:visible_project_ids, user)
+  mb = c.send(:fetch_per_project_memberships, user)
+  pids.each do |pid|
+    ref = Member.where(project_id: pid).preload(:user, :principal, :roles, :member_roles, :project).map { |m| c.send(:membership_to_hash, m) }.compact
+    bad << "memb pid=#{pid}(#{user.login})" if mb[pid.to_s] != ref
+  end
+  vb = c.send(:fetch_per_project_versions, user)
+  Project.where(id: pids).each do |pr|
+    next unless user.allowed_to?(:view_issues, pr)
+    ref = Version.where(project_id: pr.id).preload(:custom_values, :project).map { |v| c.send(:version_to_hash, v, user) }
+    bad << "vers pid=#{pr.id}(#{user.login})" if vb[pr.id.to_s] != ref
+  end
+  cb = c.send(:fetch_per_project_issue_categories, user)
+  Project.where(id: pids, status: Project::STATUS_ACTIVE).each do |pr|
+    next unless user.allowed_to?(:manage_categories, pr)
+    ref = IssueCategory.where(project_id: pr.id).preload(:assigned_to, :project).map { |cat| c.send(:category_to_hash, cat) }
+    bad << "cats pid=#{pr.id}(#{user.login})" if cb[pr.id.to_s] != ref
+  end
+end
+puts bad.empty? ? 'PASS' : "FAIL: #{bad.first(8).inspect}"
+```
+
+**期待結果:**
+- バッチ版の projects 埋め込み・memberships・versions（CF 値含む）・issue_categories が、コアの per-project 版と完全一致する
+
+---
+
+### [1-35-2] Version の CF 値ありパスがバッチ化後も一致する（preload が可視性を壊さない）
+
+`preload(:custom_values)` で per-version の CF 値 N+1 を畳んでも、`visible_custom_field_values` の可視性判定と値が
+崩れないことを、**実際に CF 値を持つ Version**で確認する（両側とも空だと検証にならないため値を行使する）。
+
+**確認方法:**
+```ruby
+target = nil
+Version.all.each do |v|
+  next if v.visible_custom_field_values(User.find(1)).reject { |cv| cv.value.blank? }.empty?
+  u = v.project.members.map(&:user).find { |m| m.is_a?(User) && m.status == User::STATUS_ACTIVE && m.allowed_to?(:view_issues, v.project) }
+  (target = [v, u]; break) if u
+end
+if target.nil?
+  puts 'SKIP: CF 値を持つ Version の member が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
+else
+  v, u = target
+  User.current = u
+  c = CacheBundlesController.new
+  c.instance_variable_set(:@errors, [])
+  row = c.send(:fetch_per_project_versions, u)[v.project_id.to_s].find { |h| h[:id] == v.id }
+  ref = c.send(:version_to_hash, v, u)
+  puts (row == ref && row[:custom_fields].present?) ? 'PASS' : "FAIL: batched=#{row&.dig(:custom_fields).inspect} expect=#{ref[:custom_fields].inspect}"
+end
+```
+
+**期待結果:**
+- CF 値を持つ Version の `custom_fields`（`{id, name, value}`）がバッチ化後も個別評価と一致し、空にならない
+
+---
+
+### [1-36] N+1 バッチ化でクエリ本数がプロジェクト／バージョン数に比例しない
+
+memberships はプロジェクト数に依らず一定本数で取得できること（旧 per-project の N+1 が解消）を確認する。
+versions/issue_categories は per-project の権限判定（`allowed_to?`）が残るため O(プロジェクト数) だが、
+**バージョン件数には比例しない**（per-version の CF 値 N+1 が解消）ことを確認する。
+
+**確認方法:**
+```ruby
+def cb_count_sql
+  n = 0
+  cb = ->(_a, _b, _c, _d, p) { n += 1 unless p[:name] =~ /SCHEMA|TRANSACTION/ || p[:sql] =~ /^\s*(BEGIN|COMMIT|RELEASE|SAVEPOINT)/i }
+  ActiveSupport::Notifications.subscribed(cb, 'sql.active_record') { yield }
+  n
+end
+
+# 複数プロジェクトの member を 2 人選び、memberships のクエリ本数がプロジェクト数に依らず一定であること
+members = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE)
+              .select { |u| u.memberships.map(&:project_id).uniq.size >= 1 }
+              .sort_by { |u| -u.memberships.map(&:project_id).uniq.size }
+if members.size < 2
+  puts 'SKIP: member ユーザが 2 人未満'
+else
+  many, few = members.first, members.last
+  User.current = many; cm = CacheBundlesController.new; cm.instance_variable_set(:@errors, [])
+  User.current = few;  cf = CacheBundlesController.new; cf.instance_variable_set(:@errors, [])
+  q_many = cb_count_sql { cm.send(:fetch_per_project_memberships, many) }
+  q_few  = cb_count_sql { cf.send(:fetch_per_project_memberships, few) }
+  pids_many = many.memberships.map(&:project_id).uniq.size
+  pids_few  = few.memberships.map(&:project_id).uniq.size
+  # プロジェクト数が違っても membership のクエリ本数は同じ（N+1 でない）
+  ok = q_many == q_few
+  puts ok ? "PASS (memberships: #{pids_many}proj->#{q_many}q, #{pids_few}proj->#{q_few}q)" : "FAIL: #{pids_many}proj->#{q_many}q vs #{pids_few}proj->#{q_few}q"
+end
+```
+
+**期待結果:**
+- memberships のクエリ本数がプロジェクト数に依存せず一定（per-project の N+1 が解消されている）
+
+---
+
+### [1-37] activities のバッチ化が「上書き除外」分岐を正しく畳む（build_project_activities）
+
+`build_project_activities` は、コア `Project#activities` の「プロジェクト個別の上書き活動があるとき、上書き元の
+システム活動を除外する」ロジックを Ruby で再現した**唯一の箇所**。上書きが 0 件だとバッチ版もコア版も
+システム活動だけの空一致になり、除外分岐が素通りする（#2779 の空リスト盲点）。上書きデータ
+（`setup_cache_bundle_equiv_testdata.rb` が perm-test-2779 に active/inactive の上書きを投入）で
+**分岐が実際に発火し、かつコアと一致**することを確認する。
+
+**確認方法:**
+```ruby
+overridden_pids = TimeEntryActivity.where.not(project_id: nil).pluck(:project_id).uniq
+if overridden_pids.empty?
+  puts 'SKIP: 活動上書きが無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
+else
+  User.current = User.find(1)
+  c = CacheBundlesController.new
+  batched = c.send(:fetch_projects, User.find(1))
+  sys_ids = TimeEntryActivity.where(project_id: nil).active.pluck(:id).sort
+  bad = []; fired = false
+  overridden_pids.each do |pid|
+    p = Project.find(pid)
+    row = batched.find { |h| h[:id] == pid }
+    next if row.nil?
+    got = row[:time_entry_activities].map { |x| x[:id] }.sort
+    bad << "pid=#{pid} got=#{got} exp=#{p.activities.map(&:id).sort}" if got != p.activities.map(&:id).sort
+    fired = true if got != sys_ids  # system 活動そのままではない＝上書き分岐が効いている
+  end
+  puts (bad.empty? && fired) ? "PASS (上書き分岐が発火しコア一致: pids=#{overridden_pids.inspect})" : "FAIL: bad=#{bad.inspect} fired=#{fired}"
+end
+```
+
+**期待結果:**
+- 上書きを持つプロジェクトの `time_entry_activities` がコア `Project#activities` と一致し、かつシステム活動そのままではない（除外/置換が効いている）
+
+---
+
+### [1-38] issue_custom_fields のバッチ化が「for_all＋プロジェクト明示紐付け」の結合を正しく畳む（merge_issue_custom_fields）
+
+`merge_issue_custom_fields` は for_all の CF とプロジェクト明示紐付けの CF を結合する。全 CF が is_for_all だと
+結合相手が空で union が素通りする。プロジェクト専用 CF（`setup_cache_bundle_equiv_testdata.rb` が perm-test-2779 に
+`is_for_all=false` の CF を投入）で**結合が実際に発火し、かつコア `Project#all_issue_custom_fields` と一致**することを確認する。
+
+**確認方法:**
+```ruby
+proj_only = IssueCustomField.where(is_for_all: false).select { |cf| cf.project_ids.any? }
+if proj_only.empty?
+  puts 'SKIP: プロジェクト専用 issue CF が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
+else
+  User.current = User.find(1)
+  c = CacheBundlesController.new
+  batched = c.send(:fetch_projects, User.find(1))
+  bad = []; fired = false
+  proj_only.each do |cf|
+    cf.project_ids.each do |pid|
+      row = batched.find { |h| h[:id] == pid }
+      next if row.nil?
+      got = row[:issue_custom_fields].map { |x| x[:id] }.sort
+      exp = Project.find(pid).all_issue_custom_fields.map(&:id).sort
+      bad << "pid=#{pid} got=#{got} exp=#{exp}" if got != exp
+      fired = true if got.include?(cf.id)  # for_all でない CF が結合されている
+    end
+  end
+  puts (bad.empty? && fired) ? 'PASS (union 分岐が発火しコア一致)' : "FAIL: bad=#{bad.inspect} fired=#{fired}"
+end
+```
+
+**期待結果:**
+- プロジェクト専用 CF を持つプロジェクトの `issue_custom_fields` がコア `Project#all_issue_custom_fields` と一致し、かつ for_all でない CF が結合されている
+
+---
+
 ## 2. HTTP テスト
 
 **実行方法:**

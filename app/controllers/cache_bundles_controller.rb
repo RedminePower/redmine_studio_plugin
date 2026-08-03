@@ -123,10 +123,19 @@ class CacheBundlesController < ApplicationController
   def fetch_projects(target_user)
     # 並び順も個別 API に揃える。projects#index は ProjectQuery 経由で lft 順（Project.sorted）で返すため、
     # ここでも .sorted（order(:lft)）を適用して要素順を一致させる。
-    Project.visible(target_user)
-           .sorted
-           .preload(:enabled_modules, :issue_categories, :parent)
-           .map do |p|
+    projects = Project.visible(target_user)
+                      .sorted
+                      .preload(:enabled_modules, :issue_categories, :parent, :issue_custom_fields)
+                      .to_a
+    pids = projects.map(&:id)
+
+    # per-project の N+1 を畳む。可視プロジェクト id 集合（parent 可視判定に流用）、
+    # activities（システム活動 1 回＋プロジェクト上書きを IN で一括）、for_all の issue CF（1 回）を先に用意。
+    visible_ids = pids.to_set
+    activities_by_pid = build_project_activities(pids)
+    for_all_issue_cfs = IssueCustomField.sorted.where(is_for_all: true).to_a
+
+    projects.map do |p|
       hash = {
         id: p.id,
         name: p.name,
@@ -139,22 +148,45 @@ class CacheBundlesController < ApplicationController
         created_on: to_api_time(p.created_on),
         updated_on: to_api_time(p.updated_on),
         # 個別 API (render_api_includes) と揃える。trackers は rolled_up_trackers(false).visible
-        # （issue_tracking モジュール有効＋対象ユーザの view_issues 可視性でフィルタ）、
-        # time_entry_activities は activities（アクティブのみ）。
+        # （issue_tracking モジュール有効＋対象ユーザの view_issues 可視性でフィルタ）。
+        # プロジェクトごとにロール×可視性で SQL が変わり畳めないため per-project のまま据え置く。
         trackers: p.rolled_up_trackers(false).visible(target_user).map { |t| { id: t.id, name: t.name } },
         enabled_modules: p.enabled_modules.map { |m| { id: m.id, name: m.name } },
         issue_categories: p.issue_categories.map { |c| { id: c.id, name: c.name } },
-        time_entry_activities: p.activities.map { |a| { id: a.id, name: a.name } },
+        # time_entry_activities は activities（アクティブのみ）。上で一括取得した辞書から引く。
+        time_entry_activities: activities_by_pid[p.id].map { |a| { id: a.id, name: a.name } },
         # 個別 API (GET /projects.json?include=issue_custom_fields) は all_issue_custom_fields
-        # （is_for_all の CF も含む）を返す。issue_custom_fields（明示有効化のみ）では is_for_all が
-        # 欠落し個別 API と食い違うため all_issue_custom_fields に揃える。
-        issue_custom_fields: p.all_issue_custom_fields.map { |cf| { id: cf.id, name: cf.name } }
+        # （is_for_all の CF も含む）を返す。for_all＋当該プロジェクト明示紐付け（preload 済み）をマージして揃える。
+        issue_custom_fields: merge_issue_custom_fields(for_all_issue_cfs, p.issue_custom_fields).map { |cf| { id: cf.id, name: cf.name } }
       }
       # 個別 API (projects/index.api.rsb) は parent.visible? のときだけ親を出す。
-      # 対象ユーザに不可視な親（private な親等）の名前を漏らさないよう、可視性でゲートして揃える。
-      hash[:parent] = { id: p.parent.id, name: p.parent.name } if p.parent && p.parent.visible?(target_user)
+      # parent.visible? は allowed_to?(:view_project) で Project.visible スコープと同一判定のため、
+      # 可視プロジェクト id 集合に parent_id が含まれるかで厳密等価に判定（per-project クエリを廃止）。
+      hash[:parent] = { id: p.parent.id, name: p.parent.name } if p.parent_id && visible_ids.include?(p.parent_id)
       hash
     end
+  end
+
+  # 各プロジェクトの time_entry_activities（Project#activities＝アクティブのみ）を一括算出する。
+  # システム活動（project_id IS NULL）を 1 回、プロジェクト個別活動を IN で 1 回取得し、
+  # プロジェクトごとに「上書き元（parent_id）を除いたシステム活動＋自プロジェクトのアクティブ活動」を組む。
+  # 戻り値: { project_id => [TimeEntryActivity...] }
+  def build_project_activities(pids)
+    system_active = TimeEntryActivity.where(project_id: nil).active.to_a
+    # 個別活動は inactive も取る（上書き元 parent_id の算出に必要。出力には active のみ使う）。
+    project_acts_by_pid = TimeEntryActivity.where(project_id: pids).group_by(&:project_id)
+
+    pids.index_with do |pid|
+      own = project_acts_by_pid[pid] || []
+      overridden_parent_ids = own.map(&:parent_id).compact
+      system_part = overridden_parent_ids.empty? ? system_active : system_active.reject { |a| overridden_parent_ids.include?(a.id) }
+      (system_part + own.select(&:active?)).sort_by(&:position)
+    end
+  end
+
+  # for_all の issue CF と、プロジェクトに明示紐付けされた issue CF をマージする（Project#all_issue_custom_fields 相当）。
+  def merge_issue_custom_fields(for_all_issue_cfs, project_issue_cfs)
+    (for_all_issue_cfs + project_issue_cfs).uniq.sort_by(&:position)
   end
 
   def fetch_trackers
@@ -342,33 +374,40 @@ class CacheBundlesController < ApplicationController
   # ProjectMemberships: { project_id => [...] }
   # ロックユーザの membership は除外する（現状の CacheService.updateProjectMembershipsAsync と同等）。
   def fetch_per_project_memberships(user)
-    result = {}
-    visible_project_ids(user).each do |pid|
-      begin
-        members = Member.where(project_id: pid).preload(:user, :roles).map do |m|
-          h = {
-            id: m.id,
-            project: { id: pid, name: m.project.name },
-            roles: m.roles.map { |r| { id: r.id, name: r.name, inherited: m.member_roles.find { |mr| mr.role_id == r.id }&.inherited_from.present? || false } }
-          }
-          if m.user.is_a?(User) && m.user.status != User::STATUS_LOCKED
-            h[:user] = { id: m.user.id, name: m.user.name }
-          elsif m.principal.is_a?(Group)
-            h[:group] = { id: m.principal.id, name: m.principal.name }
-          else
-            # ロックユーザのみの membership はスキップ
-            next nil
-          end
-          h
-        end.compact
-        result[pid.to_s] = members
-      rescue => e
-        Rails.logger.warn "cache_bundle: project_memberships project_id=#{pid} failed: #{e.class} #{e.message}"
-        @errors << { section: 'project_memberships', project_id: pid, code: 500, message: "#{e.class}: #{e.message}" }
-        result[pid.to_s] = []
+    pids = visible_project_ids(user)
+    result = pids.each_with_object({}) { |pid, h| h[pid.to_s] = [] }
+    begin
+      # 全対象プロジェクトの member を 1 クエリで取得し project_id で束ねる。
+      # member_roles / project も preload し、per-member の入れ子 N+1 も同時に解消する。
+      members_by_pid = Member.where(project_id: pids)
+                             .preload(:user, :principal, :roles, :member_roles, :project)
+                             .group_by(&:project_id)
+      pids.each do |pid|
+        result[pid.to_s] = (members_by_pid[pid] || []).map { |m| membership_to_hash(m) }.compact
       end
+    rescue => e
+      Rails.logger.warn "cache_bundle: project_memberships failed: #{e.class} #{e.message}"
+      @errors << { section: 'project_memberships', code: 500, message: "#{e.class}: #{e.message}" }
+      pids.each { |pid| result[pid.to_s] = [] }
     end
     result
+  end
+
+  def membership_to_hash(m)
+    h = {
+      id: m.id,
+      project: { id: m.project_id, name: m.project.name },
+      roles: m.roles.map { |r| { id: r.id, name: r.name, inherited: m.member_roles.find { |mr| mr.role_id == r.id }&.inherited_from.present? || false } }
+    }
+    if m.user.is_a?(User) && m.user.status != User::STATUS_LOCKED
+      h[:user] = { id: m.user.id, name: m.user.name }
+    elsif m.principal.is_a?(Group)
+      h[:group] = { id: m.principal.id, name: m.principal.name }
+    else
+      # ロックユーザのみの membership はスキップ
+      return nil
+    end
+    h
   end
 
   # ProjectVersions: { project_id => [...] }
@@ -376,42 +415,45 @@ class CacheBundlesController < ApplicationController
   # （versions#index は view_issues 配下）。cache_bundle でも対象ユーザの view_issues を確認し、
   # 権限が無いプロジェクトは空で返す（過剰露出の是正）。
   def fetch_per_project_versions(user)
-    result = {}
-    Project.where(id: visible_project_ids(user)).each do |project|
-      pid = project.id
-      # view_issues を持たないロールは個別 API では 403 になるため、cache_bundle でも空を返す。
-      unless user.allowed_to?(:view_issues, project)
-        result[pid.to_s] = []
-        next
+    projects = Project.where(id: visible_project_ids(user)).to_a
+    result = projects.each_with_object({}) { |pr, h| h[pr.id.to_s] = [] }
+    # view_issues を持たないロールは個別 API では 403 になるため、権限のあるプロジェクトのみ版を返す（他は空のまま）。
+    allowed = projects.select { |pr| user.allowed_to?(:view_issues, pr) }
+    begin
+      # 権限のある全プロジェクトの版を 1 クエリで取得。custom_values を preload し per-version の CF 値 N+1 を解消。
+      versions_by_pid = Version.where(project_id: allowed.map(&:id))
+                               .preload(:custom_values, :project)
+                               .group_by(&:project_id)
+      allowed.each do |pr|
+        result[pr.id.to_s] = (versions_by_pid[pr.id] || []).map { |v| version_to_hash(v, user) }
       end
-      begin
-        versions = Version.where(project_id: pid).map do |v|
-          h = {
-            id: v.id,
-            project: { id: pid, name: v.project.name },
-            name: v.name,
-            description: v.description,
-            status: v.status,
-            sharing: v.sharing,
-            created_on: to_api_time(v.created_on),
-            updated_on: to_api_time(v.updated_on)
-          }
-          h[:due_date] = v.due_date if v.due_date
-          h[:wiki_page_title] = v.wiki_page_title if v.wiki_page_title.present?
-          # 個別 API (GET /projects/:id/versions.json) は render_api_custom_values で
-          # 対象ユーザに可視な CF 値を返す。cache_bundle でも同じ値を同じ形で返して揃える。
-          cf_values = to_api_custom_field_values(v.visible_custom_field_values(user))
-          h[:custom_fields] = cf_values if cf_values.present?
-          h
-        end
-        result[pid.to_s] = versions
-      rescue => e
-        Rails.logger.warn "cache_bundle: project_versions project_id=#{pid} failed: #{e.class} #{e.message}"
-        @errors << { section: 'project_versions', project_id: pid, code: 500, message: "#{e.class}: #{e.message}" }
-        result[pid.to_s] = []
-      end
+    rescue => e
+      Rails.logger.warn "cache_bundle: project_versions failed: #{e.class} #{e.message}"
+      @errors << { section: 'project_versions', code: 500, message: "#{e.class}: #{e.message}" }
+      allowed.each { |pr| result[pr.id.to_s] = [] }
     end
     result
+  end
+
+  def version_to_hash(v, user)
+    h = {
+      id: v.id,
+      project: { id: v.project_id, name: v.project.name },
+      name: v.name,
+      description: v.description,
+      status: v.status,
+      sharing: v.sharing,
+      created_on: to_api_time(v.created_on),
+      updated_on: to_api_time(v.updated_on)
+    }
+    h[:due_date] = v.due_date if v.due_date
+    h[:wiki_page_title] = v.wiki_page_title if v.wiki_page_title.present?
+    # 個別 API (GET /projects/:id/versions.json) は render_api_custom_values で
+    # 対象ユーザに可視な CF 値を返す。可視性はコアの visible_custom_field_values にそのまま委ねる
+    # （preload 済み custom_values の上で評価するため追加クエリなし）。
+    cf_values = to_api_custom_field_values(v.visible_custom_field_values(user))
+    h[:custom_fields] = cf_values if cf_values.present?
+    h
   end
 
   # ProjectIssueCategories: { project_id => [...] }
@@ -422,32 +464,33 @@ class CacheBundlesController < ApplicationController
   # 権限判定して個別 API と等価な結果を返す契約のため、ここでも対象ユーザの manage_categories を確認し、
   # 権限が無いプロジェクトは空で返す（過剰露出の是正・最小権限化）。
   def fetch_per_project_issue_categories(user)
-    result = {}
-    active_projects = Project.where(id: visible_project_ids(user), status: Project::STATUS_ACTIVE)
-    active_projects.each do |project|
-      pid = project.id
-      # manage_categories を持たないロールは個別 API では 403 になるため、cache_bundle でも空を返す。
-      unless user.allowed_to?(:manage_categories, project)
-        result[pid.to_s] = []
-        next
+    active_projects = Project.where(id: visible_project_ids(user), status: Project::STATUS_ACTIVE).to_a
+    result = active_projects.each_with_object({}) { |pr, h| h[pr.id.to_s] = [] }
+    # manage_categories を持たないロールは個別 API では 403 になるため、権限のあるプロジェクトのみカテゴリを返す（他は空のまま）。
+    allowed = active_projects.select { |pr| user.allowed_to?(:manage_categories, pr) }
+    begin
+      # 権限のある全プロジェクトのカテゴリを 1 クエリで取得し project_id で束ねる。
+      categories_by_pid = IssueCategory.where(project_id: allowed.map(&:id))
+                                       .preload(:assigned_to, :project)
+                                       .group_by(&:project_id)
+      allowed.each do |pr|
+        result[pr.id.to_s] = (categories_by_pid[pr.id] || []).map { |c| category_to_hash(c) }
       end
-      begin
-        categories = IssueCategory.where(project_id: pid).preload(:assigned_to).map do |c|
-          h = {
-            id: c.id,
-            project: { id: pid, name: c.project.name },
-            name: c.name
-          }
-          h[:assigned_to] = { id: c.assigned_to.id, name: c.assigned_to.name } if c.assigned_to
-          h
-        end
-        result[pid.to_s] = categories
-      rescue => e
-        Rails.logger.warn "cache_bundle: project_issue_categories project_id=#{pid} failed: #{e.class} #{e.message}"
-        @errors << { section: 'project_issue_categories', project_id: pid, code: 500, message: "#{e.class}: #{e.message}" }
-        result[pid.to_s] = []
-      end
+    rescue => e
+      Rails.logger.warn "cache_bundle: project_issue_categories failed: #{e.class} #{e.message}"
+      @errors << { section: 'project_issue_categories', code: 500, message: "#{e.class}: #{e.message}" }
+      allowed.each { |pr| result[pr.id.to_s] = [] }
     end
     result
+  end
+
+  def category_to_hash(c)
+    h = {
+      id: c.id,
+      project: { id: c.project_id, name: c.project.name },
+      name: c.name
+    }
+    h[:assigned_to] = { id: c.assigned_to.id, name: c.assigned_to.name } if c.assigned_to
+    h
   end
 end
