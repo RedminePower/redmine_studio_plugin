@@ -204,11 +204,20 @@ class CacheBundlesController < ApplicationController
     end
   end
 
-  # 全 CustomField（admin 権限が必要）。caller が admin でなければ空配列で返す（現状の app 側挙動と同等）。
+  # CustomField 一覧。非 admin は CustomField.visible（visible=true の CF＋自分のロールに紐づく role 限定 CF）に
+  # 絞り、admin は全件。全 customized 型を返す（アプリが IsIssueType() で client filter するため shape を揃える）。
   def fetch_custom_fields
-    return [] unless User.current.admin?
+    fields = (User.current.admin? ? CustomField.all : CustomField.visible(User.current)).preload(:roles).to_a
 
-    CustomField.all.map do |cf|
+    # trackers は IssueCustomField 限定の関連のため、混在集合に preload できない。
+    # issue CF の id だけ抜き、trackers を別クエリで preload して id→trackers 辞書にする（per-CF N+1 を回避）。
+    trackers_by_cf = {}
+    issue_cf_ids = fields.select { |cf| cf.is_a?(IssueCustomField) }.map(&:id)
+    IssueCustomField.where(id: issue_cf_ids).preload(:trackers).each do |icf|
+      trackers_by_cf[icf.id] = icf.trackers
+    end
+
+    fields.map do |cf|
       hash = {
         id: cf.id,
         name: cf.name,
@@ -230,23 +239,28 @@ class CacheBundlesController < ApplicationController
           { value: value || label, label: label }
         end
       end
-      if cf.respond_to?(:trackers) && cf.trackers.any?
-        hash[:trackers] = cf.trackers.map { |t| { id: t.id, name: t.name } }
+      cf_trackers = trackers_by_cf[cf.id]
+      if cf_trackers.present?
+        hash[:trackers] = cf_trackers.map { |t| { id: t.id, name: t.name } }
       end
-      if cf.respond_to?(:roles) && cf.roles.any?
+      # roles は基底 CustomField の関連。preload(:roles) 済みのため追加クエリなし。
+      if cf.roles.any?
         hash[:roles] = cf.roles.map { |r| { id: r.id, name: r.name } }
       end
       hash
     end
   end
 
-  # active な User のみ。admin 権限が必要。caller が admin でなければ空配列で返す。
-  # 個別 API (GET /users.json) の既定挙動 (status=1) に合わせる。
+  # User 一覧。非 admin は User.visible（自分＋可視プロジェクトのメンバー、または users_visibility='all'
+  # ロールで全アクティブユーザ）に絞り、admin は従来どおり全アクティブユーザ。どちらも匿名ユーザ (type != 'User') は除外。
   def fetch_users
-    return [] unless User.current.admin?
-
-    # 並び順も個別 API に揃える（users#index は UserQuery の既定ソート login asc）。
-    User.where(type: 'User', status: User::STATUS_ACTIVE).order(:login).preload(:memberships).map { |u| user_to_hash(u) }
+    if User.current.admin?
+      # 個別 API (GET /users.json) の既定挙動 (status=1) に合わせて全アクティブユーザ。
+      # User.visible は admin だと status 無視の all（locked 含む）になるため、admin 経路はスコープを使わない。
+      User.where(type: 'User', status: User::STATUS_ACTIVE).order(:login).map { |u| user_to_hash(u) }
+    else
+      visible_users.map { |u| user_to_hash(u) }
+    end
   end
 
   def user_to_hash(u)
@@ -290,18 +304,30 @@ class CacheBundlesController < ApplicationController
     end
   end
 
-  # Group 一覧 + 各 Group の詳細（users 含む）。admin 権限が必要。
+  # Group 一覧 + 各 Group の詳細（users 含む）。非 admin は Group.givable.visible に絞る。
   # givable（type='Group'）のみ。個別 API (GET /groups.json) はビルトイングループ
   # （Anonymous / Non member）を builtin=1 指定時以外は除外するため、それに揃える。
   def fetch_groups
-    return [] unless User.current.admin?
+    admin = User.current.admin?
+    scope = admin ? Group.givable : Group.givable.visible(User.current)
 
     # 並び順も個別 API に揃える（groups#index は Group.sorted = order(type, lastname)）。
-    Group.givable.sorted.preload(:users).map do |g|
-      hash = { id: g.id, name: g.name }
-      hash[:users] = g.users.map { |u| { id: u.id, name: u.name } }
-      hash
+    scope.sorted.preload(:users).map do |g|
+      # 非 admin には見えないユーザを漏らさないよう、メンバーを可視ユーザ id 集合と交差させる。
+      members = admin ? g.users : g.users.select { |u| visible_user_ids.include?(u.id) }
+      { id: g.id, name: g.name, users: members.map { |u| { id: u.id, name: u.name } } }
     end
+  end
+
+  # current_user に可視な active User の一覧（fetch_users と groups のメンバー絞り込みで共有）。
+  # admin 経路では使わない（admin は User.visible が locked 含む all になるため）。
+  def visible_users
+    @visible_users ||= User.visible(User.current).where(type: 'User').order(:login).to_a
+  end
+
+  # 可視ユーザの id 集合（groups のメンバー交差用）。visible_users から派生し追加クエリなし。
+  def visible_user_ids
+    @visible_user_ids ||= visible_users.map(&:id).to_set
   end
 
   # ---- per-project セクション ------------------------------------------

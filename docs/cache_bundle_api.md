@@ -13,10 +13,12 @@ Redmine Studio（Windows クライアント）のキャッシュ更新を 1 リ�
 
 API キー認証が必要。
 
-リクエスト時に使用する API キーの権限により、レスポンスに含まれる内容が変わる:
+リクエスト時に使用する API キーの権限により、`users` / `custom_fields` / `groups` の 3 セクションに含まれる範囲が変わる:
 
-- **admin 権限あり**: `users` / `custom_fields` / `groups` を含むフルレスポンス
-- **admin 権限なし**: 上記 3 セクションは空配列で返る（その他は通常通り）
+- **admin 権限あり**: すべてのユーザ・カスタムフィールド・グループを返す
+- **admin 権限なし**: その利用者が Redmine 上で見られる範囲だけを返す（Redmine の画面で見えるのと同じ範囲。見えるものが無ければ空になる）
+
+管理者 API キーを持たない利用者でも、自分の権限の範囲でキャッシュを作れるようにするための挙動。
 
 ## パラメータ
 
@@ -70,10 +72,10 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `issue_priorities` | IssuePriority の配列 | inactive 含む全件（個別 enumerations API と同じ）。`active` / `is_default` 含む |
 | `time_entry_activities` | TimeEntryActivity の配列 | inactive 含む全件（個別 enumerations API と同じ）。`active` / `is_default` 含む |
 | `queries` | Query の配列 | caller の可視範囲。`is_public` は visibility が public のクエリのみ true（本体 queries API と同じ） |
-| `custom_fields` | CustomField の配列 | **admin 権限が必要**。権限がない場合は空配列。`min_length` / `max_length` は未設定なら null（本体 custom_fields API と同じ）。`possible_values` は `{value, label}` のペア |
-| `users` | User の配列 | **admin 権限が必要**。active なユーザのみ（個別 users API の既定挙動と同じ） |
+| `custom_fields` | CustomField の配列 | admin は全件、非 admin は本人が見られるカスタムフィールドのみ（全員に公開されているもの＋本人のロールに割り当てられたもの）。`min_length` / `max_length` は未設定なら null（本体 custom_fields API と同じ）。`possible_values` は `{value, label}` のペア |
+| `users` | User の配列 | admin は全 active ユーザ、非 admin は本人が見られるユーザのみ（本人＋同じプロジェクトのメンバー。ロール設定によっては全 active ユーザ）。匿名ユーザは除外 |
 | `roles` | Role の配列 | givable（builtin=0）のみ。ビルトインロール（Non member / Anonymous）は含まない（個別 API `GET /roles.json` と同じ）。各 Role の `permissions` を文字列配列で含む（本体 roles/:id API と同じ形式。リスト取得 + 詳細取得の N+1 をサーバ側で吸収） |
-| `groups` | Group の配列 | **admin 権限が必要**。givable（type='Group'）のみ。ビルトイングループ（Anonymous / Non member）は含まない（個別 API `GET /groups.json` と同じ）。各 Group の `users` を含む |
+| `groups` | Group の配列 | admin は全グループ、非 admin は本人が見られるグループのみ。通常のグループ（type='Group'）のみでビルトイングループ（Anonymous / Non member）は含まない（個別 API `GET /groups.json` と同じ）。各 Group の `users` を含む（非 admin では、本人が見られるユーザだけに絞る） |
 | `project_memberships` | `{ project_id => [Membership...] }` | 対象ユーザが member となっているプロジェクトについて取得。ロックユーザの membership は除外 |
 | `project_versions` | `{ project_id => [Version...] }` | 対象ユーザが member となっているプロジェクト。さらに対象ユーザが **`view_issues` 権限**を持つプロジェクトのみ版を返す（個別 API `GET /projects/:id/versions.json` と同じゲート。権限が無いプロジェクトは空配列）。各 Version は対象ユーザに可視な **カスタムフィールド値**（`custom_fields`）を含む（個別 API の `render_api_custom_values` と同じ。単一値はスカラー、複数値は配列＋`multiple`） |
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | 対象ユーザが member となっている **Active** プロジェクトのみ。さらに対象ユーザが **`manage_categories` 権限**を持つプロジェクトのみカテゴリを返す（個別 API `GET /projects/:id/issue_categories.json` と同じゲート。権限が無いプロジェクトは空配列） |

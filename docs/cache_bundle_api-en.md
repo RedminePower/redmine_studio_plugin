@@ -13,10 +13,12 @@ Returns multiple Redmine resources (Projects / Trackers / Users / per-project Me
 
 API key authentication is required.
 
-The content of the response varies depending on the privileges of the API key used:
+The range of the `users` / `custom_fields` / `groups` sections varies depending on the privileges of the API key used:
 
-- **With admin privilege**: Full response including `users` / `custom_fields` / `groups`
-- **Without admin privilege**: The above 3 sections are returned as empty arrays (others are returned normally)
+- **With admin privilege**: Returns all users, custom fields, and groups
+- **Without admin privilege**: Returns only what that user can see in Redmine (the same range they see in the Redmine UI; empty if there is nothing they can see)
+
+This lets users without an administrator API key build the cache within their own permission range.
 
 ## Parameters
 
@@ -70,10 +72,10 @@ The root has a single fixed key `cache_bundle`. Each section's content follows r
 | `issue_priorities` | Array of IssuePriority | All entries including inactive ones (same as the individual enumerations API). Includes `active` / `is_default` |
 | `time_entry_activities` | Array of TimeEntryActivity | All entries including inactive ones (same as the individual enumerations API). Includes `active` / `is_default` |
 | `queries` | Array of Query | Caller's visibility scope. `is_public` is true only for queries with public visibility (same as the core queries API) |
-| `custom_fields` | Array of CustomField | **Admin privilege required**. Empty array if not authorized. `min_length` / `max_length` are null when unset (same as the core custom_fields API). `possible_values` are `{value, label}` pairs |
-| `users` | Array of User | **Admin privilege required**. Active users only (same as the default behavior of the individual users API) |
+| `custom_fields` | Array of CustomField | All for admin; for non-admin, only the custom fields the user can see (those shared with everyone plus those assigned to the user's roles). `min_length` / `max_length` are null when unset (same as the core custom_fields API). `possible_values` are `{value, label}` pairs |
+| `users` | Array of User | All active users for admin; for non-admin, only the users the user can see (self plus members of the same projects; may be all active users depending on role settings). Anonymous users are excluded |
 | `roles` | Array of Role | Only givable roles (builtin=0); builtin roles (Non member / Anonymous) are excluded (same as the individual API `GET /roles.json`). Includes `permissions` of each Role as an array of strings (same format as the core roles/:id API; absorbing the list-then-details N+1 on the server side) |
-| `groups` | Array of Group | **Admin privilege required**. Only givable groups (type='Group'); builtin groups (Anonymous / Non member) are excluded (same as the individual API `GET /groups.json`). Includes `users` of each Group |
+| `groups` | Array of Group | All groups for admin; for non-admin, only the groups the user can see. Regular groups only (type='Group'); builtin groups (Anonymous / Non member) are excluded (same as the individual API `GET /groups.json`). Includes `users` of each Group (for non-admin, limited to the users the requester can see) |
 | `project_memberships` | `{ project_id => [Membership...] }` | Retrieved for projects where the target user is a member. Locked-user memberships are excluded |
 | `project_versions` | `{ project_id => [Version...] }` | Projects where the target user is a member, and further only projects where the target user has the **`view_issues`** permission (same gate as the individual API `GET /projects/:id/versions.json`; projects without the permission return an empty array). Each Version includes its **custom field values** visible to the target user (`custom_fields`), matching the individual API `render_api_custom_values` (scalar for single value, array + `multiple` for multi-value) |
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | Only **Active** projects where the target user is a member, and further only projects where the target user has the **`manage_categories`** permission (same gate as the individual API `GET /projects/:id/issue_categories.json`; projects without the permission return an empty array) |

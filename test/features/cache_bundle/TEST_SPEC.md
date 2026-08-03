@@ -120,17 +120,19 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
 | issue_priorities | array | 優先度（`IssuePriority.shared.sorted`。inactive も含む。個別 API と同じ）。要素に `active` キーあり |
 | time_entry_activities | array | 作業分類（`TimeEntryActivity.shared.sorted`。inactive も含む。個別 API と同じ）。要素に `active` キーあり |
 | queries | array | カスタムクエリ（user に対する visible）。`is_public` は VISIBILITY_PUBLIC のみ true（ロール限定は false） |
-| custom_fields | array | カスタムフィールド（admin のみ取得）。`min_length` / `max_length` は本体 API と同じく nil を保持。`possible_values` は `{value, label}` のペア（enumeration/list どちらも対応） |
-| users | array | ユーザ一覧（admin のみ取得。active な User のみ。個別 API の既定挙動と同じ） |
+| custom_fields | array | カスタムフィールド。admin は全件、非 admin は `CustomField.visible`（visible=true の CF＋自分のロールに紐づく role 限定 CF）。`min_length` / `max_length` は本体 API と同じく nil を保持。`possible_values` は `{value, label}` のペア（enumeration/list どちらも対応） |
+| users | array | ユーザ一覧。admin は全 active User、非 admin は `User.visible`（自分＋可視プロジェクトのメンバー、または users_visibility='all' ロールで全 active）。匿名ユーザは除外 |
 | roles | array | ロール（permissions 込み。文字列配列 `["view_issues", ...]`。本体 roles/:id API と同じ） |
-| groups | array | グループ（admin のみ取得、users 込み） |
+| groups | array | グループ（users 込み）。admin は全 givable、非 admin は `Group.givable.visible`。非 admin のメンバーは可視ユーザ集合と交差（不可視ユーザを漏らさない） |
 | project_memberships | dict | `{ project_id => [...] }` ロックユーザを除外 |
 | project_versions | dict | `{ project_id => [...] }` 対象ユーザが view_issues 権限を持つプロジェクトのみ版を返す（権限が無ければ空配列。個別 API と同じゲート） |
 | project_issue_categories | dict | `{ project_id => [...] }` Active プロジェクトのみ。対象ユーザが manage_categories 権限を持つプロジェクトのみカテゴリを返す（権限が無ければ空配列。個別 API と同じゲート） |
 | errors | array | 部分失敗時のメタデータ。成功時は空配列 |
 
 **非 admin ユーザの場合:**
-- `custom_fields` / `users` / `groups` は空配列で返る
+- `custom_fields` は `CustomField.visible` に絞られる（visible=false かつ自分のロールに紐づかない role 限定 CF は出ない）
+- `users` は `User.visible` に絞られる（users_visibility='all' ロールを持たない限り、自分＋可視プロジェクトのメンバーのみ）
+- `groups` は `Group.givable.visible` に絞られ、各グループのメンバーも可視ユーザ集合と交差される
 - `project_memberships` / `project_versions` / `project_issue_categories` は対象ユーザが member となっているプロジェクトのみ
 - `project_versions` はさらに view_issues 権限を持つプロジェクトのみ（権限が無いプロジェクトは空配列）
 - `project_issue_categories` はさらに manage_categories 権限を持つプロジェクトのみ（権限が無いプロジェクトは空配列）
@@ -337,63 +339,88 @@ puts result.size == expected_count ? 'PASS' : "FAIL: Expected #{expected_count},
 
 ---
 
-### [1-11] fetch_custom_fields は non-admin で空配列を返す
+### [1-11] fetch_custom_fields は non-admin で CustomField.visible に一致する
+
+非 admin は `CustomField.visible`（visible=true の CF＋自分のロールに紐づく role 限定 CF）に絞る。
 
 **確認方法:**
 ```ruby
-non_admin = User.where(admin: false, type: 'User').first
+# 可視性が制限された非 admin（全件が見えるユーザだと制限を行使できないため CustomField.visible < 全件 を選ぶ）
+non_admin = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
+  CustomField.visible(u).count < CustomField.count
+end
+non_admin ||= User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).first
 unless non_admin
   puts 'SKIP: no non-admin user available'
 else
   User.current = non_admin
   controller = CacheBundlesController.new
-  result = controller.send(:fetch_custom_fields)
-  puts result == [] ? 'PASS' : "FAIL: Expected [], got #{result.size} items"
+  result_ids = controller.send(:fetch_custom_fields).map { |h| h[:id] }.sort
+  expected_ids = CustomField.visible(non_admin).pluck(:id).sort
+  puts result_ids == expected_ids ? 'PASS' : "FAIL: got #{result_ids}, expected #{expected_ids}"
 end
 ```
 
 **期待結果:**
-- 非 admin ユーザでは空配列を返す
+- 非 admin の custom_fields が `CustomField.visible(non_admin)` と id 集合まで一致する（visible=false かつ非該当ロールの CF は出ない）
 
 ---
 
-### [1-12] fetch_users は non-admin で空配列を返す
+### [1-12] fetch_users は non-admin で User.visible に一致する
+
+非 admin は `User.visible`（自分＋可視プロジェクトのメンバー、または users_visibility='all' ロールで全 active）に絞る。
 
 **確認方法:**
 ```ruby
-non_admin = User.where(admin: false, type: 'User').first
+total = User.where(type: 'User', status: User::STATUS_ACTIVE).count
+non_admin = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
+  User.visible(u).where(type: 'User').count < total
+end
+non_admin ||= User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).first
 unless non_admin
   puts 'SKIP: no non-admin user available'
 else
   User.current = non_admin
   controller = CacheBundlesController.new
-  result = controller.send(:fetch_users)
-  puts result == [] ? 'PASS' : "FAIL: Expected [], got #{result.size} items"
+  result_ids = controller.send(:fetch_users).map { |h| h[:id] }.sort
+  expected_ids = User.visible(non_admin).where(type: 'User').pluck(:id).sort
+  puts result_ids == expected_ids ? 'PASS' : "FAIL: got #{result_ids.size} ids, expected #{expected_ids.size} (#{(expected_ids - result_ids).inspect} / #{(result_ids - expected_ids).inspect})"
 end
 ```
 
 **期待結果:**
-- 非 admin ユーザでは空配列を返す
+- 非 admin の users が `User.visible(non_admin)`（type='User'）と id 集合まで一致する
 
 ---
 
-### [1-13] fetch_groups は non-admin で空配列を返す
+### [1-13] fetch_groups は non-admin で Group.givable.visible に一致する
+
+非 admin は `Group.givable.visible` に絞り、各グループのメンバーも可視ユーザ集合と交差する。
 
 **確認方法:**
 ```ruby
-non_admin = User.where(admin: false, type: 'User').first
+non_admin = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
+  Group.givable.visible(u).count < Group.givable.count
+end
+non_admin ||= User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).first
 unless non_admin
   puts 'SKIP: no non-admin user available'
 else
   User.current = non_admin
   controller = CacheBundlesController.new
   result = controller.send(:fetch_groups)
-  puts result == [] ? 'PASS' : "FAIL: Expected [], got #{result.size} items"
+  result_ids = result.map { |h| h[:id] }.sort
+  expected_ids = Group.givable.visible(non_admin).pluck(:id).sort
+  # メンバーが可視ユーザ集合の部分集合であること（不可視ユーザを漏らさない）
+  visible_uids = User.visible(non_admin).where(type: 'User').pluck(:id).to_set
+  leaked = result.flat_map { |h| h[:users].map { |u| u[:id] } }.reject { |id| visible_uids.include?(id) }
+  ok = result_ids == expected_ids && leaked.empty?
+  puts ok ? 'PASS' : "FAIL: ids got #{result_ids}/exp #{expected_ids}, leaked_members=#{leaked.inspect}"
 end
 ```
 
 **期待結果:**
-- 非 admin ユーザでは空配列を返す
+- 非 admin の groups が `Group.givable.visible(non_admin)` と id 集合まで一致し、各グループのメンバーが可視ユーザ集合の部分集合（不可視ユーザを漏らさない）
 
 ---
 
@@ -885,6 +912,205 @@ puts bad_roles.empty? ? 'PASS' : "FAIL: bad permissions in roles: #{bad_roles.ma
 
 ---
 
+### [1-29] fetch_custom_fields は role 限定・不可視 CF を保持ロールの有無で出し分ける
+
+`CustomField.visible` は「visible=true」または「そのユーザのロールに紐づく role 限定 CF」のみ返す。
+admin は全件。visible=false かつ特定ロール限定の CF が、保持しない非 admin には出ず、admin には出ることを確認する。
+
+**確認方法:**
+```ruby
+# visible=false かつ role 限定の CF を対象にする（無ければ SKIP）
+gated_cf = CustomField.where(visible: false).detect { |cf| cf.roles.any? }
+if gated_cf.nil?
+  puts 'SKIP: visible=false かつ role 限定の CF が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
+else
+  gated_role_ids = gated_cf.roles.map(&:id)
+  # その CF のロールを保持しない非 admin を探す
+  non_holder = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
+    (u.memberships.flat_map { |m| m.roles.map(&:id) } & gated_role_ids).empty?
+  end
+  controller = CacheBundlesController.new
+
+  User.current = User.where(admin: true).first
+  admin_has = controller.send(:fetch_custom_fields).any? { |h| h[:id] == gated_cf.id }
+
+  if non_holder.nil?
+    puts admin_has ? 'PASS (admin only; 非保持ユーザ不在で SKIP)' : "FAIL: admin should see gated CF #{gated_cf.id}"
+  else
+    User.current = non_holder
+    non_holder_has = CacheBundlesController.new.send(:fetch_custom_fields).any? { |h| h[:id] == gated_cf.id }
+    ok = admin_has && !non_holder_has
+    puts ok ? 'PASS' : "FAIL: admin_has=#{admin_has}, non_holder(#{non_holder.login})_has=#{non_holder_has}"
+  end
+end
+```
+
+**期待結果:**
+- admin: role 限定・不可視 CF が含まれる
+- ロールを保持しない非 admin: 当該 CF が含まれない（`CustomField.visible` の role 分岐と一致）
+
+---
+
+### [1-30] fetch_users は可視プロジェクト外のユーザを漏らさない
+
+`users_visibility='all'` ロールを持たない非 admin に対し、`User.visible` は「自分＋可視プロジェクトのメンバー」に絞る。
+その非 admin と共有プロジェクトを持たないユーザが fetch_users に出ないことを確認する。
+
+**確認方法:**
+```ruby
+total = User.where(type: 'User', status: User::STATUS_ACTIVE).count
+restricted = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
+  User.visible(u).where(type: 'User').count < total
+end
+if restricted.nil?
+  puts 'SKIP: 可視性が制限された非 admin が無い（全員 users_visibility=all）'
+else
+  User.current = restricted
+  result_ids = CacheBundlesController.new.send(:fetch_users).map { |h| h[:id] }.to_set
+  # コアの可視集合の外にいる active ユーザ（本来見えないはず）
+  hidden = User.where(type: 'User', status: User::STATUS_ACTIVE).pluck(:id) - User.visible(restricted).where(type: 'User').pluck(:id)
+  leaked = hidden.select { |id| result_ids.include?(id) }
+  # 自分は必ず含まれる（self 参照のフォールバック安全性）
+  self_ok = result_ids.include?(restricted.id)
+  ok = leaked.empty? && self_ok && hidden.any?
+  puts ok ? "PASS (restricted=#{restricted.login}, hidden #{hidden.size} 件を非表示)" : "FAIL: leaked=#{leaked.inspect}, self_ok=#{self_ok}, hidden=#{hidden.size}"
+end
+```
+
+**期待結果:**
+- 可視プロジェクト外の active ユーザ（`hidden`）が 1 件以上あり、そのいずれも fetch_users に含まれない
+- 自分自身は必ず含まれる
+
+---
+
+### [1-31] fetch_custom_fields のクエリ本数が CF 件数に比例しない（roles/trackers バッチ化）
+
+roles は `preload(:roles)`、trackers は issue CF の id→trackers 辞書で一括取得するため、
+CF 件数 N に対して発行クエリが `O(1)`（`1 + 2N` にならない）ことを確認する。
+
+**確認方法:**
+```ruby
+User.current = User.where(admin: true).first
+controller = CacheBundlesController.new
+cf_count = CustomField.count
+
+sql_count = 0
+counter = ->(_name, _start, _finish, _id, payload) do
+  sql_count += 1 unless payload[:name] =~ /SCHEMA|TRANSACTION/ || payload[:sql] =~ /^\s*(BEGIN|COMMIT|RELEASE|SAVEPOINT)/i
+end
+ActiveSupport::Notifications.subscribed(counter, 'sql.active_record') do
+  controller.send(:fetch_custom_fields)
+end
+
+# 上限は「本体集合1 + roles preload1 + issue CF別読み1 + trackers preload1 + enumeration系の余裕」を見て固定値に。
+# CF 件数比例（1 + 2N）なら cf_count=10 で 20 本超になるため、それを大きく下回ることを確認。
+threshold = 10
+puts sql_count <= threshold ? "PASS (queries=#{sql_count} for #{cf_count} CFs)" : "FAIL: queries=#{sql_count} > #{threshold} (CF件数比例の疑い)"
+```
+
+**期待結果:**
+- 発行クエリ本数が CF 件数に比例せず、固定的な少数（閾値 10 以下）に収まる（旧 `respond_to?(:trackers)`/`roles.any?` の per-CF N+1 が解消されている）
+
+---
+
+### [1-32] fetch_custom_fields は admin で全件＋trackers/roles を返す（回帰）
+
+スコープ化後も admin 経路は全 CF を返し、trackers（issue CF）と roles を正しく直列化することを確認する。
+
+**確認方法:**
+```ruby
+User.current = User.where(admin: true).first
+controller = CacheBundlesController.new
+result = controller.send(:fetch_custom_fields)
+
+count_ok = result.size == CustomField.count
+
+# trackers: issue CF で trackers を持つものが正しく出るか
+icf = IssueCustomField.joins(:trackers).first
+tr_ok = if icf
+  row = result.find { |h| h[:id] == icf.id }
+  row && row[:trackers].map { |t| t[:id] }.sort == icf.trackers.map(&:id).sort
+else
+  true
+end
+
+# roles: role を持つ CF が正しく出るか
+rcf = CustomField.joins(:roles).first
+role_ok = if rcf
+  row = result.find { |h| h[:id] == rcf.id }
+  row && row[:roles].map { |r| r[:id] }.sort == rcf.roles.map(&:id).sort
+else
+  true
+end
+
+puts (count_ok && tr_ok && role_ok) ? 'PASS' : "FAIL: count_ok=#{count_ok}(#{result.size}/#{CustomField.count}) tr_ok=#{tr_ok} role_ok=#{role_ok}"
+```
+
+**期待結果:**
+- admin では全 CF が返り、trackers を持つ issue CF・roles を持つ CF が個別関連と id 集合まで一致する
+
+---
+
+### [1-33] admin は 3 セクションを全件母集団で返す（メンバー無交差）
+
+admin 経路は users=全 active User、groups=全 givable Group（各グループのメンバーは交差せず全件）、
+custom_fields=全 CustomField を返す。非 admin のスコープ絞り込みが admin に漏れていないことを、
+件数の完全一致で固定する（[1-27]/[1-32] の補完）。
+
+**確認方法:**
+```ruby
+User.current = User.where(admin: true).first
+c = CacheBundlesController.new
+
+users_full  = c.send(:fetch_users).map { |h| h[:id] }.sort == User.where(type: 'User', status: User::STATUS_ACTIVE).pluck(:id).sort
+groups_full = c.send(:fetch_groups).map { |g| g[:id] }.sort == Group.givable.pluck(:id).sort
+cf_full     = c.send(:fetch_custom_fields).size == CustomField.count
+
+# admin の各グループのメンバーは交差せず全件（g.users と一致）
+g = Group.givable.detect { |x| x.users.any? }
+members_full = g.nil? || (c.send(:fetch_groups).find { |h| h[:id] == g.id }[:users].map { |u| u[:id] }.sort == g.users.map(&:id).sort)
+
+puts (users_full && groups_full && cf_full && members_full) ? 'PASS' : "FAIL: users=#{users_full} groups=#{groups_full} cf=#{cf_full} members=#{members_full}"
+```
+
+**期待結果:**
+- admin の users / groups / custom_fields が全件母集団と一致し、各グループのメンバーも交差されず全件
+
+---
+
+### [1-34] スコープ基準は `User.current`（要求者）であり `target_user` ではない（モード① 維持）
+
+管理者キーで別ユーザ（`user_id=N`）のバンドルを作る運用（モード①）では、users / custom_fields / groups は
+**要求者（admin）の権限で全件**返る（`target_user` にスコープしない）。この契約を固定し、将来 `fetch_*` を
+`target_user` 基準へ変えたら赤くなるようにする。
+
+**確認方法:**
+```ruby
+admin = User.where(admin: true).first
+# 可視性が制限された非 admin を target にする（target 基準にスコープしていたら件数が減るはず）
+total = User.where(type: 'User', status: User::STATUS_ACTIVE).count
+target = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
+  User.visible(u).where(type: 'User').count < total
+end
+if target.nil?
+  puts 'SKIP: 可視性が制限された非 admin が無い'
+else
+  # show と同じ経路: 認証済み=admin（User.current）、target_user=制限ユーザ
+  User.current = admin
+  c = CacheBundlesController.new
+  users_cnt  = c.send(:fetch_users).size
+  cf_cnt     = c.send(:fetch_custom_fields).size
+  groups_cnt = c.send(:fetch_groups).size
+  ok = users_cnt == total && cf_cnt == CustomField.count && groups_cnt == Group.givable.count
+  puts ok ? "PASS (admin 基準で全件: users=#{users_cnt} cf=#{cf_cnt} groups=#{groups_cnt})" : "FAIL: users=#{users_cnt}/#{total} cf=#{cf_cnt}/#{CustomField.count} groups=#{groups_cnt}/#{Group.givable.count}"
+end
+```
+
+**期待結果:**
+- 制限ユーザが存在する環境で、admin が実行する限り users / custom_fields / groups は全件（`User.current` 基準）。target_user 基準に退行したら件数が減って FAIL する
+
+---
+
 ## 2. HTTP テスト
 
 **実行方法:**
@@ -1178,6 +1404,32 @@ $response.StatusCode
 
 **期待結果:**
 - ステータスコード 200
+
+---
+
+### [2-20] admin キーで他ユーザのバンドルを作っても users/custom_fields/groups は全件（モード① 維持）
+
+管理者 API キーで別ユーザ（`user_id=N`）のバンドルを取得する運用（モード①）でも、`users` / `custom_fields` /
+`groups` は要求者（admin）の権限で全件返る（`target_user` にスコープしない）。自分（`user_id=1`）と他ユーザで
+件数が一致することで、スコープ基準が `User.current` であることを固定する。
+
+**前提条件:** admin 以外のユーザ（`{NonAdminUserId}`）が存在すること。
+
+**確認方法:**
+```powershell
+$self  = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}).cache_bundle
+$other = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id={NonAdminUserId}' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}).cache_bundle
+($self.users.Count -eq $other.users.Count) -and `
+($self.custom_fields.Count -eq $other.custom_fields.Count) -and `
+($self.groups.Count -eq $other.groups.Count)
+```
+
+**期待結果:**
+- admin キーで requester=admin である限り、target を変えても users / custom_fields / groups の件数は変わらない（全件）
+- 一方 `project_memberships` / `project_versions` / `project_issue_categories` は target ユーザにスコープされる（別テスト [1-16 系] で担保）
+
+**スキップ条件:**
+- 非 admin ユーザが存在しない場合
 
 ---
 
