@@ -20,7 +20,7 @@
   - **Info API** - Redmine 環境情報を取得
   - **Studio Settings API** - 汎用設定を管理
   - **Activity Info API** - 活動履歴を取得
-  - **Cache Bundle API** - Redmine Studio のキャッシュ更新を 1 リクエストで完結させる一括取得
+  - **Cache Bundle API** - Redmine Studio のキャッシュ更新を 1 リクエストで完結させる
   - **Issues Bulk Write API** - 複数チケットの作成/更新を 1 リクエストで完結させる
   - **Issues With Extras API** - Issue 取得に Redmine Studio 用の追加フィールドを含めて返す
   - **Wiki Preview API** - Wiki テキストを HTML に変換

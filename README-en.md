@@ -20,7 +20,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
   - **Info API** - Retrieves Redmine environment information
   - **Studio Settings API** - Manages general settings
   - **Activity Info API** - Retrieves activity history
-  - **Cache Bundle API** - Bundled retrieval that completes the Redmine Studio cache update in a single request
+  - **Cache Bundle API** - Completes the Redmine Studio cache update in a single request
   - **Issues Bulk Write API** - Creates/updates multiple issues in a single request
   - **Issues With Extras API** - Returns issue reads with extra fields used by Redmine Studio
   - **Wiki Preview API** - Converts Wiki text to HTML

@@ -81,6 +81,31 @@ The root has a single fixed key `cache_bundle`. Each section's content follows r
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | Only **Active** projects where the target user is a member, and further only projects where the target user has the **`manage_categories`** permission (same gate as the individual API `GET /projects/:id/issue_categories.json`; projects without the permission return an empty array) |
 | `errors` | Array of `{ section, code, message }` | Partial failure metadata. Empty array means full success |
 
+### Fields returned per section
+
+The main fields returned by each section's objects are as follows (see "Section Specifications" above for details).
+
+- Each section is based on the corresponding Redmine standard API resource, with some fields adjusted for our use.
+- Fields with no value may be omitted.
+- Depending on the user's roles and permissions, some sections and fields are limited to what the requester can see.
+  - Examples: `parent` of `projects`, `users` of `groups`, `custom_fields` of `project_versions`
+
+| Section | Returned fields |
+|---|---|
+| `projects` | `id` / `name` / `identifier` / `description` / `homepage` / `status` / `is_public` / `inherit_members` / `created_on` / `updated_on` / `trackers[]` / `enabled_modules[]` / `issue_categories[]` / `time_entry_activities[]` / `issue_custom_fields[]` / `parent` |
+| `trackers` | `id` / `name` / `default_status` / `description` |
+| `issue_statuses` | `id` / `name` / `is_closed` |
+| `issue_priorities` | `id` / `name` / `active` / `is_default` |
+| `time_entry_activities` | `id` / `name` / `active` / `is_default` |
+| `queries` | `id` / `name` / `is_public` / `project_id` |
+| `custom_fields` | `id` / `name` / `customized_type` / `field_format` / `regexp` / `min_length` / `max_length` / `is_required` / `is_filter` / `searchable` / `multiple` / `default_value` / `visible` / `possible_values[]` / `trackers[]` / `roles[]` |
+| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status` / `admin` / `twofa_scheme` |
+| `roles` | `id` / `name` / `assignable` / `issues_visibility` / `time_entries_visibility` / `users_visibility` / `permissions[]` |
+| `groups` | `id` / `name` / `users[]` (each `id` / `name`) |
+| Each `project_memberships` element | `id` / `project` / `roles[]` (incl. `inherited`) / `user` or `group` |
+| Each `project_versions` element | `id` / `project` / `name` / `description` / `status` / `sharing` / `created_on` / `updated_on` / `due_date` / `wiki_page_title` / `custom_fields[]` |
+| Each `project_issue_categories` element | `id` / `project` / `name` / `assigned_to` |
+
 ### Ordering
 
 Each array is returned in the **same order** as when fetched individually — cache_bundle yields the same content and ordering as the individual API.

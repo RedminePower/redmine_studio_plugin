@@ -81,6 +81,31 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | 対象ユーザが member となっている **Active** プロジェクトのみ。さらに対象ユーザが **`manage_categories` 権限**を持つプロジェクトのみカテゴリを返す（個別 API `GET /projects/:id/issue_categories.json` と同じゲート。権限が無いプロジェクトは空配列） |
 | `errors` | `{ section, code, message }` の配列 | 部分失敗のメタデータ。空配列なら全成功 |
 
+### 各セクションが返すフィールド
+
+各セクションのオブジェクトが返す主なフィールドは以下の通り（詳細は上の「各セクションの仕様」を参照）。
+
+- Redmine 標準 API の対応リソースを基本としつつ、用途に合わせて一部の項目を調整している。
+- 値が無い項目は省略される場合がある。
+- ユーザーのロールや権限により、一部のセクションやフィールドが本人の見える範囲に絞られる。
+  - 例: `projects` の `parent`、`groups` の `users`、`project_versions` の `custom_fields`
+
+| セクション | 返すフィールド |
+|---|---|
+| `projects` | `id` / `name` / `identifier` / `description` / `homepage` / `status` / `is_public` / `inherit_members` / `created_on` / `updated_on` / `trackers[]` / `enabled_modules[]` / `issue_categories[]` / `time_entry_activities[]` / `issue_custom_fields[]` / `parent` |
+| `trackers` | `id` / `name` / `default_status` / `description` |
+| `issue_statuses` | `id` / `name` / `is_closed` |
+| `issue_priorities` | `id` / `name` / `active` / `is_default` |
+| `time_entry_activities` | `id` / `name` / `active` / `is_default` |
+| `queries` | `id` / `name` / `is_public` / `project_id` |
+| `custom_fields` | `id` / `name` / `customized_type` / `field_format` / `regexp` / `min_length` / `max_length` / `is_required` / `is_filter` / `searchable` / `multiple` / `default_value` / `visible` / `possible_values[]` / `trackers[]` / `roles[]` |
+| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status` / `admin` / `twofa_scheme` |
+| `roles` | `id` / `name` / `assignable` / `issues_visibility` / `time_entries_visibility` / `users_visibility` / `permissions[]` |
+| `groups` | `id` / `name` / `users[]`（各 `id` / `name`） |
+| `project_memberships` の各要素 | `id` / `project` / `roles[]`（`inherited` 含む）/ `user` または `group` |
+| `project_versions` の各要素 | `id` / `project` / `name` / `description` / `status` / `sharing` / `created_on` / `updated_on` / `due_date` / `wiki_page_title` / `custom_fields[]` |
+| `project_issue_categories` の各要素 | `id` / `project` / `name` / `assigned_to` |
+
 ### 並び順
 
 各配列は個別に取得した場合と**同じ並び順**で返す（cache_bundle は個別 API で取得した場合と同一の内容・並び順になるよう揃えている）。
