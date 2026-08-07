@@ -374,8 +374,8 @@ $response.Content -match 'class="reply-count"'
 
 **確認方法:**
 ```powershell
-# [2-3] と同じリクエスト
-$response.Content -match 'title=.*class="reply-count"'
+# [2-3] と同じリクエスト（title は担当者履歴で複数行になりうるため (?s) で改行も跨がせる）
+$response.Content -match '(?s)title=.*class="reply-count"'
 ```
 
 **期待結果:** `True`
@@ -414,7 +414,8 @@ $response.StatusCode
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=reply_count&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_REPLY_ID}' `
   -Credential $cred -AllowUnencryptedAuthentication
-$response.Content -match 'reply-count.*title=.*>0<'
+# span は title 属性 → class="reply-count" の順で出力される（title は複数行になりうるため (?s)）
+$response.Content -match '(?s)title=.*class="reply-count">0<'
 ```
 
 **期待結果:** `True`

@@ -187,6 +187,8 @@ puts "contains_child2: #{tooltip.include?("##{child2.id} CC_1-10_Child2")}"
 
 **確認方法:**
 ```ruby
+# 期待値が日本語のため、直前のケースのロケール（[1-6] が :en に変更）に依存しないよう明示する
+I18n.locale = :ja
 User.current = User.find(1)
 project = Project.first
 user_a = User.find(1)
