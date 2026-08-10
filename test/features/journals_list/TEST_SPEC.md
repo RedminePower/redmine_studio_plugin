@@ -24,6 +24,8 @@
 | `/journals_list/:id` | GET | 単一ジャーナルの Wiki レンダリング結果を返す |
 | `/journals_list/show_all?ids[]=...` | GET | 複数ジャーナルの Wiki レンダリング結果を JSON で一括返す |
 
+**認証:** ログイン必須（本体の `login_required` 設定に関わらず一律）。`before_action :require_login` を付与。ブラウザ UI 補助の AJAX エンドポイントのため、認証はセッション（ログイン中ユーザ）で行う。未認証（匿名）はログイン画面へリダイレクト（302）され、ジャーナル本文は取得できない。各ジャーナルの可視性は従来どおり `journalized.visible? && journal.visible?` で個別に判定する。
+
 ---
 
 ## 1. Runner テスト
@@ -553,6 +555,22 @@ try {
 ```
 
 **期待結果:** `404`
+
+### [2-18] 未認証（匿名）はログイン画面へリダイレクトされる（302・login_required 無効環境でも）
+
+追加エンドポイントは本体の `login_required` 設定に関わらず一律ログイン必須（`before_action :require_login`）。認証情報（セッション Cookie）なしのアクセスは、本体 `login_required` が無効な環境でもログイン画面へリダイレクト（302）され、ジャーナル本文は取得できない。
+
+**確認方法:**
+```powershell
+# 認証情報を付けずにアクセス（-MaximumRedirection 0 でリダイレクトを追わない）
+try {
+  Invoke-WebRequest -Uri '{BaseUrl}/journals_list/show_all?ids[]=1' -MaximumRedirection 0
+} catch {
+  $_.Exception.Response.StatusCode.Value__
+}
+```
+
+**期待結果:** `302`（ログイン画面 `/login` へのリダイレクト。匿名では取得不可）
 
 ---
 

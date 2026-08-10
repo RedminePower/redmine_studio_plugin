@@ -21,14 +21,6 @@ Redmine Studio の汎用設定を管理する API。
 | `DELETE /studio_settings/:id/histories/:version.json` | 履歴の削除 |
 | `POST /studio_settings/:id/restore.json` | 履歴からの復元 |
 
-## 認証
-
-全てのエンドポイントで API キー認証が必要。
-
-```
-GET /studio_settings.json?key=YOUR_API_KEY
-```
-
 ## レスポンス形式
 
 API は JSON と XML の両方をサポートする。

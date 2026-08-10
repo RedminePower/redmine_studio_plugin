@@ -12,7 +12,7 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
 | Controller | `CacheBundlesController` |
 | ルーティング | `GET /cache_bundle` |
 | View ファイル | なし（コントローラから `render plain:` で JSON を直接出力） |
-| 認証 | API キー必須（`accept_api_auth :show`） |
+| 認証 | ログイン必須（本体の `login_required` 設定に関わらず一律。未認証は 401）。`before_action :require_login`（`accept_api_auth :show` と併用で API キー認証も可） |
 | レスポンス形式 | JSON のみ（XML 非対応） |
 
 ### パラメータ
@@ -1631,6 +1631,24 @@ $other = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id={NonAdminU
 
 **スキップ条件:**
 - 非 admin ユーザが存在しない場合
+
+---
+
+### [2-21] 未認証（匿名）は 401 で拒否される（login_required 無効環境でも）
+
+cache_bundle は全ユーザの氏名・メール・admin フラグ・ロール権限・設定マスタを返すため、匿名アクセスの遮断が特に重要。本体の `login_required` が無効な環境でも、認証情報なしのアクセスは 401 で拒否されること。
+
+**確認方法:**
+```powershell
+try {
+    Invoke-WebRequest -Uri '{BaseUrl}/cache_bundle.json'
+} catch {
+    $_.Exception.Response.StatusCode.Value__
+}
+```
+
+**期待結果:**
+- ステータスコード 401（本体の `login_required` 設定に関わらず、認証情報なしのアクセスは拒否）
 
 ---
 

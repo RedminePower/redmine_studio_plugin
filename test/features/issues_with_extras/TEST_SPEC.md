@@ -18,8 +18,8 @@
 | ファイル | `app/controllers/issues_with_extras_controller.rb` |
 | ルーティング | `GET /issues_with_extras`, `GET /issues_with_extras/:id` |
 | View ファイル | `app/views/issues_with_extras/show.api.rsb`, `app/views/issues_with_extras/index.api.rsb` |
-| 認証 | 標準 `IssuesController` と同一（`accept_api_auth :index, :show`） |
-| 権限 | 標準 `view_issues` を流用（`authorize` を controller 名 `'issues'` で override） |
+| 認証 | ログイン必須（本体の `login_required` 設定に関わらず一律。未認証は 401）。`before_action :require_login`（`accept_api_auth :index, :show` は継承）。標準 `/issues` より厳格 |
+| 権限 | 認証済みユーザに対しては標準 `view_issues` を流用（`authorize` を controller 名 `'issues'` で override） |
 | レスポンス形式 | JSON / XML 両対応 |
 
 ### 追加されるフィールド
@@ -182,9 +182,9 @@ Write-Host "first_has_children_count: $($r.issues[0].PSObject.Properties.Name -c
 - `first_has_reply_count: False`
 - `first_has_children_count: False`
 
-### [2-7] 認証は標準 IssuesController と同一挙動
+### [2-7] 未認証（匿名）は 401 で拒否される（標準 /issues より厳格）
 
-標準 `/issues` と同じく `accept_api_auth :index, :show` を継承しているため、認証の要求条件は標準と一致する。標準 `/issues/:id.json` が返せる状況では本エンドポイントも返り、標準が 401 を返す状況では本エンドポイントも 401 を返す。
+追加 API は本体の `login_required` 設定に関わらず一律ログイン必須（`before_action :require_login`）。標準 `/issues/:id.json` は `login_required` 無効環境では公開チケットを匿名に 200 で返すが、本エンドポイントは匿名を常に 401 で拒否する（＝標準よりも厳格）。
 
 **確認方法:**
 ```powershell
@@ -195,10 +195,12 @@ try { $r = Invoke-WebRequest -Uri '{BaseUrl}/issues/{ISSUE_ID}.json' -UseBasicPa
 $extStatus = 0
 try { $r = Invoke-WebRequest -Uri '{BaseUrl}/issues_with_extras/{ISSUE_ID}.json' -UseBasicParsing -ErrorAction Stop; $extStatus = $r.StatusCode } catch { $extStatus = $_.Exception.Response.StatusCode.value__ }
 
-Write-Host "std: $stdStatus / ext: $extStatus / match: $($stdStatus -eq $extStatus)"
+Write-Host "std: $stdStatus / ext: $extStatus"
 ```
 
-**期待結果:** `match: True`（標準と本エンドポイントが同じステータスコードを返す）
+**期待結果:**
+- `ext: 401`（本エンドポイントは匿名を常に 401 で拒否）
+- 参考: `login_required` 無効環境では公開チケットに対し `std: 200` となり、本エンドポイントが標準より厳格であることが分かる（`std` の値は本体設定・チケットの公開/非公開により変わるため、判定は `ext` の 401 のみを対象とする）
 
 ### [2-8] Issue API レスポンスの他フィールドが Redmine 本体と同一（等価性検証、show）
 

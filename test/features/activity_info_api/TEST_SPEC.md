@@ -386,10 +386,82 @@ puts result ? 'PASS' : "FAIL: target1=#{restored1[:assigned_to_id].inspect}, tar
 
 ---
 
+### [1-13] 閲覧権限の無い親チケットが ticket_tree から除外される（.visible 是正）
+
+`index` は親チケット階層を `Issue.visible` で絞って取得する。要求ユーザに見えない親（例: 非公開チケットや非メンバーのプロジェクト）が ticket_tree に混ざらないことを確認する。子は見えるが親は見えない状況を作り、`build_ticket_tree` の入力に実装同様 `Issue.visible` を通した辞書を渡すと、親が階層から落ちること（旧挙動＝`.visible` なしでは混入すること）を対比で確認する。
+
+**確認方法:**
+```ruby
+admin = User.find(1)
+User.current = admin
+# 非管理・非メンバーの閲覧ユーザ（公開プロジェクトの公開チケットのみ可視）
+u = User.find_by(login: 'p2891_viewer')
+if u.nil?
+  u = User.new(login: 'p2891_viewer', firstname: 'P2891', lastname: 'Viewer', mail: 'p2891_viewer@example.com')
+  u.password = 'password123'; u.password_confirmation = 'password123'; u.admin = false; u.save
+end
+pub = Project.find_by(identifier: 'p2891-pub')
+if pub.nil?
+  pub = Project.new(name: 'P2891 Pub', identifier: 'p2891-pub', is_public: true)
+  pub.enabled_module_names = ['issue_tracking']; pub.trackers = [Tracker.first]; pub.save
+end
+tracker = pub.trackers.first || Tracker.first
+parent = Issue.find_by(subject: 'P2891_Parent_Private')
+if parent.nil?
+  parent = Issue.new(project: pub, tracker: tracker, subject: 'P2891_Parent_Private', author: admin, status: IssueStatus.first, priority: IssuePriority.first)
+  parent.is_private = true; parent.save
+end
+child = Issue.find_by(subject: 'P2891_Child_Public')
+if child.nil?
+  child = Issue.new(project: pub, tracker: tracker, subject: 'P2891_Child_Public', author: admin, status: IssueStatus.first, priority: IssuePriority.first)
+  child.is_private = false; child.save
+end
+if child.parent_id != parent.id
+  child.parent_issue_id = parent.id
+  child.save  # parent_issue_id= は仮想セッターで dirty 判定に乗らないため無条件に保存する
+end
+
+User.current = u
+controller = ActivityInfosController.new
+ids = [child.id, parent.id]
+status_lookup = IssueStatus.all.index_by(&:id)
+principal_lookup = Principal.all.index_by(&:id)
+# 実装と同じく .visible を通す
+fixed = Issue.visible.where(:id => ids).index_by(&:id)
+tree_fixed = controller.send(:build_ticket_tree, child, child.created_on, {}, fixed, {}, status_lookup, principal_lookup).map { |t| t[:id] }
+# 対比: .visible なし（旧挙動）
+old = Issue.where(:id => ids).index_by(&:id)
+tree_old = controller.send(:build_ticket_tree, child, child.created_on, {}, old, {}, status_lookup, principal_lookup).map { |t| t[:id] }
+User.current = admin
+ok = ((tree_fixed.include?(parent.id) == false) && tree_fixed.include?(child.id) && tree_old.include?(parent.id))
+puts ok ? 'PASS' : "FAIL: fixed=#{tree_fixed.inspect} old=#{tree_old.inspect}"
+```
+
+**期待結果:**
+- `PASS`（修正後は不可視な親 `P2891_Parent_Private` が ticket_tree から除外され、子のみ残る。旧挙動では親が混入していたことも対比で確認）
+
+---
+
 ## 2. HTTP テスト
 
 **実行方法:**
 PowerShell で各エンドポイントにリクエストを送信する。API キー認証が必要。
+
+### [2-0a] 未認証（匿名）は 401 で拒否される（login_required 無効環境でも）
+
+**確認方法:**
+```powershell
+try {
+  Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07'
+} catch {
+  $_.Exception.Response.StatusCode.Value__
+}
+```
+
+**期待結果:**
+- ステータスコード 401（本体の `login_required` 設定に関わらず、認証情報なしのアクセスは拒否）
+
+---
 
 ### [2-1] JSON 形式でアクセス可能
 

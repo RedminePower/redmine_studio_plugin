@@ -17,9 +17,9 @@ Redmine Studio のチケット表編集では「返答回数」「子チケッ�
 
 filter・pagination・`include=` などのクエリパラメータは、標準 `IssuesController` を継承しているため `/issues` と同一に動作する。
 
-## 認証
+## 権限
 
-標準 `IssuesController` と同じく `accept_api_auth :index, :show` を継承する。認証の要求条件・権限（`view_issues`）は標準 `/issues` と一致し、標準が返せる状況では本エンドポイントも返り、標準が 401 を返す状況では本エンドポイントも 401 を返す。
+認証済みユーザに対する権限は、標準 `/issues` と同じく `view_issues` を流用します（`accept_api_auth :index, :show` を継承）。認証は必須で、匿名アクセスは 401 で拒否されます（標準 `/issues` より厳格）。
 
 ## 追加されるフィールド
 

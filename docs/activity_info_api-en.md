@@ -8,10 +8,6 @@ API to retrieve Redmine activity history. Returns issue state (status, assignee)
 |----------|-------------|
 | `GET /activity_infos.json` | Retrieve activity history |
 
-## Authentication
-
-API key authentication is required.
-
 ## Parameters
 
 | Parameter | Type | Required | Description |
@@ -170,7 +166,7 @@ Response:
 
 | Status | Condition |
 |--------|-----------|
-| 401 | API key not provided (in environments requiring authentication) |
+| 401 | Not authenticated (login required) |
 | 404 | Specified user_id does not exist |
 | 422 | Required parameter (user_id, from, to) is missing |
 

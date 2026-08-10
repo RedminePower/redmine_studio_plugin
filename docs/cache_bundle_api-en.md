@@ -9,9 +9,7 @@ Returns multiple Redmine resources (Projects / Trackers / Users / per-project Me
 |----------|-------------|
 | `GET /cache_bundle.json` | Retrieve the cache bundle |
 
-## Authentication
-
-API key authentication is required.
+## Permissions
 
 The range of the `users` / `custom_fields` / `groups` sections varies depending on the privileges of the API key used:
 

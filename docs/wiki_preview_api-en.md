@@ -10,10 +10,6 @@ The conventional approach of automatically logging into the browser with WebView
 |----------|-------------|
 | `POST /wiki_preview.json` | Convert Wiki text to HTML |
 
-## Authentication
-
-API key authentication is required.
-
 ## Parameters
 
 | Parameter | Type | Required | Description |
@@ -98,7 +94,7 @@ Response:
 
 | Status | Condition |
 |--------|-----------|
-| 401 | API key not specified (only in environments that require authentication) |
+| 401 | Not authenticated (login required) |
 | 404 | The specified `project_id` does not exist or is not visible |
 | 422 | The required parameter `text` is not specified |
 

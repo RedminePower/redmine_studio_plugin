@@ -9,14 +9,6 @@ Redmine にインストールされているプラグインの情報を取得す
 | `GET /plugins.json` | プラグイン一覧の取得 |
 | `GET /plugins/:id.json` | 単体プラグイン情報の取得 |
 
-## 認証
-
-全てのエンドポイントで API キー認証が必要。
-
-```
-GET /plugins.json?key=YOUR_API_KEY
-```
-
 ## レスポンス形式
 
 API は JSON と XML の両方をサポートする。

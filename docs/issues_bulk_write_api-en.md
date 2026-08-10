@@ -14,9 +14,7 @@ Redmine's standard `POST /issues.json` has two limitations that cause N× overhe
 | `POST /issues/bulk_write.json` | Create/update multiple issues (JSON response) |
 | `POST /issues/bulk_write.xml` | Same (XML response) |
 
-## Authentication
-
-API key authentication is required. Returns 401 without authentication (`before_action :require_login`), matching the behavior of the standard Redmine `POST /issues.json`.
+## Permissions
 
 Per-operation permissions follow Redmine standards:
 - **create**: `User.current.allowed_to?(:add_issues, project, global: true)`

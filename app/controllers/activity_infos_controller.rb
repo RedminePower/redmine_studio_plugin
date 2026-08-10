@@ -2,6 +2,8 @@
 
 class ActivityInfosController < ApplicationController
   accept_api_auth :index
+  # 追加 API は本体の login_required 設定に関わらず一律ログイン必須にする（匿名アクセス遮断）
+  before_action :require_login
 
   # GET /activity_infos?user_id=N&from=YYYY-MM-DD&to=YYYY-MM-DD
   def index
@@ -26,7 +28,9 @@ class ActivityInfosController < ApplicationController
     journals_by_issue = preload_journals(all_issue_ids)
 
     # ルックアップテーブルを構築（DB クエリを最小化）
-    issues_by_id = Issue.where(:id => all_issue_ids).preload(:tracker, :project, :priority, :author).index_by(&:id)
+    # 親チケット階層に閲覧権限の無いチケットが混ざり得るため .visible で絞る。
+    # 可視でない親は issues_by_id から外れ、build_ticket_tree がそこで階層を打ち切る
+    issues_by_id = Issue.visible.where(:id => all_issue_ids).preload(:tracker, :project, :priority, :author).index_by(&:id)
     status_lookup = IssueStatus.where(:id => collect_all_status_ids(journals_by_issue, issues_by_id)).index_by(&:id)
     principal_lookup = Principal.where(:id => collect_all_principal_ids(journals_by_issue, issues_by_id)).index_by(&:id)
 

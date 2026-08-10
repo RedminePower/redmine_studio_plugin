@@ -191,6 +191,8 @@ For details, see [docs/children_count-en.md](docs/children_count-en.md).
 
 APIs used internally by Redmine Studio. See the linked documents for details.
 
+**Authentication:** All of the APIs below require login (authentication) regardless of Redmine's "Authentication required" setting. Unauthenticated requests are rejected (401). Returned content is scoped to each user's permissions and visibility in Redmine.
+
 | API | Description | Details |
 |-----|-------------|---------|
 | Plugin API | Retrieves plugin information | [docs/plugin_api-en.md](docs/plugin_api-en.md) |

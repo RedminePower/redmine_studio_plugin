@@ -20,7 +20,7 @@ Redmine 本体のプレビュー画面と同じ `textilizable` を使用し、�
 | Controller | `WikiPreviewsController` |
 | ルーティング | `POST /wiki_preview.json`, `POST /wiki_preview.xml` |
 | View ファイル | `app/views/wiki_previews/create.api.rsb` |
-| 認証 | API キー必須（未認証で 401） |
+| 認証 | ログイン必須（本体の `login_required` 設定に関わらず一律。未認証は 401）。`before_action :require_login`（`accept_api_auth :create` と併用で API キー認証も可） |
 | レンダリング | `view_context.textilizable(text, :project => project)` |
 | フォーマット固定 | textilizable 実行中だけ `lookup_context.formats = [:html]`（ensure で復元）。マクロが描画する HTML パーシャル（`issues/_list` 等）を解決するため。固定しないと JSON/XML 応答の format で `Missing partial` になる |
 | スタイルシート解決 | `stylesheet_urls` が表示用 CSS の URL を返す。Redmine 本体のレイアウトと同じ規則（`application.css` を持つテーマが設定されていればテーマ側、なければコアの `application.css`）で `view_context.stylesheet_path` により解決する |
@@ -207,6 +207,23 @@ puts themes.any? ? "PASS (themes=#{themes.inspect}, current=#{Setting.ui_theme.i
 **実行方法:**
 PowerShell で各エンドポイントに POST リクエストを送信する。API キー認証が必要。
 JSON ボディは `ConvertTo-Json` で生成し、`-ContentType 'application/json'` を指定する。
+
+### [2-0a] 未認証（匿名）は 401 で拒否される（login_required 無効環境でも）
+
+**確認方法:**
+```powershell
+$body = @{ text = 'h1. Test' } | ConvertTo-Json
+try {
+  Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json'
+} catch {
+  $_.Exception.Response.StatusCode.Value__
+}
+```
+
+**期待結果:**
+- ステータスコード 401（本体の `login_required` 設定に関わらず、認証情報なしのアクセスは拒否）
+
+---
 
 ### [2-1] JSON 形式でアクセス可能
 

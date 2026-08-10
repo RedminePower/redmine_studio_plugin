@@ -9,14 +9,6 @@ API to retrieve information about plugins installed in Redmine.
 | `GET /plugins.json` | Get plugin list |
 | `GET /plugins/:id.json` | Get single plugin information |
 
-## Authentication
-
-All endpoints require API key authentication.
-
-```
-GET /plugins.json?key=YOUR_API_KEY
-```
-
 ## Response Format
 
 The API supports both JSON and XML.

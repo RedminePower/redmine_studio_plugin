@@ -21,14 +21,6 @@ API to manage general settings for Redmine Studio.
 | `DELETE /studio_settings/:id/histories/:version.json` | Delete history |
 | `POST /studio_settings/:id/restore.json` | Restore from history |
 
-## Authentication
-
-All endpoints require API key authentication.
-
-```
-GET /studio_settings.json?key=YOUR_API_KEY
-```
-
 ## Response Format
 
 The API supports both JSON and XML.

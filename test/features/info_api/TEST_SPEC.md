@@ -11,7 +11,7 @@ Redmine 環境情報 API 機能のテスト仕様。「管理」＞「情報」�
 | Controller | `InfoController` |
 | ルーティング | `GET /info.json`, `GET /info.xml` |
 | View ファイル | `app/views/info/show.api.rsb` |
-| 認証 | 不要（誰でもアクセス可能） |
+| 認証 | ログイン必須（本体の `login_required` 設定に関わらず一律。未認証は 401）。`before_action :require_login` |
 
 ### レスポンス形式
 
@@ -198,13 +198,29 @@ end
 ## 2. HTTP テスト
 
 **実行方法:**
-PowerShell で各エンドポイントにリクエストを送信する。
+PowerShell で各エンドポイントにリクエストを送信する。本 API はログイン必須のため、成功系のテストは全て API キー（`-Headers @{'X-Redmine-API-Key'='{ApiKey}'}`）を付与して実行する。
+
+### [2-0a] 未認証（匿名）は 401 で拒否される（login_required 無効環境でも）
+
+**確認方法:**
+```powershell
+try {
+  Invoke-WebRequest -Uri '{BaseUrl}/info.json' -Method Get
+} catch {
+  $_.Exception.Response.StatusCode.Value__
+}
+```
+
+**期待結果:**
+- ステータスコード 401（本体の `login_required` 設定に関わらず、認証情報なしのアクセスは拒否）
+
+---
 
 ### [2-1] JSON 形式でアクセス可能
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-WebRequest -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.StatusCode
 ```
 
@@ -217,7 +233,7 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get
+$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.StatusCode
 ```
 
@@ -230,7 +246,7 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info -ne $null
 ```
 
@@ -243,7 +259,7 @@ $response.info -ne $null
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.redmine_version
 ```
 
@@ -256,7 +272,7 @@ $response.info.redmine_version
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.ruby_version
 ```
 
@@ -269,7 +285,7 @@ $response.info.ruby_version
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.rails_version
 ```
 
@@ -282,7 +298,7 @@ $response.info.rails_version
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.environment
 ```
 
@@ -295,7 +311,7 @@ $response.info.environment
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.database_adapter
 ```
 
@@ -308,7 +324,7 @@ $response.info.database_adapter
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.mailer_queue
 ```
 
@@ -321,7 +337,7 @@ $response.info.mailer_queue
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.mailer_delivery
 ```
 
@@ -334,7 +350,7 @@ $response.info.mailer_delivery
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.redmine_theme
 ```
 
@@ -347,7 +363,7 @@ $response.info.redmine_theme
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.text_formatting
 ```
 
@@ -360,7 +376,7 @@ $response.info.text_formatting
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.scm -is [array]
 ```
 
@@ -373,7 +389,7 @@ $response.info.scm -is [array]
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.scm | ForEach-Object { $_.name; $_.version }
 ```
 
@@ -386,7 +402,7 @@ $response.info.scm | ForEach-Object { $_.name; $_.version }
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.plugins -is [array]
 ```
 
@@ -399,7 +415,7 @@ $response.info.plugins -is [array]
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get
+$response = Invoke-RestMethod -Uri '{BaseUrl}/info.json' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.info.plugins | ForEach-Object { $_.id; $_.version }
 ```
 
@@ -412,7 +428,7 @@ $response.info.plugins | ForEach-Object { $_.id; $_.version }
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get
+$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.Content -match '<info>'
 ```
 
@@ -425,7 +441,7 @@ $response.Content -match '<info>'
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get
+$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.Content -match '<scm type="array">'
 ```
 
@@ -438,7 +454,7 @@ $response.Content -match '<scm type="array">'
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get
+$response = Invoke-WebRequest -Uri '{BaseUrl}/info.xml' -Method Get -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.Content -match '<plugins type="array">'
 ```
 

@@ -17,9 +17,9 @@ It uses a dedicated controller that inherits from the standard `IssuesController
 
 Query parameters such as filters, pagination, and `include=` behave identically to `/issues` because the controller inherits the standard `IssuesController`.
 
-## Authentication
+## Permissions
 
-Inherits `accept_api_auth :index, :show` from the standard `IssuesController`. Authentication requirements and permissions (`view_issues`) match the standard `/issues`: it returns data whenever the standard endpoint would, and returns 401 whenever the standard endpoint would.
+For authenticated users, permissions follow the standard `/issues` (`view_issues`; inherits `accept_api_auth :index, :show`). Authentication is required and anonymous requests are rejected with 401 (stricter than the standard `/issues`).
 
 ## Added Fields
 

@@ -8,10 +8,6 @@ API to retrieve Redmine environment information. Provides the same information d
 |----------|-------------|
 | `GET /info.json` | Get Redmine environment information |
 
-## Authentication
-
-No authentication required. Accessible by anyone.
-
 ## Response Format
 
 The API supports both JSON and XML.

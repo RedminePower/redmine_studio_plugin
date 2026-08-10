@@ -2,6 +2,8 @@
 
 class WikiPreviewsController < ApplicationController
   accept_api_auth :create
+  # 追加 API は本体の login_required 設定に関わらず一律ログイン必須にする（匿名アクセス遮断）
+  before_action :require_login
 
   # POST /wiki_preview
   def create

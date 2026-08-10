@@ -3,6 +3,8 @@
 # AJAX 経由で呼ばれるため、エラー時はクライアント側で "Failed to load." と表示されるだけで
 # 原因の特定が困難になる。そのため、他のコントローラーと異なりログ出力を追加している。
 class JournalsListController < ApplicationController
+  # 追加 API は本体の login_required 設定に関わらず一律ログイン必須にする（匿名アクセス遮断）
+  before_action :require_login
   before_action :find_journal, only: [:show]
   before_action :find_journals, only: [:show_all]
 

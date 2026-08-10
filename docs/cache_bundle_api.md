@@ -9,9 +9,7 @@ Redmine Studio（Windows クライアント）のキャッシュ更新を 1 リ�
 |---------------|------|
 | `GET /cache_bundle.json` | キャッシュバンドルの取得 |
 
-## 認証
-
-API キー認証が必要。
+## 権限
 
 リクエスト時に使用する API キーの権限により、`users` / `custom_fields` / `groups` の 3 セクションに含まれる範囲が変わる:
 

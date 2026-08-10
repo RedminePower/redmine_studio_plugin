@@ -14,9 +14,7 @@ Redmine 標準の `POST /issues.json` は以下 2 つの制約があり、大量
 | `POST /issues/bulk_write.json` | 複数 Issue の作成/更新（JSON レスポンス） |
 | `POST /issues/bulk_write.xml` | 同上（XML レスポンス） |
 
-## 認証
-
-API キー認証が必要。`before_action :require_login` により無認証時は 401 を返す（Redmine 標準 POST /issues.json の挙動に揃えている）。
+## 権限
 
 各 operation の権限は Redmine 標準に従う:
 - **create**: `User.current.allowed_to?(:add_issues, project, global: true)`
