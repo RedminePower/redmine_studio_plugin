@@ -1,0 +1,13 @@
+# oauth_client ルートは常に出力する（未登録でも空要素を返す）。
+# 空応答を「ルート無し」にすると XML デシリアライズが壊れるため、
+# 中身（client_id / scopes）は登録済みのときだけ詰める。
+api.oauth_client do
+  if @application
+    api.client_id @application.uid
+    api.array :scopes do
+      @scopes.each do |scope|
+        api.scope scope
+      end
+    end
+  end
+end

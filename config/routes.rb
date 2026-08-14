@@ -7,6 +7,9 @@ Rails.application.routes.draw do
   # Info
   get 'info', to: 'info#show'
 
+  # OAuth Client (サインイン開始用に client_id / scopes を返す唯一の匿名窓口)
+  get 'oauth_client', to: 'oauth_client#show'
+
   # Activity Info
   get 'activity_infos', to: 'activity_infos#index'
 

@@ -121,6 +121,10 @@ else
   # Load Spent Hours By User (API 専用。HTML 一覧カラムではないため query_column 等は無し)
   require_relative 'lib/redmine_studio_plugin/spent_hours_by_user/issue_patch'
 
+  # Load OAuth Client (サインイン用アプリの自己修復登録・スコープ定義)
+  require_relative 'lib/redmine_studio_plugin/oauth_client/scope_provider'
+  require_relative 'lib/redmine_studio_plugin/oauth_client/app_registrar'
+
   # Apply patches directly (init.rb is already executed inside to_prepare)
   Issue.include RedmineStudioPlugin::AutoClose::IssuePatch
   Issue.prepend RedmineStudioPlugin::DateIndependent::IssuePatch
@@ -156,4 +160,9 @@ else
 
   require_relative 'lib/redmine_studio_plugin/children_count/query_column'
   IssueQuery.add_available_column(RedmineStudioPlugin::ChildrenCount::QueryColumn.new)
+
+  # サインイン用 OAuth アプリを起動のたびに自己修復登録する（未登録なら登録・スコープ差は追従）
+  Rails.application.config.after_initialize do
+    RedmineStudioPlugin::OauthClient::AppRegistrar.ensure_registered
+  end
 end

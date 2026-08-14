@@ -18,6 +18,7 @@
 - **API** - Redmine Studio が内部で使用する API 群
   - **Plugin API** - プラグイン情報を取得
   - **Info API** - Redmine 環境情報を取得
+  - **OAuth Client API** - ブラウザサインイン用の client_id / scopes を取得（唯一の匿名アクセス可）
   - **Studio Settings API** - 汎用設定を管理
   - **Activity Info API** - 活動履歴を取得
   - **Cache Bundle API** - Redmine Studio のキャッシュ更新を 1 リクエストで完結させる
@@ -193,12 +194,13 @@ Redmine の子チケット一覧は、階層が深くなると全体を把握し
 
 Redmine Studio が内部で使用する API 群です。各 API の詳細はリンク先を参照してください。
 
-**認証:** 以下の API はいずれも、Redmine 本体の「認証が必要」設定に関わらず、**ログイン（認証）が必須**です。未認証のアクセスは拒否されます（401）。返される内容は各利用者の Redmine 上の権限・可視性に従います。
+**認証:** 以下の API は、**OAuth Client API を除き**、Redmine 本体の「認証が必要」設定に関わらず、**ログイン（認証）が必須**です。未認証のアクセスは拒否されます（401）。返される内容は各利用者の Redmine 上の権限・可視性に従います。OAuth Client API のみ、サインインを開始する前段で必要なため匿名アクセスを許可します（返す情報は client_id と scopes に限定）。
 
 | API | 説明 | 詳細 |
 |-----|------|------|
 | Plugin API | プラグイン情報を取得 | [docs/plugin_api.md](docs/plugin_api.md) |
 | Info API | Redmine 環境情報を取得 | [docs/info_api.md](docs/info_api.md) |
+| OAuth Client API | ブラウザサインイン用の client_id / scopes を取得（匿名アクセス可） | [docs/oauth_client_api.md](docs/oauth_client_api.md) |
 | Studio Settings API | 汎用設定を管理 | [docs/studio_settings_api.md](docs/studio_settings_api.md) |
 | Activity Info API | 活動履歴を取得 | [docs/activity_info_api.md](docs/activity_info_api.md) |
 | Cache Bundle API | キャッシュバンドルを取得 | [docs/cache_bundle_api.md](docs/cache_bundle_api.md) |
