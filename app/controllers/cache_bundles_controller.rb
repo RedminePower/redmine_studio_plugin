@@ -449,7 +449,9 @@ class CacheBundlesController < ApplicationController
       updated_on: to_api_time(v.updated_on)
     }
     h[:due_date] = v.due_date if v.due_date
-    h[:wiki_page_title] = v.wiki_page_title if v.wiki_page_title.present?
+    # 個別 API (XML) は空でも wiki_page_title 要素を出力し空文字になるため、
+    # cache_bundle でも常に文字列で出力して個別 API と表現を揃える
+    h[:wiki_page_title] = v.wiki_page_title.to_s
     # 個別 API (GET /projects/:id/versions.json) は render_api_custom_values で
     # 対象ユーザに可視な CF 値を返す。可視性はコアの visible_custom_field_values にそのまま委ねる
     # （preload 済み custom_values の上で評価するため追加クエリなし）。
