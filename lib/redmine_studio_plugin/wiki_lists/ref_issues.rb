@@ -209,7 +209,9 @@ TEXT
                 if parser.only_link
                   disp += link_to("#{word}", issue_path(issue))
                 else
-                  disp += textilizable(word, object: issue)
+                  # CommonMark（Redmine 7.0 以降）は非 UTF-8 文字列を拒否するため、
+                  # 数値カラム由来の US-ASCII 文字列を UTF-8 に統一してから整形する
+                  disp += textilizable(word.to_s.dup.force_encoding('UTF-8'), object: issue)
                 end
               end
             elsif parser.count_flag
