@@ -107,3 +107,24 @@ every time Redmine starts.
 
 Because the scopes on the token and the user's own permissions are combined with AND,
 information the user cannot see in Redmine remains invisible even after signing in.
+
+---
+
+## Token retrieval behind a front HTTP Basic gate
+
+Browser sign-in's token retrieval (`POST /oauth/token`) is made to work even when an
+HTTP Basic authentication gate (a reverse proxy in front of Redmine) is present.
+
+To pass the front gate, the client puts the gate credentials in the `Authorization: Basic`
+header. However, standard Doorkeeper interprets this header as the OAuth client's
+credentials (`client_id:client_secret`), so the gate credentials fail to match any client
+and token retrieval fails with `invalid_client`.
+
+This plugin treats the `Authorization: Basic` header as client credentials only when its
+username is the `client_id` (uid) of a registered OAuth application. As a result the gate
+credentials are ignored, the client is identified by the `client_id` in the request body
+(a public client), and token retrieval succeeds.
+
+- No effect on the normal configuration without a front gate (unchanged when there is no Basic header)
+- Legitimate client Basic authentication using a registered app's `client_id` is still honored
+- No customer-side proxy configuration (such as excluding specific paths from Basic auth) is required

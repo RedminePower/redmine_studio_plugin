@@ -124,6 +124,11 @@ else
   # Load OAuth Client (サインイン用アプリの自己修復登録・スコープ定義)
   require_relative 'lib/redmine_studio_plugin/oauth_client/scope_provider'
   require_relative 'lib/redmine_studio_plugin/oauth_client/app_registrar'
+  require_relative 'lib/redmine_studio_plugin/oauth_client/doorkeeper_client_credentials_patch'
+
+  # 前段 Basic 認証ゲート下でも /oauth/token を通す
+  # （Doorkeeper がゲートの Basic をクライアント資格情報と誤読しないよう、未登録 uid の Basic は無視させる）
+  Doorkeeper::OAuth::Client::Credentials.singleton_class.prepend(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch)
 
   # Apply patches directly (init.rb is already executed inside to_prepare)
   Issue.include RedmineStudioPlugin::AutoClose::IssuePatch

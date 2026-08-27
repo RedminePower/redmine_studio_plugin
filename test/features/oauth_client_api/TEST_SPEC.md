@@ -8,6 +8,9 @@
 あわせて、サインイン用 OAuth アプリを Redmine 起動のたびに自己修復登録する仕組み
 （`AppRegistrar`）と、権限範囲を定義する `ScopeProvider` を検証する。
 
+さらに、前段 Basic 認証ゲートの裏でトークン取得 `POST /oauth/token` を成立させるための
+クライアント資格情報パッチ（`DoorkeeperClientCredentialsPatch`）を検証する。
+
 ## 機能の内部実装
 
 | 項目 | 値 |
@@ -17,6 +20,7 @@
 | View ファイル | `app/views/oauth_client/show.api.rsb` |
 | 登録処理 | `RedmineStudioPlugin::OauthClient::AppRegistrar`（`init.rb` の `after_initialize` から起動時に呼ぶ） |
 | スコープ定義 | `RedmineStudioPlugin::OauthClient::ScopeProvider` |
+| クライアント資格情報パッチ | `RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch`（`Doorkeeper::OAuth::Client::Credentials` の特異クラスに `prepend`） |
 | 認証 | **匿名アクセス可（本体の `login_required` 設定に関わらず到達可能）**。追加 API 中これだけが匿名の例外。`skip_before_action :check_if_login_required` |
 
 ### 匿名を許可する理由
@@ -78,6 +82,27 @@ API は JSON と XML の両方をサポートする。
 | 管理系 | `admin` は絶対に含めない |
 
 トークンに載る権限と利用者本人のロール権限は AND で効くため、ここは「アプリが要求してよい上限」を最小権限で定義する。
+
+### 前段 Basic ゲート下でのトークン取得（クライアント資格情報パッチ）
+
+前段プロキシの Basic 認証を通すため、クライアントは `Authorization: Basic` にゲートの資格情報を載せる。
+ところが Doorkeeper はこのヘッダを OAuth クライアント資格情報（`client_id:client_secret`）として解釈する
+（`client_credentials_methods` の既定は `from_basic` が `from_params` より優先）。その結果、ゲートの資格情報では
+該当クライアントが見つからず `POST /oauth/token` が `invalid_client`（401）で失敗する。
+
+`DoorkeeperClientCredentialsPatch` は `Doorkeeper::OAuth::Client::Credentials.from_basic` を差し替え、
+Basic のユーザー名が「登録済み OAuth アプリの uid」でない場合に限りクライアント資格情報として無視して `nil` を返す。
+これにより `from_params`（リクエストボディの `client_id`）へフォールバックし、公開クライアント（PKCE）として
+トークン取得が成立する。登録済みクライアントの Basic 認証は従来どおり尊重する（`nil` を返さない）。
+
+| 入力 | `from_basic` の戻り | 効果 |
+|------|--------------------|------|
+| ゲートの資格情報（未登録 uid）の Basic | `nil` | ボディ `client_id` へフォールバック |
+| 登録済みアプリ uid の Basic | `[uid, secret]`（従来どおり） | 正規のクライアント認証として尊重 |
+| Basic ヘッダ無し | `nil`（従来どおり） | 影響なし |
+
+補足: doorkeeper 5.8.2 では `from_basic` は `[uid, secret]` の配列を返す（`Credentials` 構造体ではない）。
+パッチは戻り値の先頭要素（uid）だけを見て判定するため、この差異の影響を受けない。
 
 ---
 
@@ -198,6 +223,67 @@ puts RedmineStudioPlugin::OauthClient::AppRegistrar.signin_supported? ? 'PASS' :
 
 ---
 
+### [1-10] クライアント資格情報パッチが定義されている
+
+```ruby
+puts defined?(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch) ? 'PASS' : 'FAIL: patch not defined'
+```
+
+**期待結果:** `DoorkeeperClientCredentialsPatch` が定義されている
+
+---
+
+### [1-11] パッチが Credentials の特異クラスに適用されている
+
+```ruby
+ok = Doorkeeper::OAuth::Client::Credentials.singleton_class.ancestors.include?(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch)
+puts ok ? 'PASS' : 'FAIL: patch not prepended to Credentials singleton class'
+```
+
+**期待結果:** `Doorkeeper::OAuth::Client::Credentials` の特異クラスにパッチが `prepend` されている
+
+---
+
+### [1-12] ゲートの資格情報（未登録 uid）の Basic は無視される
+
+```ruby
+require 'base64'
+req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64('user:password'))
+creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
+puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
+```
+
+**期待結果:** 未登録 uid（前段ゲートの資格情報）の Basic では `nil`（＝ボディ `client_id` へフォールバックさせる）
+
+---
+
+### [1-13] 登録済みアプリ uid の Basic は従来どおり尊重される
+
+```ruby
+require 'base64'
+app = Doorkeeper::Application.find_by(name: 'Redmine Studio')
+req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64("#{app.uid}:sek"))
+creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
+ok = creds && creds.first == app.uid
+puts ok ? 'PASS' : "FAIL: #{creds.inspect}"
+```
+
+**期待結果:** 登録済み uid の Basic は `nil` にせず、先頭要素が uid の資格情報を返す
+
+---
+
+### [1-14] Basic ヘッダ無しは従来どおり nil
+
+```ruby
+req = Struct.new(:authorization).new(nil)
+creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
+puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
+```
+
+**期待結果:** Basic ヘッダが無ければ従来どおり `nil`（パッチによる副作用なし）
+
+---
+
 ## 2. HTTP テスト
 
 **実行方法:**
@@ -286,6 +372,63 @@ docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner
 ```
 
 **期待結果:** 未登録（非対応相当）でも 404 ではなく 200 で空オブジェクトを返す。`client_id` は含まれない
+
+---
+
+### [2-6] ゲートの Basic ヘッダ下でもボディ client_id でトークン取得の認証が通る
+
+前段ゲートの `Authorization: Basic` を載せたまま、ボディに公開クライアントの `client_id` を渡す。
+パッチにより Basic はクライアント資格情報として無視され、ボディの `client_id` でクライアント認証が成立する。
+偽の認可コードを渡すため、`invalid_client`（クライアント認証失敗）ではなく `invalid_grant`（コード不正）で失敗すれば、
+クライアント認証が通ったことの証明になる。
+
+```powershell
+# 登録済みアプリの uid を取得
+$uid = docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner `"puts Doorkeeper::Application.find_by(name: 'Redmine Studio').uid`"" | Select-Object -Last 1
+$uid = $uid.Trim()
+
+$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('user:password'))
+$headers = @{ Authorization = "Basic $basic" }
+$body = @{
+  grant_type    = 'authorization_code'
+  code          = 'bogus-code-not-exist'
+  client_id     = $uid
+  redirect_uri  = 'http://127.0.0.1/'
+  code_verifier = ('a' * 43)
+}
+try {
+  Invoke-RestMethod -Uri '{BaseUrl}/oauth/token' -Method Post -Headers $headers -Body $body
+} catch {
+  $_.ErrorDetails.Message   # {"error":"invalid_grant",...} 期待
+}
+```
+
+**期待結果:** レスポンスの `error` が `invalid_grant`（`invalid_client` ではない＝クライアント認証は成立）
+
+---
+
+### [2-7] ボディ client_id が無ければフォールバック先が無く invalid_client
+
+ゲートの Basic のみでボディに `client_id` が無い場合、フォールバック先が無いためクライアント認証は成立しない。
+[2-6] の対照として、パッチが「Basic を無条件に通す」ものではないことを確認する。
+
+```powershell
+$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('user:password'))
+$headers = @{ Authorization = "Basic $basic" }
+$body = @{
+  grant_type    = 'authorization_code'
+  code          = 'bogus-code-not-exist'
+  redirect_uri  = 'http://127.0.0.1/'
+  code_verifier = ('a' * 43)
+}
+try {
+  Invoke-RestMethod -Uri '{BaseUrl}/oauth/token' -Method Post -Headers $headers -Body $body
+} catch {
+  $_.ErrorDetails.Message   # {"error":"invalid_client",...} 期待
+}
+```
+
+**期待結果:** レスポンスの `error` が `invalid_client`（フォールバックできるボディ `client_id` が無い）
 
 ---
 
