@@ -105,7 +105,7 @@ puts plugin.version
 
 **期待結果:**
 - name: `Redmine Studio plugin`
-- version: `0.1.0`
+- version: 非空の版番号が取得できる（版番号は更新されるため固定値では検証しない）
 
 ### [1-2] 管理メニュー登録確認
 
