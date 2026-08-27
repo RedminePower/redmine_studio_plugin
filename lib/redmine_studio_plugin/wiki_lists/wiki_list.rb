@@ -130,7 +130,7 @@ TEXT
                   else
                     keyword = Regexp.escape(column_key)
                     terminator = false
-                    matches = wiki_page.text.scan /#{keyword}.*\z/ # キーワードから行末までを抽出
+                    matches = wiki_page.text.scan /#{keyword}.*$/ # キーワードから行末までを抽出
                   end
 
                   matches.each do |match| # 抽出されたキーワード毎の処理
