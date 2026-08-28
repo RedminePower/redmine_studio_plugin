@@ -277,6 +277,9 @@ puts missing.empty? ? 'PASS' : "FAIL: Missing keys: #{missing.join(', ')}"
 
 `issue_custom_fields` は `all_issue_custom_fields`（is_for_all 込み）、`time_entry_activities` は
 `activities`（アクティブのみ）、`trackers` は `rolled_up_trackers(false).visible(対象ユーザ)` と揃える。
+Redmine 7.0 以降はコアの個別 API が include を権限でゲートするため（`issue_categories` /
+`issue_custom_fields` は `view_issues`、`time_entry_activities` は `view_time_entries`）、期待値も
+同じゲートを掛ける（権限が無いプロジェクトは空配列。6.1 以前は無ゲートで常に返す）。
 
 **確認方法:**
 ```ruby
@@ -285,14 +288,15 @@ User.current = admin
 controller = CacheBundlesController.new
 result = controller.send(:fetch_projects, admin)
 
+gate = Redmine::VERSION::MAJOR >= 7 # 7.0 以降のみコアが include を権限でゲートする
 ok = true
 Project.visible(admin).each do |p|
   row = result.find { |h| h[:id] == p.id }
   next if row.nil?
   cf = row[:issue_custom_fields].map { |x| x[:id] }.sort
-  exp_cf = p.all_issue_custom_fields.map(&:id).sort
+  exp_cf = (gate && !admin.allowed_to?(:view_issues, p)) ? [] : p.all_issue_custom_fields.map(&:id).sort
   act = row[:time_entry_activities].map { |x| x[:id] }.sort
-  exp_act = p.activities.map(&:id).sort
+  exp_act = (gate && !admin.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
   tr = row[:trackers].map { |x| x[:id] }.sort
   exp_tr = p.rolled_up_trackers(false).visible(admin).map(&:id).sort
   if cf != exp_cf || act != exp_act || tr != exp_tr
@@ -304,7 +308,7 @@ puts ok ? 'PASS' : 'FAIL: 埋め込み includes が render_api_includes と不�
 ```
 
 **期待結果:**
-- 各プロジェクトの `issue_custom_fields` / `time_entry_activities` / `trackers` が個別 API と一致する（is_for_all CF を含み、inactive activity を含まず、trackers は view_issues 可視性で絞られる）
+- 各プロジェクトの `issue_custom_fields` / `time_entry_activities` / `trackers` が個別 API と一致する（is_for_all CF を含み、inactive activity を含まず、trackers は view_issues 可視性で絞られる）。7.0 以降は権限の無いプロジェクトで該当 include が空配列になる
 
 ---
 
@@ -1125,6 +1129,7 @@ targets = [User.find(1)]
 mu = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect { |u| u.memberships.map(&:project_id).uniq.size >= 2 }
 targets << mu if mu
 
+gate = Redmine::VERSION::MAJOR >= 7 # 7.0 以降のみコアが projects の include を権限でゲートする
 bad = []
 targets.each do |user|
   User.current = user
@@ -1139,7 +1144,10 @@ targets.each do |user|
     cf  = row[:issue_custom_fields].map { |x| x[:id] }.sort
     par = row[:parent] && row[:parent][:id]
     exp_par = (p.parent && p.parent.visible?(user)) ? p.parent.id : nil
-    bad << "proj p=#{p.id}(#{user.login})" if act != p.activities.map(&:id).sort || cf != p.all_issue_custom_fields.map(&:id).sort || par != exp_par
+    # 7.0 以降はコアが activities/custom_fields を権限でゲートするため期待値も同じゲートを掛ける
+    exp_act = (gate && !user.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
+    exp_cf  = (gate && !user.allowed_to?(:view_issues, p)) ? [] : p.all_issue_custom_fields.map(&:id).sort
+    bad << "proj p=#{p.id}(#{user.login})" if act != exp_act || cf != exp_cf || par != exp_par
   end
 
   # memberships / versions / issue_categories: バッチ vs per-pid（同一ハッシュ生成ヘルパで突き合わせ）
@@ -1265,7 +1273,9 @@ else
     row = batched.find { |h| h[:id] == pid }
     next if row.nil?
     got = row[:time_entry_activities].map { |x| x[:id] }.sort
-    bad << "pid=#{pid} got=#{got} exp=#{p.activities.map(&:id).sort}" if got != p.activities.map(&:id).sort
+    # 7.0 以降はコアが view_time_entries でゲートするため期待値も揃える（上書き PJ はモジュール有効で admin は許可）
+    exp = (Redmine::VERSION::MAJOR >= 7 && !User.current.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
+    bad << "pid=#{pid} got=#{got} exp=#{exp}" if got != exp
     fired = true if got != sys_ids  # system 活動そのままではない＝上書き分岐が効いている
   end
   puts (bad.empty? && fired) ? "PASS (上書き分岐が発火しコア一致: pids=#{overridden_pids.inspect})" : "FAIL: bad=#{bad.inspect} fired=#{fired}"
@@ -1298,7 +1308,9 @@ else
       row = batched.find { |h| h[:id] == pid }
       next if row.nil?
       got = row[:issue_custom_fields].map { |x| x[:id] }.sort
-      exp = Project.find(pid).all_issue_custom_fields.map(&:id).sort
+      # 7.0 以降はコアが view_issues でゲートするため期待値も揃える（対象 PJ は admin が view_issues 許可）
+      pr = Project.find(pid)
+      exp = (Redmine::VERSION::MAJOR >= 7 && !User.current.allowed_to?(:view_issues, pr)) ? [] : pr.all_issue_custom_fields.map(&:id).sort
       bad << "pid=#{pid} got=#{got} exp=#{exp}" if got != exp
       fired = true if got.include?(cf.id)  # for_all でない CF が結合されている
     end

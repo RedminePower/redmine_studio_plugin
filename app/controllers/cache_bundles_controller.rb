@@ -136,8 +136,15 @@ class CacheBundlesController < ApplicationController
     visible_ids = pids.to_set
     activities_by_pid = build_project_activities(pids)
     for_all_issue_cfs = IssueCustomField.sorted.where(is_for_all: true).to_a
+    # Redmine 7.0 で projects API の per-project include に権限ゲートが入った（issue_categories /
+    # issue_custom_fields は view_issues、time_entry_activities は view_time_entries）。6.1 以前は無ゲート。
+    # 個別 API と同じ内容を返すため、コアがゲートする版でのみ同じ出し分けを行う。
+    gate_includes = Redmine::VERSION::MAJOR >= 7
 
     projects.map do |p|
+      # ゲートする版では対象ユーザの権限で、しない版では常に出力する（個別 API と同じ挙動）。
+      can_view_issues = gate_includes ? target_user.allowed_to?(:view_issues, p) : true
+      can_view_time_entries = gate_includes ? target_user.allowed_to?(:view_time_entries, p) : true
       hash = {
         id: p.id,
         name: p.name,
@@ -154,12 +161,18 @@ class CacheBundlesController < ApplicationController
         # プロジェクトごとにロール×可視性で SQL が変わり畳めないため per-project のまま据え置く。
         trackers: p.rolled_up_trackers(false).visible(target_user).map { |t| { id: t.id, name: t.name } },
         enabled_modules: p.enabled_modules.map { |m| { id: m.id, name: m.name } },
-        issue_categories: p.issue_categories.map { |c| { id: c.id, name: c.name } },
+        # 7.0 の個別 API は view_issues 権限の無いプロジェクトで issue_categories を空にするため揃える。
+        issue_categories: (can_view_issues ? p.issue_categories.map { |c| { id: c.id, name: c.name } } : []),
         # time_entry_activities は activities（アクティブのみ）。上で一括取得した辞書から引く。
-        time_entry_activities: activities_by_pid[p.id].map { |a| { id: a.id, name: a.name } },
+        # 7.0 の個別 API は view_time_entries 権限（＝time_tracking モジュール有効＋権限）の無い
+        # プロジェクトで空にするため、同じゲートを掛けて出力を揃える（無権限なら空配列）。
+        time_entry_activities: (can_view_time_entries ?
+          activities_by_pid[p.id].map { |a| { id: a.id, name: a.name } } : []),
         # 個別 API (GET /projects.json?include=issue_custom_fields) は all_issue_custom_fields
         # （is_for_all の CF も含む）を返す。for_all＋当該プロジェクト明示紐付け（preload 済み）をマージして揃える。
-        issue_custom_fields: merge_issue_custom_fields(for_all_issue_cfs, p.issue_custom_fields).map { |cf| { id: cf.id, name: cf.name } }
+        # 7.0 の個別 API は view_issues 権限の無いプロジェクトで issue_custom_fields を空にするため揃える。
+        issue_custom_fields: (can_view_issues ?
+          merge_issue_custom_fields(for_all_issue_cfs, p.issue_custom_fields).map { |cf| { id: cf.id, name: cf.name } } : [])
       }
       # 個別 API (projects/index.api.rsb) は parent.visible? のときだけ親を出す。
       # parent.visible? は allowed_to?(:view_project) で Project.visible スコープと同一判定のため、

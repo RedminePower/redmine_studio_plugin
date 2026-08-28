@@ -64,7 +64,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | セクション | 中身 | 補足 |
 |---|---|---|
 | `markup_lang` | string | `Setting.text_formatting` の値（`textile` / `common_mark` 等） |
-| `projects` | Project の配列 | 対象ユーザが Redmine 上で見られるプロジェクトのみ（アーカイブ済みは含まない。個別 projects API と同じ範囲）。各プロジェクトに `trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` を含み、内容は個別 projects API の include と揃える（トラッカーは対象ユーザがチケットを見られるもの、作業分類はアクティブなもの、カスタムフィールドは全プロジェクト共通のものも含む）。`parent`（親プロジェクト）は対象ユーザに**見える親のみ**出力する（見えない非公開の親の名前を漏らさない） |
+| `projects` | Project の配列 | 対象ユーザが Redmine 上で見られるプロジェクトのみ（アーカイブ済みは含まない。個別 projects API と同じ範囲）。各プロジェクトに `trackers` / `enabled_modules` / `issue_categories` / `time_entry_activities` / `issue_custom_fields` を含み、内容は個別 projects API の include と揃える（トラッカーは対象ユーザがチケットを見られるもの、作業分類はアクティブなもの、カスタムフィールドは全プロジェクト共通のものも含む）。Redmine 7.0 以降は個別 projects API がこれらの include を権限でゲートするため揃える（`issue_categories` / `issue_custom_fields` は **`view_issues`** 権限、`time_entry_activities` は **`view_time_entries`** 権限＝time_tracking モジュール有効かつ権限。権限が無いプロジェクトは空配列。6.1 以前はゲートが無く常に返す）。`parent`（親プロジェクト）は対象ユーザに**見える親のみ**出力する（見えない非公開の親の名前を漏らさない） |
 | `trackers` | Tracker の配列 | `default_status` 含む |
 | `issue_statuses` | IssueStatus の配列 | `is_closed` 含む |
 | `issue_priorities` | IssuePriority の配列 | inactive 含む全件（個別 enumerations API と同じ）。`active` / `is_default` 含む |
