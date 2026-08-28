@@ -121,7 +121,7 @@ Cache Bundle API 機能のテスト仕様。Redmine Studio (Windows クライア
 | time_entry_activities | array | 作業分類（`TimeEntryActivity.shared.sorted`。inactive も含む。個別 API と同じ）。要素に `active` キーあり |
 | queries | array | カスタムクエリ（user に対する visible）。`is_public` は VISIBILITY_PUBLIC のみ true（ロール限定は false） |
 | custom_fields | array | カスタムフィールド。admin は全件、非 admin は `CustomField.visible`（visible=true の CF＋自分のロールに紐づく role 限定 CF）。`min_length` / `max_length` は本体 API と同じく nil を保持。`possible_values` は `{value, label}` のペア（enumeration/list どちらも対応） |
-| users | array | ユーザ一覧。admin は全 active User、非 admin は `User.visible`（自分＋可視プロジェクトのメンバー、または users_visibility='all' ロールで全 active）。匿名ユーザは除外 |
+| users | array | ユーザ一覧。admin は全 active User、非 admin は `User.visible`（自分＋可視プロジェクトのメンバー、または users_visibility='all' ロールで全 active）。匿名ユーザは除外。`status` は個別 API (GET /users.json) が一覧に含める Redmine 6.1 以降でのみ出力（6.1 未満の一覧 API は status を返さないため揃える） |
 | roles | array | ロール（permissions 込み。文字列配列 `["view_issues", ...]`。本体 roles/:id API と同じ） |
 | groups | array | グループ（users 込み）。admin は全 givable、非 admin は `Group.givable.visible`。非 admin のメンバーは可視ユーザ集合と交差（不可視ユーザを漏らさない） |
 | project_memberships | dict | `{ project_id => [...] }` ロックユーザを除外 |

@@ -71,7 +71,7 @@ The root has a single fixed key `cache_bundle`. Each section's content follows r
 | `time_entry_activities` | Array of TimeEntryActivity | All entries including inactive ones (same as the individual enumerations API). Includes `active` / `is_default` |
 | `queries` | Array of Query | Caller's visibility scope. `is_public` is true only for queries with public visibility (same as the core queries API) |
 | `custom_fields` | Array of CustomField | All for admin; for non-admin, only the custom fields the user can see (those shared with everyone plus those assigned to the user's roles). `min_length` / `max_length` are null when unset (same as the core custom_fields API). `possible_values` are `{value, label}` pairs |
-| `users` | Array of User | All active users for admin; for non-admin, only the users the user can see (self plus members of the same projects; may be all active users depending on role settings). Anonymous users are excluded |
+| `users` | Array of User | All active users for admin; for non-admin, only the users the user can see (self plus members of the same projects; may be all active users depending on role settings). Anonymous users are excluded. `status` is emitted only on **Redmine 6.1+**, where the individual API (GET /users.json) includes it in the list (Redmine before 6.1 does not return status in the list API, so this matches it) |
 | `roles` | Array of Role | Only givable roles (builtin=0); builtin roles (Non member / Anonymous) are excluded (same as the individual API `GET /roles.json`). Includes `permissions` of each Role as an array of strings (same format as the core roles/:id API; absorbing the list-then-details N+1 on the server side) |
 | `groups` | Array of Group | All groups for admin; for non-admin, only the groups the user can see. Regular groups only (type='Group'); builtin groups (Anonymous / Non member) are excluded (same as the individual API `GET /groups.json`). Includes `users` of each Group (for non-admin, limited to the users the requester can see) |
 | `project_memberships` | `{ project_id => [Membership...] }` | Retrieved for projects where the target user is a member. Locked-user memberships are excluded |
@@ -97,7 +97,7 @@ The main fields returned by each section's objects are as follows (see "Section 
 | `time_entry_activities` | `id` / `name` / `active` / `is_default` |
 | `queries` | `id` / `name` / `is_public` / `project_id` |
 | `custom_fields` | `id` / `name` / `customized_type` / `field_format` / `regexp` / `min_length` / `max_length` / `is_required` / `is_filter` / `searchable` / `multiple` / `default_value` / `visible` / `possible_values[]` / `trackers[]` / `roles[]` |
-| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status` / `admin` / `twofa_scheme` |
+| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status` (Redmine 6.1+ only) / `admin` / `twofa_scheme` |
 | `roles` | `id` / `name` / `assignable` / `issues_visibility` / `time_entries_visibility` / `users_visibility` / `permissions[]` |
 | `groups` | `id` / `name` / `users[]` (each `id` / `name`) |
 | Each `project_memberships` element | `id` / `project` / `roles[]` (incl. `inherited`) / `user` or `group` |

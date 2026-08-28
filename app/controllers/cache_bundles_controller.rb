@@ -320,7 +320,9 @@ class CacheBundlesController < ApplicationController
     }
     hash[:mail] = u.mail if u.mail.present?
     hash[:last_login_on] = to_api_time(u.last_login_on) if u.last_login_on
-    hash[:status] = u.status if u.status
+    # 個別 API (GET /users.json) が users 一覧に status を入れるのは Redmine 6.1 以降。
+    # 6.1 未満は一覧 API が status を返さないため、cache_bundle も出さずに揃える。
+    hash[:status] = u.status if u.status && users_list_api_has_status?
     hash[:admin] = u.admin? if u.admin?
     # 個別 API (GET /users.json) が返すフィールドに揃える。
     hash[:updated_on] = to_api_time(u.updated_on)
@@ -328,6 +330,12 @@ class CacheBundlesController < ApplicationController
     hash[:twofa_scheme] = u.twofa_scheme
     # API キーと auth_source などは個別 API も返さないため含めない
     hash
+  end
+
+  # 個別 API (GET /users.json) の users 一覧に status が入るのは Redmine 6.1 以降。
+  def users_list_api_has_status?
+    v = Redmine::VERSION
+    v::MAJOR > 6 || (v::MAJOR == 6 && v::MINOR >= 1)
   end
 
   # Role 一覧 + 各 Role の詳細（permissions）。

@@ -71,7 +71,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `time_entry_activities` | TimeEntryActivity の配列 | inactive 含む全件（個別 enumerations API と同じ）。`active` / `is_default` 含む |
 | `queries` | Query の配列 | caller の可視範囲。`is_public` は visibility が public のクエリのみ true（本体 queries API と同じ） |
 | `custom_fields` | CustomField の配列 | admin は全件、非 admin は本人が見られるカスタムフィールドのみ（全員に公開されているもの＋本人のロールに割り当てられたもの）。`min_length` / `max_length` は未設定なら null（本体 custom_fields API と同じ）。`possible_values` は `{value, label}` のペア |
-| `users` | User の配列 | admin は全 active ユーザ、非 admin は本人が見られるユーザのみ（本人＋同じプロジェクトのメンバー。ロール設定によっては全 active ユーザ）。匿名ユーザは除外 |
+| `users` | User の配列 | admin は全 active ユーザ、非 admin は本人が見られるユーザのみ（本人＋同じプロジェクトのメンバー。ロール設定によっては全 active ユーザ）。匿名ユーザは除外。`status` は個別 API (GET /users.json) が一覧に含める **Redmine 6.1 以降**でのみ出力する（6.1 未満の一覧 API は status を返さないため揃える） |
 | `roles` | Role の配列 | givable（builtin=0）のみ。ビルトインロール（Non member / Anonymous）は含まない（個別 API `GET /roles.json` と同じ）。各 Role の `permissions` を文字列配列で含む（本体 roles/:id API と同じ形式。リスト取得 + 詳細取得の N+1 をサーバ側で吸収） |
 | `groups` | Group の配列 | admin は全グループ、非 admin は本人が見られるグループのみ。通常のグループ（type='Group'）のみでビルトイングループ（Anonymous / Non member）は含まない（個別 API `GET /groups.json` と同じ）。各 Group の `users` を含む（非 admin では、本人が見られるユーザだけに絞る） |
 | `project_memberships` | `{ project_id => [Membership...] }` | 対象ユーザが member となっているプロジェクトについて取得。ロックユーザの membership は除外 |
@@ -97,7 +97,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `time_entry_activities` | `id` / `name` / `active` / `is_default` |
 | `queries` | `id` / `name` / `is_public` / `project_id` |
 | `custom_fields` | `id` / `name` / `customized_type` / `field_format` / `regexp` / `min_length` / `max_length` / `is_required` / `is_filter` / `searchable` / `multiple` / `default_value` / `visible` / `possible_values[]` / `trackers[]` / `roles[]` |
-| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status` / `admin` / `twofa_scheme` |
+| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status`（Redmine 6.1 以降のみ） / `admin` / `twofa_scheme` |
 | `roles` | `id` / `name` / `assignable` / `issues_visibility` / `time_entries_visibility` / `users_visibility` / `permissions[]` |
 | `groups` | `id` / `name` / `users[]`（各 `id` / `name`） |
 | `project_memberships` の各要素 | `id` / `project` / `roles[]`（`inherited` 含む）/ `user` または `group` |
