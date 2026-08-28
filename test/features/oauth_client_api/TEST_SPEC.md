@@ -106,6 +106,22 @@ Basic のユーザー名が「登録済み OAuth アプリの uid」でない場
 
 ---
 
+## テストの版適用（Doorkeeper 依存）
+
+サインイン機能は OAuth2 プロバイダ（Doorkeeper）に依存し、Doorkeeper は本体では **Redmine 6.1** で導入された。
+そのためテストは版で適用範囲を分ける（実行時に `Redmine::VERSION` で判定し、対象外はスキップする）。
+
+| 区分 | 対象ケース | 適用版 |
+|------|-----------|--------|
+| 全版共通 | [1-1]〜[1-5] / [1-9] / [2-0] / [2-1] | 全版 |
+| Doorkeeper 依存（登録・patch・トークン） | [1-6]〜[1-8] / [1-10]〜[1-14] / [2-2]〜[2-7] | **6.1 以上のみ**（6.1 未満は Doorkeeper 無しでスキップ） |
+| Doorkeeper なしの挙動（ロード・degradation） | [1-15]〜[1-16] / [2-8] | **6.1 未満のみ** |
+
+6.1 未満では、init.rb の Doorkeeper patch 適用が `defined?(Doorkeeper::OAuth::Client::Credentials)` でガードされ、
+サインイン用 patch ごとスキップされる。プラグイン自体は正常ロードされ、`oauth_client` は空応答を返す。
+
+---
+
 ## 1. Runner テスト
 
 **実行方法:**
@@ -172,6 +188,8 @@ puts missing.empty? ? 'PASS' : "FAIL: missing scopes: #{missing.join(', ')}"
 
 ---
 
+> **[1-6]〜[1-8] は Doorkeeper 依存（自己修復登録）。6.1 以上のみ実行し、6.1 未満（Doorkeeper なし）ではスキップする。**
+
 ### [1-6] 自己修復登録が公開クライアントを作成する
 
 ```ruby
@@ -213,15 +231,19 @@ puts ok ? 'PASS' : "FAIL: scopes=#{app.scopes.all.sort}"
 
 ---
 
-### [1-9] 6.1 以上をサインイン対応と判定する
+### [1-9] signin_supported? がバージョンと一致する（全版共通）
 
 ```ruby
-puts RedmineStudioPlugin::OauthClient::AppRegistrar.signin_supported? ? 'PASS' : 'FAIL: 6.1+ should be supported'
+sup = RedmineStudioPlugin::OauthClient::AppRegistrar.signin_supported?
+exp = Redmine::VERSION::MAJOR > 6 || (Redmine::VERSION::MAJOR == 6 && Redmine::VERSION::MINOR >= 1)
+puts sup == exp ? 'PASS' : "FAIL: signin_supported?=#{sup} expected=#{exp}"
 ```
 
-**期待結果:** Redmine 6.1 以上で `true`（本テスト環境は 6.1.1）
+**期待結果:** `signin_supported?` が版と一致する（Redmine 6.1 以上で `true`、6.1 未満で `false`）
 
 ---
+
+> **[1-10]〜[1-14] は Doorkeeper 依存（クライアント資格情報 patch）。6.1 以上のみ実行し、6.1 未満（Doorkeeper なし）ではスキップする。**
 
 ### [1-10] クライアント資格情報パッチが定義されている
 
@@ -284,6 +306,38 @@ puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
 
 ---
 
+> **[1-15]〜[1-16] は Doorkeeper なし（6.1 未満）のときのみ実行する。6.1 以上ではスキップする。**
+
+### [1-15] 6.1 未満: Doorkeeper 無しでもプラグインが正常ロードされる（init.rb のガード）
+
+```ruby
+if defined?(Doorkeeper)
+  puts 'SKIP: 6.1 以上（Doorkeeper あり）'
+else
+  loaded = (Redmine::Plugin.find(:redmine_studio_plugin) rescue nil)
+  patch_defined = defined?(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch)
+  puts (loaded && patch_defined) ? 'PASS' : "FAIL: loaded=#{!loaded.nil?} patch_defined=#{!patch_defined.nil?}"
+end
+```
+
+**期待結果:** Doorkeeper が無くても require は通り（patch モジュールは定義済み）、プラグインは正常ロードされる（init.rb の `prepend` がガードでスキップされ、初期化が中断しない）
+
+---
+
+### [1-16] 6.1 未満: registered_application が nil（available? が false）
+
+```ruby
+if defined?(Doorkeeper)
+  puts 'SKIP: 6.1 以上（Doorkeeper あり）'
+else
+  puts RedmineStudioPlugin::OauthClient::AppRegistrar.registered_application.nil? ? 'PASS' : 'FAIL'
+end
+```
+
+**期待結果:** 6.1 未満（Doorkeeper なし）は `registered_application` が `nil`（`available?` が false）
+
+---
+
 ## 2. HTTP テスト
 
 **実行方法:**
@@ -321,6 +375,8 @@ docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner
 **期待結果:** `login_required` の ON/OFF に関わらず `/oauth_client` は 200。対照として `/info` は ON で 401
 
 ---
+
+> **[2-2]〜[2-7] は Doorkeeper 依存（登録済みアプリ・トークン取得）。6.1 以上のみ実行し、6.1 未満（Doorkeeper なし）ではスキップする。**
 
 ### [2-2] JSON に client_id が含まれる（登録済み）
 
@@ -429,6 +485,20 @@ try {
 ```
 
 **期待結果:** レスポンスの `error` が `invalid_client`（フォールバックできるボディ `client_id` が無い）
+
+---
+
+> **[2-8] は Doorkeeper なし（6.1 未満）のときのみ実行する。6.1 以上ではスキップする。**
+
+### [2-8] 6.1 未満: 空応答を返す（degradation）
+
+```powershell
+$response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get
+$response.StatusCode   # 200 期待
+$response.Content      # {"oauth_client":{}} 期待（client_id 無し）
+```
+
+**期待結果:** 6.1 未満（Doorkeeper なし）でも 404 ではなく 200 で空オブジェクト `{"oauth_client":{}}` を返す（`client_id` 無し＝アプリは「プラグイン対応・Redmine 非対応」と解釈できる）
 
 ---
 
