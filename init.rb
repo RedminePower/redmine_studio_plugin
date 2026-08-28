@@ -128,7 +128,10 @@ else
 
   # 前段 Basic 認証ゲート下でも /oauth/token を通す
   # （Doorkeeper がゲートの Basic をクライアント資格情報と誤読しないよう、未登録 uid の Basic は無視させる）
-  Doorkeeper::OAuth::Client::Credentials.singleton_class.prepend(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch)
+  if defined?(Doorkeeper::OAuth::Client::Credentials)
+    # Doorkeeper（OAuth2 プロバイダ）は Redmine 6.1 以降のみ。無い版ではサインイン用 patch ごとスキップする
+    Doorkeeper::OAuth::Client::Credentials.singleton_class.prepend(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch)
+  end
 
   # Apply patches directly (init.rb is already executed inside to_prepare)
   Issue.include RedmineStudioPlugin::AutoClose::IssuePatch

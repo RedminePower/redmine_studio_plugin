@@ -128,3 +128,4 @@ credentials are ignored, the client is identified by the `client_id` in the requ
 - No effect on the normal configuration without a front gate (unchanged when there is no Basic header)
 - Legitimate client Basic authentication using a registered app's `client_id` is still honored
 - No customer-side proxy configuration (such as excluding specific paths from Basic auth) is required
+- On Redmine without Doorkeeper (the OAuth2 provider, i.e. before 6.1) the sign-in feature does not apply, so this patch is skipped; the plugin still loads normally
