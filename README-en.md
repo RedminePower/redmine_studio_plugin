@@ -30,6 +30,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 
 - V5.x (Tested on V5.1.11)
 - V6.x (Tested on V6.1.1)
+- V7.x (Tested on V7.0.1)
 
 ## Installation
 
