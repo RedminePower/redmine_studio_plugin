@@ -5,6 +5,7 @@ class StudioSettingUsersController < ApplicationController
 
   before_action :require_login
   before_action :find_studio_setting
+  before_action :authorize_studio_setting
 
   # GET /studio_settings/:id/users
   def index
@@ -112,5 +113,9 @@ class StudioSettingUsersController < ApplicationController
     @studio_setting = StudioSetting.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render_404
+  end
+
+  def authorize_studio_setting
+    render_403 unless @studio_setting.visible?(User.current)
   end
 end

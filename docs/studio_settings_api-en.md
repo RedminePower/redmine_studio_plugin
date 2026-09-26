@@ -38,6 +38,23 @@ GET /studio_settings.xml    → Returns XML format
 
 ---
 
+## Access Control (Visibility)
+
+Visibility is determined by `scope_type`. Login is required for all endpoints.
+
+| scope_type | Users who can view/edit |
+|-----------|-------------------------|
+| `global` | All logged-in users |
+| `project` | Members of that project |
+| (admin) | All settings (any scope) |
+
+- `GET /studio_settings` (list) returns only visible settings (`project`-scoped settings are excluded for non-members).
+- Accessing an individual setting, its history, or its user assignments (show/create/update/delete/restore) for a `project`-scoped setting as a non-member returns **403 Forbidden**.
+- `POST /studio_settings` with a `project` scope can only be created by a member of that project (or an admin). `global` settings can be created by any logged-in user.
+- `GET /users/:id/studio_settings` is allowed only when `:id` is the requester themselves or an admin (otherwise 403).
+
+---
+
 ## Settings
 
 ### GET /studio_settings
@@ -543,6 +560,13 @@ Error response (when trying to restore to current version):
 ---
 
 ## Error Responses
+
+### 403 Forbidden
+
+Returned when accessing a setting in a scope the user is not allowed to access. A 403 is returned when:
+
+- A non-member of the project accesses (show/create/update/delete/restore/user-assignment) a `project`-scoped setting
+- `GET /users/:id/studio_settings` is requested by someone other than the user themselves and who is not an admin
 
 ### 404 Not Found
 

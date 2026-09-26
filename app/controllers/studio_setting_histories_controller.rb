@@ -5,6 +5,7 @@ class StudioSettingHistoriesController < ApplicationController
 
   before_action :require_login
   before_action :find_studio_setting
+  before_action :authorize_studio_setting
   before_action :find_history, only: [:show, :destroy]
 
   # GET /studio_settings/:studio_setting_id/histories
@@ -92,5 +93,9 @@ class StudioSettingHistoriesController < ApplicationController
   def find_history
     @history = @studio_setting.histories.find_by(version: params[:version])
     render_404 unless @history
+  end
+
+  def authorize_studio_setting
+    render_403 unless @studio_setting.visible?(User.current)
   end
 end

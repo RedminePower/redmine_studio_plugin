@@ -893,6 +893,128 @@ puts fk&.on_delete == :cascade
 
 ---
 
+## 1B. 可視性（Runner テスト）
+
+`StudioSetting.visible` scope / `visible?` を検証する。global は全ログインユーザーに可視、project スコープは当該プロジェクトのメンバーのみ、admin は全件。**バッチ 3**（[1-30]〜[1-34]）としてまとめて実行し、[1-30] が前提データを作る。
+
+### [1-30] 可視性テストデータ整備（前提）
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+role = Role.givable.first
+
+# ユーザー（冪等・アクティブ化）
+member = User.find_by_login('vis_member') || User.new(login: 'vis_member', firstname: 'Vis', lastname: 'Member', mail: 'vis_member@example.com')
+member.password, member.password_confirmation = 'password123', 'password123' if member.new_record?
+member.status = User::STATUS_ACTIVE
+member.save
+
+nonmember = User.find_by_login('vis_nonmember') || User.new(login: 'vis_nonmember', firstname: 'Vis', lastname: 'NonMember', mail: 'vis_nonmember@example.com')
+nonmember.password, nonmember.password_confirmation = 'password123', 'password123' if nonmember.new_record?
+nonmember.status = User::STATUS_ACTIVE
+nonmember.save
+
+# プロジェクト（冪等）
+proj_a = Project.find_by_identifier('vis-proj-a') || Project.create(name: 'Vis Proj A', identifier: 'vis-proj-a')
+proj_b = Project.find_by_identifier('vis-proj-b') || Project.create(name: 'Vis Proj B', identifier: 'vis-proj-b')
+
+# メンバーシップ（vis_member を proj_a のみに）
+unless member.member_of?(proj_a)
+  m = Member.new(user_id: member.id, project_id: proj_a.id)
+  m.roles = [role]
+  m.save
+end
+
+# 設定（冪等・global / proj_a / proj_b）
+def upsert_setting(name, scope_type, scope_id, admin)
+  s = StudioSetting.find_by(name: name) || StudioSetting.new(name: name, schema_type: 'work', schema_version: 0, created_by: admin)
+  s.scope_type = scope_type
+  s.scope_id = scope_id
+  s.updated_by = admin
+  s.save
+  s
+end
+g = upsert_setting('Vis_Global', 'global', nil, admin)
+sa = upsert_setting('Vis_ProjA', 'project', proj_a.id, admin)
+sb = upsert_setting('Vis_ProjB', 'project', proj_b.id, admin)
+
+puts member.reload.member_of?(proj_a)
+puts (nonmember.reload.member_of?(proj_a) == false)
+puts [g, sa, sb].all?(&:persisted?)
+puts "member_key=#{member.api_key}"
+puts "nonmember_key=#{nonmember.api_key}"
+puts "proj_a=#{proj_a.id} proj_b=#{proj_b.id} member_id=#{member.id}"
+```
+
+**期待結果:**
+- `true` が 3 回出力される（member は proj_a 所属／nonmember は非所属／設定 3 件が永続化）
+- `member_key` / `nonmember_key` / `proj_a` / `proj_b` / `member_id` が出力される（HTTP テストで使用）
+
+### [1-31] visible scope: admin は全件
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+names = StudioSetting.visible(admin).pluck(:name)
+puts names.include?('Vis_Global')
+puts names.include?('Vis_ProjA')
+puts names.include?('Vis_ProjB')
+```
+
+**期待結果:**
+- `true` が 3 回（admin は他プロジェクトの設定も見える）
+
+### [1-32] visible scope: 非メンバーは global のみ（project 設定は除外）
+
+**確認方法:**
+```ruby
+nonmember = User.find_by_login('vis_nonmember')
+names = StudioSetting.visible(nonmember).pluck(:name)
+puts names.include?('Vis_Global')
+puts (names.include?('Vis_ProjA') == false)
+puts (names.include?('Vis_ProjB') == false)
+```
+
+**期待結果:**
+- `true` が 3 回（global は可視・非所属 project 2 件は除外＝除外が効いたことを確認）
+
+### [1-33] visible scope: メンバーは自分の project を含み他 project は除外
+
+**確認方法:**
+```ruby
+member = User.find_by_login('vis_member')
+names = StudioSetting.visible(member).pluck(:name)
+puts names.include?('Vis_Global')
+puts names.include?('Vis_ProjA')
+puts (names.include?('Vis_ProjB') == false)
+```
+
+**期待結果:**
+- `true` が 3 回（global＋所属 proj_a は可視・非所属 proj_b は除外）
+
+### [1-34] visible? 単体判定
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+member = User.find_by_login('vis_member')
+nonmember = User.find_by_login('vis_nonmember')
+g = StudioSetting.find_by(name: 'Vis_Global')
+sa = StudioSetting.find_by(name: 'Vis_ProjA')
+
+puts g.visible?(nonmember)
+puts sa.visible?(member)
+puts (sa.visible?(nonmember) == false)
+puts sa.visible?(admin)
+```
+
+**期待結果:**
+- `true` が 4 回（global は非メンバーも true／project はメンバー・admin が true・非メンバーは false）
+
+---
+
 ## 2. HTTP テスト
 
 ### 事前準備
@@ -2389,6 +2511,155 @@ $response.Content -match "<studio_setting_history>"
 
 ---
 
+## 2B. 可視性（HTTP テスト）
+
+コントローラの認可を、メンバー / 非メンバー / admin の各 API キーで検証する。前提データは Runner [1-30] が作成し、`member_key` / `nonmember_key` / `proj_a` / `proj_b` / `member_id` を出力する。実行前にそれらと admin の api_key を変数へ入れる。
+
+### 事前準備
+
+```powershell
+$AdminKey = "<{Username} の api_key>"
+$MemberKey = "<vis_member の api_key（[1-30] 出力）>"
+$NonMemberKey = "<vis_nonmember の api_key（[1-30] 出力）>"
+$ProjA = <proj_a（[1-30] 出力）>
+$MemberId = <member_id（[1-30] 出力）>
+
+# ProjA スコープ設定の ID を admin で取得
+$projA = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$AdminKey&scope_type=project&scope_id=$ProjA" -Method GET).studio_settings | Where-Object { $_.name -eq 'Vis_ProjA' }
+$projASettingId = $projA.id
+```
+
+### [2-14] 一覧：非メンバーは global のみ（project 設定は除外）
+
+**確認方法:**
+```powershell
+$names = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$NonMemberKey&limit=100" -Method GET).studio_settings.name
+$names -contains 'Vis_Global'
+$names -contains 'Vis_ProjA'
+$names -contains 'Vis_ProjB'
+```
+
+**期待結果:**
+- `Vis_Global` を含む（True）
+- `Vis_ProjA` を含まない（False）／`Vis_ProjB` を含まない（False）
+
+### [2-15] 一覧：メンバーは global＋所属 project（非所属は除外）
+
+**確認方法:**
+```powershell
+$names = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$MemberKey&limit=100" -Method GET).studio_settings.name
+$names -contains 'Vis_Global'
+$names -contains 'Vis_ProjA'
+$names -contains 'Vis_ProjB'
+```
+
+**期待結果:**
+- `Vis_Global`（True）／`Vis_ProjA`（True）／`Vis_ProjB`（False）
+
+### [2-16] 一覧：admin は全件
+
+**確認方法:**
+```powershell
+$names = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$AdminKey&limit=100" -Method GET).studio_settings.name
+$names -contains 'Vis_ProjA'
+$names -contains 'Vis_ProjB'
+```
+
+**期待結果:**
+- `Vis_ProjA`（True）／`Vis_ProjB`（True）
+
+### [2-17] 単体取得：非メンバー → 403／メンバー → 200
+
+**確認方法:**
+```powershell
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId.json?key=$NonMemberKey" -Method GET -SkipHttpErrorCheck).StatusCode
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId.json?key=$MemberKey" -Method GET -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 非メンバー: 403／メンバー: 200
+
+### [2-18] 更新：非メンバーが ProjA → 403
+
+**確認方法:**
+```powershell
+$body = @{ studio_setting = @{ payload = '{"x":1}' } } | ConvertTo-Json -Depth 3
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId.json?key=$NonMemberKey" -Method PUT -Body $body -ContentType "application/json" -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 403（設定は変更されない）
+
+### [2-19] 削除：非メンバーが ProjA → 403
+
+**確認方法:**
+```powershell
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId.json?key=$NonMemberKey" -Method DELETE -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 403（設定は削除されない）
+
+### [2-20] 作成：project 非メンバー → 403／メンバー → 201／global は誰でも → 201
+
+**確認方法:**
+```powershell
+# 非メンバーが ProjA の project 設定を作成 → 403
+$bodyProj = @{ studio_setting = @{ name = "Vis_Create_NonMember"; schema_type = "work"; scope_type = "project"; scope_id = $ProjA; schema_version = 0 } } | ConvertTo-Json -Depth 3
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings.json?key=$NonMemberKey" -Method POST -Body $bodyProj -ContentType "application/json" -SkipHttpErrorCheck).StatusCode
+
+# メンバーが ProjA の project 設定を作成 → 201
+$bodyProjM = @{ studio_setting = @{ name = "Vis_Create_Member"; schema_type = "work"; scope_type = "project"; scope_id = $ProjA; schema_version = 0 } } | ConvertTo-Json -Depth 3
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings.json?key=$MemberKey" -Method POST -Body $bodyProjM -ContentType "application/json" -SkipHttpErrorCheck).StatusCode
+
+# 非メンバーが global 設定を作成 → 201（global は誰でも可）
+$bodyGlobal = @{ studio_setting = @{ name = "Vis_Create_Global"; schema_type = "work"; scope_type = "global"; schema_version = 0 } } | ConvertTo-Json -Depth 3
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings.json?key=$NonMemberKey" -Method POST -Body $bodyGlobal -ContentType "application/json" -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 非メンバーの project 作成: 403／メンバーの project 作成: 201／非メンバーの global 作成: 201
+
+### [2-21] 履歴・復元：非メンバーが ProjA → 403
+
+**確認方法:**
+```powershell
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId/histories.json?key=$NonMemberKey" -Method GET -SkipHttpErrorCheck).StatusCode
+$body = @{ version = 1 } | ConvertTo-Json
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId/restore.json?key=$NonMemberKey" -Method POST -Body $body -ContentType "application/json" -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 履歴一覧: 403／復元: 403
+
+### [2-22] 割り当て：非メンバーが ProjA → 403
+
+**確認方法:**
+```powershell
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId/users.json?key=$NonMemberKey" -Method GET -SkipHttpErrorCheck).StatusCode
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$projASettingId/users/$MemberId.json?key=$NonMemberKey" -Method POST -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 割り当て一覧: 403／割り当て追加: 403
+
+### [2-23] /users/:id/studio_settings：自分 or admin のみ
+
+**確認方法:**
+```powershell
+# 非メンバーが member の一覧を要求 → 403
+(Invoke-WebRequest -Uri "{BaseUrl}/users/$MemberId/studio_settings.json?key=$NonMemberKey" -Method GET -SkipHttpErrorCheck).StatusCode
+# member が自分の一覧を要求 → 200
+(Invoke-WebRequest -Uri "{BaseUrl}/users/$MemberId/studio_settings.json?key=$MemberKey" -Method GET -SkipHttpErrorCheck).StatusCode
+# admin が member の一覧を要求 → 200
+(Invoke-WebRequest -Uri "{BaseUrl}/users/$MemberId/studio_settings.json?key=$AdminKey" -Method GET -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 非メンバー（他人分）: 403／本人: 200／admin: 200
+
+---
+
 ## 3. ブラウザテスト
 
 なし（API のみの機能のため）
@@ -2403,10 +2674,12 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 2. フェーズ 1: 登録確認テスト実行
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
+   - バッチ 3: [1-30]～[1-34] 可視性（Runner）。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id を出力する
 3. フェーズ 2: コンテナ再起動（HTTP テストに備える）
 4. フェーズ 3: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
+   - [2-14]～[2-23]: 可視性（HTTP）。バッチ 3 の出力キー / ID を事前準備に設定してから実行する
 
 ### Runner テスト実行時の注意事項
 

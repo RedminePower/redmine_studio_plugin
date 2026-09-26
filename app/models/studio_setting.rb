@@ -16,11 +16,28 @@ class StudioSetting < ActiveRecord::Base
   scope :not_deleted, -> { where(deleted_on: nil) }
   scope :deleted, -> { where.not(deleted_on: nil) }
 
+  # global は全ログインユーザーに可視。project は当該プロジェクトのメンバーのみ。admin は全件。
+  scope :visible, ->(user = User.current) {
+    next all if user&.admin?
+
+    project_ids = user ? user.projects.pluck(:id) : []
+    # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）
+    where("scope_type = ? OR (scope_type = ? AND scope_id IN (?))",
+          'global', 'project', project_ids.presence || [-1])
+  }
+
   before_create :set_timestamps
   before_update :update_timestamps
 
   def deleted?
     deleted_on.present?
+  end
+
+  def visible?(user = User.current)
+    return true if user&.admin?
+    return true if scope_type == 'global'
+
+    scope_type == 'project' && scope_id.present? && user&.member_of?(Project.find_by(id: scope_id))
   end
 
   def soft_delete(user, comment: nil)

@@ -5,10 +5,11 @@ class StudioSettingsController < ApplicationController
 
   before_action :require_login
   before_action :find_studio_setting, only: [:show, :update, :destroy]
+  before_action :authorize_studio_setting, only: [:show, :update, :destroy]
 
   # GET /studio_settings
   def index
-    scope = StudioSetting.all
+    scope = StudioSetting.visible(User.current)
 
     # Filter by schema_type
     if params[:schema_type].present?
@@ -53,6 +54,9 @@ class StudioSettingsController < ApplicationController
   # POST /studio_settings
   def create
     @studio_setting = StudioSetting.new(studio_setting_params)
+    # project スコープはメンバー（or admin）のみ作成可。global・不正スコープは通してバリデーション（422）に委ねる。
+    return render_403 if @studio_setting.scope_type == 'project' && !@studio_setting.visible?(User.current)
+
     @studio_setting.created_by = User.current
     @studio_setting.updated_by = User.current
 
@@ -116,6 +120,10 @@ class StudioSettingsController < ApplicationController
     @studio_setting = StudioSetting.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render_404
+  end
+
+  def authorize_studio_setting
+    render_403 unless @studio_setting.visible?(User.current)
   end
 
   def studio_setting_params

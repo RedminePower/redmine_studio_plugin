@@ -5,6 +5,7 @@ class UserStudioSettingsController < ApplicationController
 
   before_action :require_login
   before_action :find_user
+  before_action :authorize_target_user
 
   # GET /users/:id/studio_settings
   def index
@@ -28,5 +29,10 @@ class UserStudioSettingsController < ApplicationController
     @user = User.find(params[:id])
   rescue ActiveRecord::RecordNotFound
     render_404
+  end
+
+  # 既存 API（cache_bundles）の慣習に合わせ、非 admin は自分以外の user_id を参照不可
+  def authorize_target_user
+    render_403 unless User.current.admin? || @user.id == User.current.id
   end
 end
