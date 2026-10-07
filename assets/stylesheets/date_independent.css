@@ -1,3 +1,15 @@
+/* Redmine 7.0 removed the shared .icon base styles; restore icon placement for the admin
+   menu. The selected rule is scoped to Redmine 7.0 (which emits html[dir]) because 5.1/6.1
+   core already positions the selected legacy icon and uses margin -2px there, so the 7.0
+   offset would misalign them. On 7.0 the selected sidebar item uses margin-inline-start:-6px,
+   so +6px on padding-left and background-position keeps the icon aligned with other items. */
 .icon-date_independent {
     background-image: url("../images/date_independent.png");
+    background-position: 0 50%;
+    background-repeat: no-repeat;
+    padding-left: 20px;
+}
+html[dir="ltr"] #admin-menu a.selected.icon-date_independent {
+    padding-left: 26px;
+    background-position: 6px 50%;
 }

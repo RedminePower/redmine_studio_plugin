@@ -12,7 +12,7 @@ Reply Button 機能のテスト仕様。この文書から runner_test.rb, http_
 | Hooks クラス | `RedmineStudioPlugin::ReplyButton::Hooks` |
 | View ファイル | `app/views/issues/reply_button/_reply.html.erb` |
 | 競合プラグイン | `redmine_reply_button`（plugins/ 直下に init.rb があれば競合） |
-| HTML 出力パターン | `icon-reply` |
+| HTML 出力パターン | `rsp-icon-reply` |
 | JS 出力パターン | `showAndScrollTo`, `var reverseOrder = true/false` |
 
 ---
@@ -178,7 +178,7 @@ pwsh -File "...\http_test.ps1" -BaseUrl "{BaseUrl}"
 1. `/login` ページから CSRF トークンを取得（`csrf-token" content="([^"]+)"` パターン）
 2. POST `/login` でセッション確立
 
-### [2-1] モジュール有効のチケット画面 → icon-reply が HTML に存在
+### [2-1] モジュール有効のチケット画面 → rsp-icon-reply が HTML に存在
 
 **テスト対象チケットの取得:**
 ```ruby
@@ -192,11 +192,11 @@ Issue.joins(:project)
 - GET `/issues/{id}` のレスポンス HTML
 
 **期待結果:**
-- HTML に `icon-reply` が含まれる
+- HTML に `rsp-icon-reply` が含まれる
 
 ---
 
-### [2-2] モジュール無効のチケット画面 → icon-reply が存在しない
+### [2-2] モジュール無効のチケット画面 → rsp-icon-reply が存在しない
 
 **テスト対象チケットの取得:**
 ```ruby
@@ -209,7 +209,7 @@ Issue.joins(:project)
 - GET `/issues/{id}` のレスポンス HTML
 
 **期待結果:**
-- HTML に `icon-reply` が含まれない
+- HTML に `rsp-icon-reply` が含まれない
 
 ---
 
@@ -219,7 +219,7 @@ Issue.joins(:project)
 - GET `/issues/{id}` のレスポンス HTML（モジュール有効プロジェクト）
 
 **期待結果:**
-- HTML に `icon-reply` と `showAndScrollTo` の両方が含まれる
+- HTML に `rsp-icon-reply` と `showAndScrollTo` の両方が含まれる
 
 ---
 

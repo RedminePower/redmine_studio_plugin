@@ -413,9 +413,9 @@ module RedmineStudioPlugin
 
               var html = '<ul>';
               if (expanded) {
-                html += '<li><a href="#" class="jl-cm-hide icon icon-expanded">' + #{l(:label_journals_list_hide_detail).to_json} + '</a></li>';
+                html += '<li><a href="#" class="jl-cm-hide icon rsp-icon-expanded">' + #{l(:label_journals_list_hide_detail).to_json} + '</a></li>';
               } else {
-                html += '<li><a href="#" class="jl-cm-show icon icon-collapsed">' + #{l(:label_journals_list_show_detail).to_json} + '</a></li>';
+                html += '<li><a href="#" class="jl-cm-show icon rsp-icon-collapsed">' + #{l(:label_journals_list_show_detail).to_json} + '</a></li>';
               }
               html += '<li class="jl-cm-separator"></li>';
               html += '<li><a href="#" class="jl-cm-show-all">' + #{l(:label_journals_list_show_all).to_json} + '</a></li>';

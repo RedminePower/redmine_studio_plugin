@@ -1,0 +1,20 @@
+/* Self-contained icons for buttons that used Redmine's raster icon classes (add/edit/
+   delete/reply and the detail expand/collapse arrows). Redmine 7.0 removed those core
+   styles, so the images are bundled in the plugin to keep the icons working regardless
+   of changes to Redmine's own icon assets. */
+.rsp-icon-add,
+.rsp-icon-edit,
+.rsp-icon-del,
+.rsp-icon-reply,
+.rsp-icon-expanded,
+.rsp-icon-collapsed {
+    background-position: 0 50%;
+    background-repeat: no-repeat;
+    padding-left: 20px;
+}
+.rsp-icon-add { background-image: url(../images/add.png); }
+.rsp-icon-edit { background-image: url(../images/edit.png); }
+.rsp-icon-del { background-image: url(../images/delete.png); }
+.rsp-icon-reply { background-image: url(../images/comments.png); }
+.rsp-icon-expanded { background-image: url(../images/arrow_down.png); }
+.rsp-icon-collapsed { background-image: url(../images/arrow_right.png); }

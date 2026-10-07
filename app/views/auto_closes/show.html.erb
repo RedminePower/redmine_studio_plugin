@@ -3,11 +3,11 @@
 <div class="contextual">
 <%= link_to(l(:button_edit),
                {:action => 'edit', :id => @auto_close.id},
-               :class => 'icon icon-edit') %>
+               :class => 'icon rsp-icon-edit') %>
 <%= link_to(l(:button_delete),
                {:action => 'destroy', :id => @auto_close.id},
                :data => {:confirm => l(:text_are_you_sure)}, :method => :delete,
-               :class => 'icon icon-del') %>
+               :class => 'icon rsp-icon-del') %>
 </div>
 
 <%= title [l(:label_auto_close_plural), auto_closes_path], @auto_close.id %>

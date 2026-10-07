@@ -12,7 +12,7 @@
 
           // Create reply button
           $('<a>', {
-            'class': 'icon icon-reply',
+            'class': 'icon rsp-icon-reply',
             text: '<%= escape_javascript(l(:button_reply)) %>',
             href: '<%= edit_issue_path(@issue) %>',
             click: function() {
@@ -82,7 +82,7 @@
           });
 
         } else {
-          edit.text('<%= escape_javascript(l(:button_reply)) %>').removeClass('icon-edit').addClass('icon-reply');
+          edit.text('<%= escape_javascript(l(:button_reply)) %>').removeClass('icon-edit').addClass('rsp-icon-reply');
         }
       }
     });

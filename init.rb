@@ -80,6 +80,7 @@ else
   end
 
   # Load hooks only when no conflicts
+  require_relative 'lib/redmine_studio_plugin/rsp_icons/hooks'
   require_relative 'lib/redmine_studio_plugin/reply_button/hooks'
   require_relative 'lib/redmine_studio_plugin/teams_button/hooks'
 
