@@ -1124,7 +1124,7 @@ $response.StatusCode
 
 **期待結果:**
 - ステータスコード 422
-- errors に "Name" で始まるメッセージを含む（メッセージ本文はロケールにより異なるため属性名のみ確認）
+- errors が 1 件以上（name 未指定でバリデーションが発火。本文はロケールにより異なるため件数のみ確認。対象フィールドの属性名確認は Runner 側で実施）
 
 #### [2-2-4] 設定作成（バリデーションエラー: scope_type なし）
 
@@ -1140,11 +1140,12 @@ $body = @{
 
 $response = Invoke-WebRequest -Uri "{BaseUrl}/studio_settings.json?key=$ApiKey" -Method POST -Body $body -ContentType "application/json" -SkipHttpErrorCheck
 $response.StatusCode
+($response.Content | ConvertFrom-Json).errors
 ```
 
 **期待結果:**
 - ステータスコード 422
-- errors に "Scope type" で始まるメッセージを含む（メッセージ本文はロケールにより異なるため属性名のみ確認）
+- errors が 1 件以上（scope_type 未指定でバリデーションが発火。本文はロケールにより異なるため件数のみ確認。対象フィールドの属性名確認は Runner 側で実施）
 
 #### [2-2-4b] 設定作成（バリデーションエラー: schema_type なし）
 
@@ -1165,7 +1166,7 @@ $response.StatusCode
 
 **期待結果:**
 - ステータスコード 422
-- errors に "Schema type" で始まるメッセージを含む（メッセージ本文はロケールにより異なるため属性名のみ確認）
+- errors が 1 件以上（schema_type 未指定でバリデーションが発火。本文はロケールにより異なるため件数のみ確認。対象フィールドの属性名確認は Runner 側で実施）
 
 #### [2-2-5] 設定取得（GET 単体）
 
