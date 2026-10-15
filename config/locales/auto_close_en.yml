@@ -45,3 +45,23 @@ en:
   warning_expired_trigger: "The expired trigger may target many issues depending on conditions. Please set appropriate conditions such as tracker or custom field."
   error_set_one_or_more_actions: "Please set one or more actions."
   error_expired_requires_condition: "For the expired trigger, please set at least one condition (project, tracker, status, subject pattern, or custom field)."
+  activerecord:
+    attributes:
+      auto_close:
+        title: "Title"
+        is_enabled: "Enabled"
+        project_ids: "Projects"
+        trigger_type: "Type"
+        trigger_tracker: "Tracker"
+        trigger_subject_pattern: "Subject pattern"
+        trigger_status: "Status"
+        trigger_custom_field: "Custom Field"
+        trigger_custom_field_boolean: "Value"
+        action_user: "Action user"
+        action_status: "Change status"
+        action_assigned_to: "Change assignee"
+        action_assigned_to_custom_field: "Custom field for change assignee"
+        action_comment: "Add comments"
+        is_action_comment_parent: "Add to parent issue too"
+        max_issues_per_run: "Max issues per run"
+        project_pattern: "Project pattern"

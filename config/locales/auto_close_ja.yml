@@ -45,3 +45,23 @@ ja:
   warning_expired_trigger: "期限切れトリガーは、条件によっては多数のチケットが対象になります。トラッカーやカスタムフィールドなど、適切な条件を設定してください。"
   error_set_one_or_more_actions: "いずれか一つ以上のアクションを設定してください。"
   error_expired_requires_condition: "期限切れトリガーでは、少なくとも1つの条件（プロジェクト、トラッカー、ステータス、題名パターン、カスタムフィールド）を設定してください。"
+  activerecord:
+    attributes:
+      auto_close:
+        title: "タイトル"
+        is_enabled: "有効"
+        project_ids: "プロジェクト"
+        trigger_type: "トリガー種類"
+        trigger_tracker: "トラッカー"
+        trigger_subject_pattern: "題名のパターン"
+        trigger_status: "ステータス"
+        trigger_custom_field: "カスタムフィールド"
+        trigger_custom_field_boolean: "値"
+        action_user: "実行ユーザー"
+        action_status: "ステータスを変更"
+        action_assigned_to: "担当者を変更"
+        action_assigned_to_custom_field: "カスタムフィールドで指定"
+        action_comment: "コメントを追加"
+        is_action_comment_parent: "親チケットにも追加"
+        max_issues_per_run: "一度に処理する最大件数"
+        project_pattern: "プロジェクトパターン"

@@ -180,6 +180,38 @@ puts ac.max_issues_per_run == 50
 - `constant` が出力される
 - `true` が出力される（4回）
 
+### [1-7] 属性名の翻訳確認
+
+設定画面のフォームラベルとバリデーションエラーメッセージの属性名は `AutoClose.human_attribute_name` で解決される。
+モデルは `ActiveRecord::Base` 直接継承のため Redmine の `field_*` 探索（Redmine 6.x では `ApplicationRecord` にある）を通らず、
+Rails 標準の `activerecord.attributes.auto_close.*` キーで翻訳する（locale: `auto_close_ja.yml` / `auto_close_en.yml`）。
+本テストはロケールを明示して翻訳値を確認する（意図が翻訳確認のため、ロケール固定は正当）。
+
+**確認方法:**
+```ruby
+ja_expected = {
+  title: 'タイトル', is_enabled: '有効', project_ids: 'プロジェクト',
+  trigger_type: 'トリガー種類', trigger_tracker: 'トラッカー',
+  trigger_subject_pattern: '題名のパターン', trigger_status: 'ステータス',
+  trigger_custom_field: 'カスタムフィールド', trigger_custom_field_boolean: '値',
+  action_user: '実行ユーザー', action_status: 'ステータスを変更',
+  action_assigned_to: '担当者を変更', action_assigned_to_custom_field: 'カスタムフィールドで指定',
+  action_comment: 'コメントを追加', is_action_comment_parent: '親チケットにも追加',
+  max_issues_per_run: '一度に処理する最大件数', project_pattern: 'プロジェクトパターン',
+}
+ja_ok = I18n.with_locale(:ja) do
+  ja_expected.all? { |attr, label| AutoClose.human_attribute_name(attr) == label }
+end
+en_ok = I18n.with_locale(:en) do
+  AutoClose.human_attribute_name(:trigger_type) == 'Type' &&
+    AutoClose.human_attribute_name(:project_ids) == 'Projects'
+end
+puts ja_ok
+puts en_ok
+```
+
+**期待結果:** `true` が 2 回出力される
+
 ---
 
 ## 2. 機能テスト

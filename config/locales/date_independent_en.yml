@@ -9,3 +9,12 @@ en:
   di_text_title_info: "Please enter a clear name to manage."
   di_text_project_info: "Please specify projects."
   di_text_calculate_status_info: "Please specify status without applying this setting."
+  activerecord:
+    attributes:
+      date_independent:
+        title: "Title"
+        is_enabled: "Enabled"
+        project_ids: "Target Projects"
+        calculate_status_ids: "Not applied status"
+        project_pattern: "Project pattern"
+        calculate_status_pattern: "Not applied status pattern"

@@ -9,3 +9,12 @@ ja:
   di_text_title_info: "管理する上でわかりやすい名前を入力してください。"
   di_text_project_info: "適用するプロジェクトを指定してください。"
   di_text_calculate_status_info: "本設定を適用せずに連動を行うステータスを指定してください。"
+  activerecord:
+    attributes:
+      date_independent:
+        title: "タイトル"
+        is_enabled: "有効"
+        project_ids: "対象プロジェクト"
+        calculate_status_ids: "適用しないステータス"
+        project_pattern: "プロジェクトパターン"
+        calculate_status_pattern: "適用しないステータスのパターン"

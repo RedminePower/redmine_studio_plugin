@@ -142,6 +142,35 @@ puts di.is_enabled == true
 - `constant` が出力される
 - `true` が出力される（2回）
 
+### [1-6] 属性名の翻訳確認
+
+バリデーションエラーメッセージの属性名は `DateIndependent.human_attribute_name` で解決される
+（フォームラベルは `:label => l(:di_field_*)` 明示のため対象外）。
+モデルは `ActiveRecord::Base` 直接継承のため Redmine の `field_*` 探索（Redmine 6.x では `ApplicationRecord` にある）を通らず、
+Rails 標準の `activerecord.attributes.date_independent.*` キーで翻訳する（locale: `date_independent_ja.yml` / `date_independent_en.yml`）。
+本テストはロケールを明示して翻訳値を確認する（意図が翻訳確認のため、ロケール固定は正当）。
+
+**確認方法:**
+```ruby
+ja_expected = {
+  title: 'タイトル', is_enabled: '有効', project_ids: '対象プロジェクト',
+  calculate_status_ids: '適用しないステータス',
+  project_pattern: 'プロジェクトパターン',
+  calculate_status_pattern: '適用しないステータスのパターン',
+}
+ja_ok = I18n.with_locale(:ja) do
+  ja_expected.all? { |attr, label| DateIndependent.human_attribute_name(attr) == label }
+end
+en_ok = I18n.with_locale(:en) do
+  DateIndependent.human_attribute_name(:project_ids) == 'Target Projects' &&
+    DateIndependent.human_attribute_name(:calculate_status_ids) == 'Not applied status'
+end
+puts ja_ok
+puts en_ok
+```
+
+**期待結果:** `true` が 2 回出力される
+
 ---
 
 ## 2. 機能テスト
