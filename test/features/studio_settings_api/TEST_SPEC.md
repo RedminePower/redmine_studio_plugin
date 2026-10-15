@@ -1013,6 +1013,33 @@ puts sa.visible?(admin)
 **期待結果:**
 - `true` が 4 回（global は非メンバーも true／project はメンバー・admin が true・非メンバーは false）
 
+### [1-35] 属性名の翻訳確認
+
+バリデーションエラーメッセージ（`render_validation_errors` → `full_messages`）の属性名は `human_attribute_name` で解決される。
+モデルは `ActiveRecord::Base` 直接継承のため Redmine の `field_*` 探索（Redmine 6.x では `ApplicationRecord` にある）を通らず、
+Rails 標準の `activerecord.attributes.<モデル>.*` キーで翻訳する（locale: `studio_settings_ja.yml` / `studio_settings_en.yml`）。
+本テストはロケールを明示して翻訳値を確認する（意図が翻訳確認のため、ロケール固定は正当）。
+
+**確認方法:**
+```ruby
+ja_expected = {
+  StudioSetting => { name: '名称', schema_type: 'スキーマ種別', scope_type: 'スコープ種別', schema_version: 'スキーマバージョン' },
+  StudioSettingAssignment => { setting_id: '設定', user_id: 'ユーザー', assigned_by_id: '割り当て実行者' },
+  StudioSettingHistory => { name: '名称', version: 'バージョン', change_type: '変更種別', changed_by_id: '変更者' },
+}
+ja_ok = I18n.with_locale(:ja) do
+  ja_expected.all? { |klass, attrs| attrs.all? { |attr, label| klass.human_attribute_name(attr) == label } }
+end
+en_ok = I18n.with_locale(:en) do
+  StudioSetting.human_attribute_name(:schema_type) == 'Schema type' &&
+    StudioSettingAssignment.human_attribute_name(:user_id) == 'User'
+end
+puts ja_ok
+puts en_ok
+```
+
+**期待結果:** `true` が 2 回出力される
+
 ---
 
 ## 2. HTTP テスト

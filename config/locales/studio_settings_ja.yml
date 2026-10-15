@@ -1,0 +1,36 @@
+ja:
+  activerecord:
+    attributes:
+      studio_setting:
+        name: "名称"
+        schema_type: "スキーマ種別"
+        scope_type: "スコープ種別"
+        scope_id: "スコープ"
+        payload: "設定内容"
+        schema_version: "スキーマバージョン"
+        created_on: "作成日時"
+        created_by_id: "作成者"
+        updated_on: "更新日時"
+        updated_by_id: "更新者"
+        deleted_on: "削除日時"
+        deleted_by_id: "削除者"
+      studio_setting_assignment:
+        setting_id: "設定"
+        user_id: "ユーザー"
+        assigned_on: "割り当て日時"
+        assigned_by_id: "割り当て実行者"
+      studio_setting_history:
+        studio_setting_id: "設定"
+        name: "名称"
+        schema_type: "スキーマ種別"
+        scope_type: "スコープ種別"
+        scope_id: "スコープ"
+        payload: "設定内容"
+        schema_version: "スキーマバージョン"
+        version: "バージョン"
+        change_type: "変更種別"
+        restored_from_version: "復元元バージョン"
+        comment: "コメント"
+        is_current: "最新フラグ"
+        changed_on: "変更日時"
+        changed_by_id: "変更者"

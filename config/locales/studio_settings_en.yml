@@ -1,0 +1,36 @@
+en:
+  activerecord:
+    attributes:
+      studio_setting:
+        name: "Name"
+        schema_type: "Schema type"
+        scope_type: "Scope type"
+        scope_id: "Scope"
+        payload: "Payload"
+        schema_version: "Schema version"
+        created_on: "Created on"
+        created_by_id: "Created by"
+        updated_on: "Updated on"
+        updated_by_id: "Updated by"
+        deleted_on: "Deleted on"
+        deleted_by_id: "Deleted by"
+      studio_setting_assignment:
+        setting_id: "Setting"
+        user_id: "User"
+        assigned_on: "Assigned on"
+        assigned_by_id: "Assigned by"
+      studio_setting_history:
+        studio_setting_id: "Setting"
+        name: "Name"
+        schema_type: "Schema type"
+        scope_type: "Scope type"
+        scope_id: "Scope"
+        payload: "Payload"
+        schema_version: "Schema version"
+        version: "Version"
+        change_type: "Change type"
+        restored_from_version: "Restored from version"
+        comment: "Comment"
+        is_current: "Current flag"
+        changed_on: "Changed on"
+        changed_by_id: "Changed by"
