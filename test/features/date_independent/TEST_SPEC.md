@@ -515,20 +515,43 @@ puts di.errors[:project_ids].present?
 
 ## 3. HTTP テスト
 
-> **注記:** 現時点では HTTP テストは実施しない。
-> 理由: 管理画面の CRUD 操作は標準的な Rails の実装であり、プラグイン固有のロジックには影響しない。
-> 将来、コントローラのロジックを変更した場合に追加を検討する。
+> **注記:** 標準的な CRUD 操作のテストは実施しない（標準的な Rails の実装であり、プラグイン固有のロジックには影響しないため）。
+> コントローラ独自の整形処理に関わる [3-1] のみ実施する。
 
-### 確認可能な項目（参考）
+### [3-1] 配列パラメータ欠落時に 500 にならない
+
+コントローラの create / update は `project_ids` / `calculate_status_ids` の配列パラメータを整形してモデルに渡す。
+ブラウザのフォームは常に空の hidden フィールドを送るためパラメータは欠落しないが、
+直接 POST / PUT では欠落し得る。欠落時は空配列として扱い、500 にせず通常のバリデーションエラー表示を返すこと。
+
+**確認方法:**
+
+admin でログインしたセッションで、`authenticity_token` のみ付与し配列パラメータを含まないボディを送る。
+
+```powershell
+# create（title 空・project_ids / calculate_status_ids 無し）
+Invoke-WebRequest -Uri "$base/date_independents" -Method Post -WebSession $sess -SkipHttpErrorCheck `
+  -Body @{ authenticity_token = $token; 'date_independent[title]' = '' }
+
+# update（既存ルールに対し title のみ送信）
+Invoke-WebRequest -Uri "$base/date_independents/$id" -Method Post -WebSession $sess -SkipHttpErrorCheck `
+  -Body @{ authenticity_token = $token; '_method' = 'patch'; 'date_independent[title]' = 'updated' }
+```
+
+**期待結果:**
+- どちらもステータス 200（500 にならない）
+- レスポンスにバリデーションエラー（タイトル必須 / 対象プロジェクト必須）が表示される
+
+### 確認可能な項目（参考・未実施）
 
 | ID | 確認内容 |
 |----|----------|
-| [3-1] | 管理画面一覧（管理者） → 200 |
-| [3-2] | 管理画面一覧（非管理者） → 302（リダイレクト） |
-| [3-3] | ルール作成（POST） |
-| [3-4] | ルール詳細表示（GET） |
-| [3-5] | ルール更新（PATCH） |
-| [3-6] | ルール削除（DELETE） |
+| [3-2] | 管理画面一覧（管理者） → 200 |
+| [3-3] | 管理画面一覧（非管理者） → 302（リダイレクト） |
+| [3-4] | ルール作成（POST） |
+| [3-5] | ルール詳細表示（GET） |
+| [3-6] | ルール更新（PATCH） |
+| [3-7] | ルール削除（DELETE） |
 
 ---
 
@@ -557,6 +580,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 2. フェーズ 1: 登録確認テスト実行（バッチ 1）
 3. フェーズ 2: 機能テスト実行（セットアップ → バッチ 2〜3）
 4. フェーズ 3: コンテナ再起動
+5. フェーズ 4: HTTP テスト実行（[3-1]）
 
 テストデータの管理は CLAUDE.md の「テストデータの管理」ルールに従う。
 
