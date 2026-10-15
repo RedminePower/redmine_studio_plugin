@@ -438,6 +438,70 @@ settings['subtask_list_accordion_enable_server_scripting_mode'] = true
 Setting.plugin_redmine_studio_plugin = settings
 ```
 
+### [2-10] 子チケット一覧がコアの表示設定に追随する
+
+アコーディオンの一覧はコアの描画（`render_descendants_tree`）を後加工して出力するため、
+列・ヘッダ行・ボタン列は常にコアと一致する。
+
+**テストケース A: 表示設定の反映（Redmine 6.0 以降のみ）**
+
+**前提条件:**
+- 孫チケットを持つ親チケットが存在すること
+
+**確認方法:**
+```ruby
+# 関連チケット一覧の表示設定を変更
+Setting.display_related_issues_table_headers = 1
+Setting.related_issues_default_columns = %w[status priority assigned_to]
+```
+
+```powershell
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
+$html = $response.Content
+# ヘッダ行が出力される
+$html -match 'thead class="related-issues"'
+# 設定した列が出力される
+$html -match 'td class="priority'
+```
+
+**期待結果:** いずれも `True`（ヘッダ行と設定どおりの列が表示される）
+
+**後処理:**
+```ruby
+# 設定を元に戻す
+Setting.display_related_issues_table_headers = 0
+Setting.related_issues_default_columns = %w[status assigned_to start_date due_date done_ratio]
+```
+
+**テストケース B: 列構成がコア描画と一致する**
+
+**前提条件:**
+- 孫チケットを持つ親チケット（アコーディオン描画）と、子のみの親チケット（コア描画）が存在すること
+
+**確認方法:**
+```powershell
+# 両チケットの子チケット一覧（#issue_tree 内）の td クラスの種類を抽出して比較する
+# 注: done_ratio 列の進捗バーは入れ子の <table> を含むため、抽出は "relations" の div までを範囲にする
+$accCols  = # 孫ありチケットの td class 一覧（重複除去）
+$coreCols = # 孫なしチケットの td class 一覧（重複除去）
+Compare-Object $accCols $coreCols
+```
+
+**期待結果:** 差分なし（Redmine 5.x では両者とも start_date / due_date 列を含む固定列）
+
+**テストケース C: アコーディオン属性の付与**
+
+**確認方法:**
+```powershell
+$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
+$html = $response.Content
+# 各行に開閉用の属性・クラスが付与される
+$html -match ' cs="\d+" ce="\d+" rank="\d+"'
+$html -match 'span class="treearrow"'
+```
+
+**期待結果:** いずれも `True`
+
 ---
 
 ## 3. ブラウザテスト

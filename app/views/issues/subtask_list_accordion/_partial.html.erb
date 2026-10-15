@@ -1,6 +1,6 @@
 <% if sla_has_grandson_issues?(@issue) %>
   <%= content_for :header_tags do
-    stylesheet_link_tag(sla_use_css, :plugin => "redmine_studio_plugin") +
+    stylesheet_link_tag("subtask_list_accordion", :plugin => "redmine_studio_plugin") +
     javascript_include_tag("subtask_list_accordion" + (subtask_tree_client_processing? ? "_client" : ""), :plugin => "redmine_studio_plugin")
   end %>
   <div class="accordion_control contextual">
