@@ -1,5 +1,14 @@
 <%= javascript_tag do %>
   $(document).ready(function() {
+    // Core's showAndScrollTo is legacy since Redmine 6.0 and may be removed, so keep our own equivalent
+    function rspShowAndScrollTo(id, focus) {
+      $('#' + id).show();
+      if (focus) {
+        $('#' + focus).focus();
+      }
+      $('html, body').animate({scrollTop: $('#' + id).offset().top}, 100);
+    }
+
     $('#content > .contextual').each(function() {
       var edit = $(this).find('.icon-edit');
       if (edit.length > 0) {
@@ -58,7 +67,7 @@
               }
 
               $('#update .edit_issue .box > fieldset.tabular').show();
-              showAndScrollTo('update', 'issue_notes');
+              rspShowAndScrollTo('update', 'issue_notes');
               return false;
             }
           }).prependTo($(this));
@@ -77,7 +86,7 @@
             }
 
             $('#update .edit_issue .box > fieldset.tabular').show();
-            showAndScrollTo('update', 'issue_notes');
+            rspShowAndScrollTo('update', 'issue_notes');
             return false;
           });
 

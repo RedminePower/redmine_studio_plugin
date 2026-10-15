@@ -13,7 +13,7 @@ Reply Button 機能のテスト仕様。この文書から runner_test.rb, http_
 | View ファイル | `app/views/issues/reply_button/_reply.html.erb` |
 | 競合プラグイン | `redmine_reply_button`（plugins/ 直下に init.rb があれば競合） |
 | HTML 出力パターン | `rsp-icon-reply` |
-| JS 出力パターン | `showAndScrollTo`, `var reverseOrder = true/false` |
+| JS 出力パターン | `rspShowAndScrollTo`, `var reverseOrder = true/false` |
 
 ---
 
@@ -219,7 +219,9 @@ Issue.joins(:project)
 - GET `/issues/{id}` のレスポンス HTML（モジュール有効プロジェクト）
 
 **期待結果:**
-- HTML に `rsp-icon-reply` と `showAndScrollTo` の両方が含まれる
+- HTML に `rsp-icon-reply` と `rspShowAndScrollTo` の両方が含まれる
+- プラグインが出力する script ブロック（`rsp-icon-reply` を含む `<script>` 要素）内に、コア関数 `showAndScrollTo` の裸呼び出し（`rsp` プレフィックスなし）が含まれない
+  - ※ ページ全体にはコア自身の「編集」リンク（`onclick="showAndScrollTo(...)"`）が含まれるため、確認はプラグインの script ブロックにスコープする
 
 ---
 
