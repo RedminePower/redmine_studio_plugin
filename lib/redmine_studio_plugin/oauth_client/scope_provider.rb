@@ -11,13 +11,27 @@ module RedmineStudioPlugin
       # （Redmine コアでは close_project / delete_project が read 扱いのため明示的に外す）。
       READ_DENYLIST = %i[close_project delete_project].freeze
 
-      # 変更系はアプリが実際に呼ぶ操作だけに限定する（チケットの作成・更新・注記、時間記録の登録・更新・削除）。
+      # カテゴリー一覧の取得（アプリのカテゴリー選択肢）はコアに閲覧専用の権限が無く、
+      # 個別 API も cache_bundle も manage_categories を要求するため、閲覧目的で含める。
+      READ_EXTRA_SCOPES = %i[manage_categories].freeze
+
+      # プラグインはアプリより更新が届きにくい（顧客側 Redmine の管理者作業が要る）ため、
+      # アプリの将来機能で使う見込みの権限は先行して確保する。
+      # ただし操作を取り消せるものに限る（Wiki の編集は版履歴で戻せるため含める。
+      # ページ削除は履歴ごと消えて戻せないため含めない）。
+      PROVISIONED_SCOPES = %i[edit_wiki_pages].freeze
+
+      # 変更系はアプリが実際に呼ぶ操作だけに限定する（チケットの作成・更新・注記・親チケットの設定、
+      # 時間記録の登録・更新・削除）。
       # 「自分のものだけ」ロール向けに own 版も含める。含めないと本人が持つ own 権限が
       # スコープとの AND で削られ、ブラウザでは編集できるのにアプリからは編集できなくなる。
+      # manage_subtasks が無いと parent_issue_id が safe_attributes で黙って無視され、
+      # 親チケットを指定した作成・更新が親なしで通ってしまう。
       WRITE_SCOPES = %i[
         add_issues
         edit_issues
         edit_own_issues
+        manage_subtasks
         add_issue_notes
         log_time
         edit_time_entries
@@ -31,7 +45,7 @@ module RedmineStudioPlugin
       # 登録・要求に使うスコープ名（Symbol）の一覧。並びは安定させる（登録との差分検出のため）。
       def scope_names
         read = Redmine::AccessControl.permissions.select(&:read?).map(&:name)
-        (read - READ_DENYLIST + WRITE_SCOPES).uniq.sort
+        (read - READ_DENYLIST + READ_EXTRA_SCOPES + PROVISIONED_SCOPES + WRITE_SCOPES).uniq.sort
       end
 
       # スペース区切りのスコープ文字列（Doorkeeper の scopes 形式）。

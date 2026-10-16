@@ -77,8 +77,9 @@ API は JSON と XML の両方をサポートする。
 
 | 区分 | 内容 |
 |------|------|
-| 閲覧系 | `read` フラグの付いた権限を広めに許可。ただし破壊的操作（`close_project` / `delete_project`）は `read` 扱いでも除外 |
-| 変更系 | アプリが実際に使う操作のみ（`add_issues` / `edit_issues` / `edit_own_issues` / `add_issue_notes` / `log_time` / `edit_time_entries` / `edit_own_time_entries`） |
+| 閲覧系 | `read` フラグの付いた権限を広めに許可。ただし破壊的操作（`close_project` / `delete_project`）は `read` 扱いでも除外。カテゴリー一覧は閲覧専用権限がコアに無いため `manage_categories` を含める |
+| 変更系 | アプリが実際に使う操作のみ（`add_issues` / `edit_issues` / `edit_own_issues` / `manage_subtasks` / `add_issue_notes` / `log_time` / `edit_time_entries` / `edit_own_time_entries`） |
+| 先行確保 | アプリの将来機能で使う見込みの権限（`edit_wiki_pages`）。取り消せる操作に限り、`delete_wiki_pages`（履歴ごと消える）は含めない |
 | 管理系 | `admin` は絶対に含めない |
 
 トークンに載る権限と利用者本人のロール権限は AND で効くため、ここは「アプリが要求してよい上限」を最小権限で定義する。
@@ -166,11 +167,11 @@ puts File.exist?(view_file) ? 'PASS' : 'FAIL: show.api.rsb not found'
 
 ```ruby
 names = RedmineStudioPlugin::OauthClient::ScopeProvider.scope_names
-bad = [:admin, :close_project, :delete_project] & names
+bad = [:admin, :close_project, :delete_project, :delete_wiki_pages] & names
 puts bad.empty? ? 'PASS' : "FAIL: forbidden scopes present: #{bad.join(', ')}"
 ```
 
-**期待結果:** `admin` / `close_project` / `delete_project` を含まない
+**期待結果:** `admin` / `close_project` / `delete_project` / `delete_wiki_pages` を含まない
 
 ---
 
@@ -178,8 +179,9 @@ puts bad.empty? ? 'PASS' : "FAIL: forbidden scopes present: #{bad.join(', ')}"
 
 ```ruby
 names = RedmineStudioPlugin::OauthClient::ScopeProvider.scope_names
-required = [:add_issues, :edit_issues, :edit_own_issues, :add_issue_notes,
-            :log_time, :edit_time_entries, :edit_own_time_entries, :view_issues]
+required = [:add_issues, :edit_issues, :edit_own_issues, :manage_subtasks, :add_issue_notes,
+            :log_time, :edit_time_entries, :edit_own_time_entries, :manage_categories,
+            :edit_wiki_pages, :view_issues]
 missing = required - names
 puts missing.empty? ? 'PASS' : "FAIL: missing scopes: #{missing.join(', ')}"
 ```
@@ -499,6 +501,86 @@ $response.Content      # {"oauth_client":{}} 期待（client_id 無し）
 ```
 
 **期待結果:** 6.1 未満（Doorkeeper なし）でも 404 ではなく 200 で空オブジェクト `{"oauth_client":{}}` を返す（`client_id` 無し＝アプリは「プラグイン対応・Redmine 非対応」と解釈できる）
+
+---
+
+> **[2-9]〜[2-11] はスコープ契約テスト（Doorkeeper 依存）。6.1 以上のみ実行し、6.1 未満ではスキップする。**
+>
+> サインインと同じスコープを載せたアクセストークンを Runner で直作成し、Bearer 認証で
+> 「アプリが実際に使う操作」が権限 AND で削られないことを検証する（トークンに無い権限は
+> ロールにあっても落とされるため、スコープ定義の不足はこの形でしか検知できない）。
+>
+> **前提データ**: `test-plugin` プロジェクトに親チケット #1 があり、`test_active_user` が
+> `add_issues` / `manage_subtasks` / `manage_categories` / `edit_wiki_pages` を持つロールで
+> メンバーであること（[2-11] はプロジェクトの Wiki モジュールが有効であることも前提）。
+> 無い場合はロール・メンバーシップを整備してから実行する（素通り防止のため、前提が無いときは
+> SKIP とし成功に数えない）。
+> トークンはハッシュ保存（`hash_token_secrets`）のため、Runner の出力（`plaintext_token`）を使う。
+
+### [2-9] スコープ契約: 親チケットを指定した作成が配下に入る
+
+```bash
+# 1) サインインと同じスコープのトークンを直作成
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"u=User.find_by(login: 'test_active_user'); app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); t=Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600); puts t.plaintext_token\""
+```
+```powershell
+# 2) 親チケット #1 を指定して作成し、作成結果の parent を確認
+$token = '<上の出力>'
+$h = @{ Authorization = "Bearer $token" }
+$body = @{ issue = @{ project_id = 'test-plugin'; subject = 'scope contract: parent'; parent_issue_id = 1 } } | ConvertTo-Json
+$r = Invoke-RestMethod -Uri '{BaseUrl}/issues.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
+(Invoke-RestMethod -Uri "{BaseUrl}/issues/$($r.issue.id).json" -Headers $h).issue.parent.id   # 1 期待
+```
+```bash
+# 3) 掃除（作成チケットとテストトークンを削除）
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"Issue.where(subject: 'scope contract: parent').destroy_all; app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); u=User.find_by(login: 'test_active_user'); Doorkeeper::AccessToken.where(application_id: app.id, resource_owner_id: u.id).delete_all\""
+```
+
+**期待結果:** 作成されたチケットの `parent.id` が `1`（`manage_subtasks` がスコープに無いと、エラーにならず親なしで作成されてしまう）
+
+---
+
+### [2-10] スコープ契約: カテゴリー一覧が取得できる
+
+```bash
+# 1) 検証用カテゴリーを作成し、トークンを直作成
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"p=Project.find_by(identifier: 'test-plugin'); p.issue_categories.find_or_create_by!(name: 'scope-contract-cat'); u=User.find_by(login: 'test_active_user'); app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); t=Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600); puts t.plaintext_token\""
+```
+```powershell
+# 2) カテゴリー一覧 API（コアが manage_categories を要求）を Bearer で取得
+$token = '<上の出力>'
+$r = Invoke-RestMethod -Uri '{BaseUrl}/projects/test-plugin/issue_categories.json' -Headers @{ Authorization = "Bearer $token" }
+$r.issue_categories.name -contains 'scope-contract-cat'   # True 期待（スコープ不足だと 403）
+```
+```bash
+# 3) 掃除（カテゴリーとテストトークンを削除）
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"p=Project.find_by(identifier: 'test-plugin'); p.issue_categories.where(name: 'scope-contract-cat').destroy_all; app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); u=User.find_by(login: 'test_active_user'); Doorkeeper::AccessToken.where(application_id: app.id, resource_owner_id: u.id).delete_all\""
+```
+
+**期待結果:** 200 で `scope-contract-cat` を含む一覧が返る（`manage_categories` がスコープに無いと 403 になり、cache_bundle でもカテゴリーが空になる）
+
+---
+
+### [2-11] スコープ契約: Wiki ページの作成・編集ができる（先行確保）
+
+```bash
+# 1) トークンを直作成（[2-9] と同じ手順）
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"u=User.find_by(login: 'test_active_user'); app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); t=Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600); puts t.plaintext_token\""
+```
+```powershell
+# 2) Wiki ページを Bearer で作成（PUT は新規作成と更新を兼ねる）し、取得して確認
+$token = '<上の出力>'
+$h = @{ Authorization = "Bearer $token" }
+$body = @{ wiki_page = @{ text = 'scope contract wiki text' } } | ConvertTo-Json
+Invoke-RestMethod -Uri '{BaseUrl}/projects/test-plugin/wiki/ScopeContractPage.json' -Method Put -Body $body -ContentType 'application/json' -Headers $h
+(Invoke-RestMethod -Uri '{BaseUrl}/projects/test-plugin/wiki/ScopeContractPage.json' -Headers $h).wiki_page.text   # 'scope contract wiki text' 期待
+```
+```bash
+# 3) 掃除（検証ページとテストトークンを削除）
+docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"p=Project.find_by(identifier: 'test-plugin'); p.wiki.pages.where(title: 'ScopeContractPage').destroy_all; app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); u=User.find_by(login: 'test_active_user'); Doorkeeper::AccessToken.where(application_id: app.id, resource_owner_id: u.id).delete_all\""
+```
+
+**期待結果:** 作成が成功し、取得したページ本文が一致する（`edit_wiki_pages` がスコープに無いと 403。将来の Wiki 書き込み機能のための先行確保が効いていることの確認）
 
 ---
 

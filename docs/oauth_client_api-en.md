@@ -101,8 +101,9 @@ every time Redmine starts.
 
 | Category | Content |
 |----------|---------|
-| Read | Read permissions granted broadly (destructive operations excluded) |
-| Write | Only the operations the app actually uses (create/update issues and notes; create/update/delete time entries) |
+| Read | Read permissions granted broadly (destructive operations excluded). manage_categories is included because Redmine has no read-only permission for listing issue categories |
+| Write | Only the operations the app actually uses (create/update issues and notes; set parent issues; create/update/delete time entries) |
+| Provisioned | Permissions that future app features are expected to use (wiki editing). Secured in advance because plugin updates reach users more slowly than app updates. Limited to recoverable operations; wiki page deletion (which removes the history as well) is not included |
 | Admin | Admin permission is never included |
 
 Because the scopes on the token and the user's own permissions are combined with AND,
