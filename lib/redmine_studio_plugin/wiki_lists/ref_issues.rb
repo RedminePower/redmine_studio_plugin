@@ -6,9 +6,12 @@ module RedmineStudioPlugin
       Redmine::WikiFormatting::Macros.register do
         desc 'Displays a list of referer issues.'
         macro :ref_issues do |obj, args|
-          # 再帰防止: ref_issues マクロの展開中に再度呼ばれた場合はスキップ
+          # 再帰防止: ref_issues マクロの展開中に再度呼ばれた場合は何も表示しない。
+          # 入れ子になるのはほぼ一覧の「説明」列などの中で、表の中に表を出しても読めない。
+          # また自己参照かどうかは見ずに入れ子をすべて止めているため、通知文を出すと
+          # 通常の使い方（説明に一覧を含むチケットの一覧）で毎行に並ぶ雑音になる。
           if (Thread.current[:ref_issues_depth] || 0) > 0
-            return "<i style=\"color: gray;\">(#{I18n.t('ref_issues_recursion_skipped')})</i>".html_safe
+            return ''.html_safe
           end
 
           incremented = true
