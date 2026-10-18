@@ -2,6 +2,7 @@
   tracker_ids = nil unless defined?(tracker_ids)
   project_ids = nil unless defined?(project_ids)
   hide_when_empty = false unless defined?(hide_when_empty)
+  header_html = nil unless defined?(header_html)
   query = roadmap_display.build_query(version, tracker_ids: tracker_ids, project_ids: project_ids)
   sort_init(query.sort_criteria.empty? ? [['id', 'desc']] : query.sort_criteria)
   sort_update(query.sortable_columns)
@@ -11,6 +12,7 @@
 <% unless issues.empty? && hide_when_empty %>
 <div class="rsp-roadmap-display">
   <div class="rsp-roadmap-display-caption"><%= l(:label_related_issues) %></div>
+  <%= header_html %>
   <% if issues.empty? %>
     <p class="nodata"><%= l(:label_no_data) %></p>
   <% else %>

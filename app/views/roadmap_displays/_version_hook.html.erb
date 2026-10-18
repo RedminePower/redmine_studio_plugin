@@ -1,7 +1,30 @@
 <% display = RoadmapDisplay.for_project(version.project) %>
 <% if display %>
+<%
+  # 一覧の上のトラッカー絞り込み。そのバージョンにあるトラッカーだけを出し、最初は全部選択（= 絞り込みなし）
+  trackers = Tracker.where(:id => version.fixed_issues.visible.select(:tracker_id)).sorted.to_a
+  filtered = params[:rd_tracker_filter].present?
+  selected_ids = filtered ? Array(params[:rd_tracker_ids]).map(&:to_s) & trackers.map {|t| t.id.to_s} : trackers.map {|t| t.id.to_s}
+  tracker_ids = (filtered && selected_ids.size < trackers.size) ? selected_ids : nil
+%>
 <div id="rsp-roadmap-display-block" style="display:none">
-  <%= render :partial => 'roadmap_displays/issue_list', :locals => {:roadmap_display => display, :version => version} %>
+  <% filter_html = capture do %>
+    <% if trackers.size > 1 %>
+    <%= form_tag(version_path(version), :method => :get, :class => 'rsp-roadmap-tracker-filter') do %>
+      <%= hidden_field_tag 'rd_tracker_filter', '1', :id => nil %>
+      <%= hidden_field_tag 'sort', params[:sort], :id => nil if params[:sort].present? %>
+      <% trackers.each do |tracker| %>
+        <label class="inline">
+          <%= check_box_tag 'rd_tracker_ids[]', tracker.id, selected_ids.include?(tracker.id.to_s), :id => nil %>
+          <%= tracker.name %>
+        </label>
+      <% end %>
+    <% end %>
+    <% end %>
+  <% end %>
+  <%= render :partial => 'roadmap_displays/issue_list',
+             :locals => {:roadmap_display => display, :version => version,
+                         :tracker_ids => tracker_ids, :header_html => filter_html} %>
 </div>
 <%= javascript_tag do %>
 $(function() {
@@ -13,6 +36,10 @@ $(function() {
     block.appendTo('#roadmap');
   }
   block.show();
+  <%# チェックを変えたらすぐ絞り込む %>
+  block.find('form.rsp-roadmap-tracker-filter input[type=checkbox]').on('change', function() {
+    $(this).closest('form').submit();
+  });
 });
 <% end %>
 <% end %>
