@@ -15,8 +15,8 @@ html[dir="ltr"] #admin-menu a.selected.icon-roadmap_display {
 /* バージョン画面の一覧 */
 .rsp-roadmap-display { margin-top: 1em; }
 .rsp-roadmap-display-caption { font-weight: bold; text-align: left; margin: 0 0 4px; }
-.rsp-roadmap-tracker-filter { margin: 0 0 6px; }
-.rsp-roadmap-tracker-filter label.inline { margin-right: 1em; }
+.rsp-roadmap-tracker-filter ul { list-style: none; margin: 0; padding: 0 0 0 4px; }
+.rsp-roadmap-tracker-filter li { padding: 2px 0; }
 /* 標準のロードマップと同じく、終了したチケットに取り消し線を引く */
 .rsp-roadmap-display tr.issue.closed td.subject a,
 .rsp-roadmap-display tr.issue.closed td.id a {

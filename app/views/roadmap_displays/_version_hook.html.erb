@@ -1,31 +1,36 @@
 <% display = RoadmapDisplay.for_project(version.project) %>
 <% if display %>
 <%
-  # 一覧の上のトラッカー絞り込み。そのバージョンにあるトラッカーだけを出し、最初は全部選択（= 絞り込みなし）
+  # トラッカー絞り込み。そのバージョンにあるトラッカーだけを出し、最初は全部選択（= 絞り込みなし）
   trackers = Tracker.where(:id => version.fixed_issues.visible.select(:tracker_id)).sorted.to_a
   filtered = params[:rd_tracker_filter].present?
   selected_ids = filtered ? Array(params[:rd_tracker_ids]).map(&:to_s) & trackers.map {|t| t.id.to_s} : trackers.map {|t| t.id.to_s}
   tracker_ids = (filtered && selected_ids.size < trackers.size) ? selected_ids : nil
 %>
 <div id="rsp-roadmap-display-block" style="display:none">
-  <% filter_html = capture do %>
-    <% if trackers.size > 1 %>
-    <%= form_tag(version_path(version), :method => :get, :class => 'rsp-roadmap-tracker-filter') do %>
-      <%= hidden_field_tag 'rd_tracker_filter', '1', :id => nil %>
-      <%= hidden_field_tag 'sort', params[:sort], :id => nil if params[:sort].present? %>
-      <% trackers.each do |tracker| %>
-        <label class="inline">
+  <%= render :partial => 'roadmap_displays/issue_list',
+             :locals => {:roadmap_display => display, :version => version, :tracker_ids => tracker_ids} %>
+</div>
+<% if trackers.size > 1 %>
+<%# ロードマップ一覧画面のサイドバーと同じく、右側（時間管理・トラッカー別のチケットの下）に置く %>
+<fieldset id="rsp-roadmap-tracker-filter" class="rsp-roadmap-tracker-filter" style="display:none">
+  <legend><%= l(:label_tracker_plural) %></legend>
+  <%= form_tag(version_path(version), :method => :get) do %>
+    <%= hidden_field_tag 'rd_tracker_filter', '1', :id => nil %>
+    <%= hidden_field_tag 'sort', params[:sort], :id => nil if params[:sort].present? %>
+    <ul>
+    <% trackers.each do |tracker| %>
+      <li>
+        <label>
           <%= check_box_tag 'rd_tracker_ids[]', tracker.id, selected_ids.include?(tracker.id.to_s), :id => nil %>
           <%= tracker.name %>
         </label>
-      <% end %>
+      </li>
     <% end %>
-    <% end %>
+    </ul>
   <% end %>
-  <%= render :partial => 'roadmap_displays/issue_list',
-             :locals => {:roadmap_display => display, :version => version,
-                         :tracker_ids => tracker_ids, :header_html => filter_html} %>
-</div>
+</fieldset>
+<% end %>
 <%= javascript_tag do %>
 $(function() {
   var block = $('#rsp-roadmap-display-block');
@@ -36,8 +41,17 @@ $(function() {
     block.appendTo('#roadmap');
   }
   block.show();
+
+  var filter = $('#rsp-roadmap-tracker-filter');
+  var summary = $('#version-summary');
+  if (summary.length) {
+    filter.appendTo(summary);
+  } else {
+    filter.insertBefore(block.find('.rsp-roadmap-display'));
+  }
+  filter.show();
   <%# チェックを変えたらすぐ絞り込む %>
-  block.find('form.rsp-roadmap-tracker-filter input[type=checkbox]').on('change', function() {
+  filter.find('input[type=checkbox]').on('change', function() {
     $(this).closest('form').submit();
   });
 });
