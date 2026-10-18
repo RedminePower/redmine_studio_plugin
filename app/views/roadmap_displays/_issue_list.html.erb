@@ -1,10 +1,14 @@
 <%
-  query = roadmap_display.build_query(version)
+  tracker_ids = nil unless defined?(tracker_ids)
+  project_ids = nil unless defined?(project_ids)
+  hide_when_empty = false unless defined?(hide_when_empty)
+  query = roadmap_display.build_query(version, tracker_ids: tracker_ids, project_ids: project_ids)
   sort_init(query.sort_criteria.empty? ? [['id', 'desc']] : query.sort_criteria)
   sort_update(query.sortable_columns)
   query.sort_criteria = sort_criteria.to_a
   issues = query.issues
 %>
+<% unless issues.empty? && hide_when_empty %>
 <div class="rsp-roadmap-display">
   <div class="rsp-roadmap-display-caption"><%= l(:label_related_issues) %></div>
   <% if issues.empty? %>
@@ -16,3 +20,4 @@
     <% @rsp_roadmap_display = false %>
   <% end %>
 </div>
+<% end %>

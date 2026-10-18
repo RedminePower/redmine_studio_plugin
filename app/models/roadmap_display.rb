@@ -74,7 +74,8 @@ class RoadmapDisplay < (Redmine::VERSION::MAJOR >= 6 ? ApplicationRecord : Activ
   end
 
   # 表示中のバージョンのチケットを、この設定の列・グループ・並び順で取得するクエリ
-  def build_query(version = nil)
+  # ロードマップ一覧画面では、サイドバーのトラッカーとサブプロジェクトの絞り込みを tracker_ids / project_ids で受け取る
+  def build_query(version = nil, tracker_ids: nil, project_ids: nil)
     query = IssueQuery.new(name: '_', filters: {})
     query.user = User.current
     query.column_names = column_names.presence || DEFAULT_COLUMN_NAMES
@@ -82,6 +83,8 @@ class RoadmapDisplay < (Redmine::VERSION::MAJOR >= 6 ? ApplicationRecord : Activ
     query.sort_criteria = sort_criteria.presence || [%w[id desc]]
     query.totalable_names = totalable_names.presence || []
     query.add_filter('fixed_version_id', '=', [version.id.to_s]) if version
+    query.add_filter('tracker_id', '=', tracker_ids.map(&:to_s)) if tracker_ids
+    query.add_filter('project_id', '=', project_ids.map(&:to_s)) if project_ids
     case status_scope
     when 'open' then query.add_filter('status_id', 'o', [''])
     when 'closed' then query.add_filter('status_id', 'c', [''])

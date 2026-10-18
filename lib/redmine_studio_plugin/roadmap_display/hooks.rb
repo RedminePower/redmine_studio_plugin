@@ -5,6 +5,8 @@ module RedmineStudioPlugin
     class Hooks < Redmine::Hook::ViewListener
       # バージョン画面の下部で一覧を描画し、JS で「関連するチケット」の位置へ移す
       render_on :view_versions_show_bottom, partial: 'roadmap_displays/version_hook'
+      # ロードマップ一覧画面では、バージョンごとに描画して同じバージョンの標準の一覧と入れ替える
+      render_on :view_projects_roadmap_version_bottom, partial: 'roadmap_displays/roadmap_version_hook'
 
       def view_layouts_base_html_head(context = {})
         tags = stylesheet_link_tag('roadmap_display.css', plugin: :redmine_studio_plugin)
