@@ -23,6 +23,7 @@
 | `features/wiki_preview_api/TEST_SPEC.md` | Wiki Preview API（Wiki テキスト→HTML 変換）テスト |
 | `features/cache_bundle/TEST_SPEC.md` | Cache Bundle API（キャッシュ一括取得）テスト |
 | `features/oauth_client_api/TEST_SPEC.md` | OAuth クライアント情報 API・ブラウザサインイン支援（前段 Basic ゲート下のトークン取得パッチ含む）テスト |
+| `features/roadmap_display/TEST_SPEC.md` | Roadmap Display（ロードマップのチケット一覧の列・グループ表示）テスト |
 
 ## テストの種類
 
