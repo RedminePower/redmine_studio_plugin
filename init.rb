@@ -70,6 +70,13 @@ else
          html: { class: 'icon icon-date_independent' },
          if: proc { User.current.admin? }
 
+    # Roadmap Display - admin menu
+    menu :admin_menu, :roadmap_displays,
+         { controller: 'roadmap_displays', action: 'index' },
+         caption: :rd_label_roadmap_display,
+         html: { class: 'icon icon-roadmap_display' },
+         if: proc { User.current.admin? }
+
     # Subtask List Accordion settings
     settings default: {
       'subtask_list_accordion_enable_server_scripting_mode' => true,
@@ -92,6 +99,10 @@ else
   # Load Date Independent
   require_relative 'lib/redmine_studio_plugin/date_independent/hooks'
   require_relative 'lib/redmine_studio_plugin/date_independent/issue_patch'
+
+  # Load Roadmap Display
+  require_relative 'lib/redmine_studio_plugin/roadmap_display/hooks'
+  require_relative 'lib/redmine_studio_plugin/roadmap_display/queries_helper_patch'
 
   # Load Wiki Lists macros
   require_relative 'lib/redmine_studio_plugin/wiki_lists/wiki_list'
@@ -156,6 +167,11 @@ else
   Issue.include RedmineStudioPlugin::ChildrenCount::IssuePatch
   IssueQuery.prepend RedmineStudioPlugin::ChildrenCount::IssueQueryPatch
   QueriesHelper.include RedmineStudioPlugin::ChildrenCount::QueriesHelperPatch
+
+  # Roadmap Display patch
+  QueriesHelper.include RedmineStudioPlugin::RoadmapDisplay::QueriesHelperPatch
+  # バージョン画面でチケット一覧（issues/list）を描画するためのヘルパー（Redmine は include_all_helpers = false）
+  VersionsController.helper :queries, :issues, :sort
 
   # Spent Hours By User patch
   Issue.include RedmineStudioPlugin::SpentHoursByUser::IssuePatch
