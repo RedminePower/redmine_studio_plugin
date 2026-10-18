@@ -6,6 +6,11 @@ a.icon-roadmap_display {
     background-repeat: no-repeat;
     padding-left: 20px;
 }
+/* Redmine 7.0 は選択中の項目を -6px ずらすため、自動クローズと同じく位置を合わせる（5.1/6.1 は html[dir] を出さないので対象外） */
+html[dir="ltr"] #admin-menu a.selected.icon-roadmap_display {
+    padding-left: 26px;
+    background-position: 6px 50%;
+}
 
 /* バージョン画面の一覧 */
 .rsp-roadmap-display { margin-top: 1em; }

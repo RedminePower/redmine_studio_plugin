@@ -2,8 +2,8 @@
 
 # ロードマップのバージョン画面で「関連するチケット」の代わりに表示する一覧の設定。
 # 上から順（position）に照合し、最初にプロジェクトパターンが当てはまった有効な設定を使う。
-# acts_as_positioned は Redmine 6 以降 ApplicationRecord にだけ組み込まれるため、ApplicationRecord を継承する
-class RoadmapDisplay < ApplicationRecord
+# acts_as_positioned は Redmine 6 以降 ApplicationRecord にだけ組み込まれる（5.x は ActiveRecord::Base で、ApplicationRecord が無い）
+class RoadmapDisplay < (Redmine::VERSION::MAJOR >= 6 ? ApplicationRecord : ActiveRecord::Base)
   STATUS_SCOPES = %w[all open closed].freeze
   DEFAULT_COLUMN_NAMES = %w[tracker id subject status assigned_to done_ratio updated_on].freeze
 
