@@ -58,12 +58,7 @@ Redmine 本体の POST /issues.json は notes をサポートせず、また 1 �
 
 ## 環境パラメータ
 
-| パラメータ | 値 |
-|-----------|-----|
-| Docker コンテナ | `redmine_6.1.1_dev` |
-| ポート | 3061 |
-| Redmine URL | http://localhost:3061 |
-| 管理者 | admin / password123 (`REDMINE_DOCKER.md` に準拠) |
+接続先（BaseUrl）と管理者の認証情報は実行環境から注入する（プレースホルダの契約は `test/README.md`）。HTTP 例の相対パスは BaseUrl に続けて実行する。
 
 ## テスト前提条件
 

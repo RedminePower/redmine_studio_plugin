@@ -8,10 +8,7 @@ Redmine 本体のプレビュー画面と同じ `textilizable` を使用し、�
 
 ## 環境パラメータ
 
-| パラメータ | 判定方法 | 本環境（redmine_6.1.1） |
-|-----------|----------|------------------------|
-| Container | TEST_SPEC.md のパスから自動判定 | `redmine_6.1.1` |
-| BaseUrl | `3000 + メジャー×10 + マイナー` | `http://localhost:3061` |
+以降の HTTP 例の `{BaseUrl}`・`{ApiKey}`（管理者）・`{UserApiKey}`（限定ユーザ）は実行環境から注入する（プレースホルダの契約は `test/README.md`）。
 
 ## 機能の内部実装
 

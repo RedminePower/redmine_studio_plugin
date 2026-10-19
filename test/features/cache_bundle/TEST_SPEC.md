@@ -1331,8 +1331,7 @@ PowerShell で各エンドポイントにリクエストを送信する。API �
 
 ### 共通
 
-- `{BaseUrl}` = `http://localhost:3061/redmine_61`
-- `{ApiKey}` = `4897d6e90c0af122a4f3b2652796b465f0c26278`（admin の API キー）
+- `{BaseUrl}`（接続先）・`{ApiKey}`（管理者の API キー）は実行環境から注入する（プレースホルダの契約は `test/README.md`）
 
 ---
 

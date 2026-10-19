@@ -83,7 +83,7 @@ puts "index_exists: #{File.exist?(index_view)}"
 
 ## 2. HTTP テスト
 
-`{BaseUrl}` は `http://localhost:3061/redmine_61`、`{Username}` / `{Password}` は Redmine 管理者アカウント（`admin` / `password123` など）。
+`{BaseUrl}`・`{Username}`・`{Password}`（Redmine 管理者）は実行環境から注入する（プレースホルダの契約は `test/README.md`）。
 
 ### [2-1] GET /issues_with_extras/:id.json で reply_count / children_count が返る
 

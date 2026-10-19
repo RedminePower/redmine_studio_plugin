@@ -446,12 +446,14 @@ puts "is_empty: #{fresh.children_tooltip.empty?}"
 
 ## 2. HTTP テスト
 
+HTTP 例の `{BaseUrl}`・`{Username}`・`{Password}`（管理者）は実行環境から注入する（プレースホルダの契約は `test/README.md`）。
+
 ### [2-1] チケット一覧で children_count カラムを指定して表示できる
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
@@ -462,8 +464,8 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues?set_filter=1' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'children_count'
 ```
@@ -477,8 +479,8 @@ $response.Content -match 'children_count'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:asc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:asc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match '<span class="children-count">0</span>'
 ```
@@ -492,8 +494,8 @@ $response.Content -match '<span class="children-count">0</span>'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'class="children-count"[^>]*>\d+</a>'
 ```
@@ -517,15 +519,15 @@ $response.Content -match 'parent_id.*set_filter=1|set_filter=1.*parent_id'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
 
 # 任意のプロジェクト identifier を1つ取得（最初のプロジェクト）
-$projIdResponse = Invoke-RestMethod -Uri 'http://localhost:3061/redmine_61/projects.json?limit=1' `
+$projIdResponse = Invoke-RestMethod -Uri '{BaseUrl}/projects.json?limit=1' `
   -Credential $cred -AllowUnencryptedAuthentication
 $projectId = $projIdResponse.projects[0].identifier
 
 # プロジェクトスコープのチケット一覧を取得
-$response = Invoke-WebRequest -Uri "http://localhost:3061/redmine_61/projects/$projectId/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc" `
+$response = Invoke-WebRequest -Uri "{BaseUrl}/projects/$projectId/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc" `
   -Credential $cred -AllowUnencryptedAuthentication
 
 # children-count クラスを持つ link の href を抽出
@@ -566,8 +568,8 @@ $response.Content -match 'title=".*#\d+'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
@@ -578,8 +580,8 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:asc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:asc' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 ```
@@ -590,8 +592,8 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues.csv?set_filter=1&c[]=id&c[]=subject&c[]=children_count' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues.csv?set_filter=1&c[]=id&c[]=subject&c[]=children_count' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.StatusCode
 # CSV に HTML タグが混入していないことも確認
@@ -609,8 +611,8 @@ $response.Content -notmatch '<span|<a '
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('admin', (ConvertTo-SecureString 'password123' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri 'http://localhost:3061/redmine_61/issues.csv?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues.csv?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
   -Credential $cred -AllowUnencryptedAuthentication
 
 $csv = $response.Content

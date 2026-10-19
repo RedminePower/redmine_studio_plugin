@@ -283,7 +283,7 @@ User.find_by_login('{Username}').pref.update(comments_sorting: 'asc')
 
 ### 前提条件
 
-- admin ユーザーが存在すること（ログイン: admin / パスワード: password123）
+- 管理者ユーザーが存在すること（ログイン情報は実行環境から注入。契約は `test/README.md`）
 - test-plugin プロジェクトが存在し、reply_button モジュールが有効であること
 
 ### 初期設定

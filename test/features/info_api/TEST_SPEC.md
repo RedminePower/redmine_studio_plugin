@@ -28,7 +28,7 @@ API は JSON と XML の両方をサポートする。
 ```json
 {
   "info": {
-    "redmine_version": "6.1.1.stable",
+    "redmine_version": "x.y.z.stable",
     "ruby_version": "3.4.8-p72 (2025-12-17) [x86_64-linux]",
     "rails_version": "7.2.3",
     "environment": "production",
