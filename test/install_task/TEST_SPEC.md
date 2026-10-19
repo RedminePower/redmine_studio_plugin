@@ -15,11 +15,7 @@ DB マイグレーションと cron 登録のテストは `features/auto_close/T
 
 ## 環境パラメータ
 
-以下のパラメータは TEST_SPEC.md のパスから自動判定する:
-
-| パラメータ | 判定方法 |
-|-----------|----------|
-| Container | パス内の `redmine_X.Y.Z` フォルダ名をそのまま使用 |
+`{Container}`・`{RedmineRoot}` は実行環境から注入する（プレースホルダの契約は `test/README.md`）。
 
 ## タスクの内部実装
 
@@ -81,7 +77,7 @@ Rake タスクは `reenable` / `invoke` で再実行可能なため、コンテ�
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 
 # 統合済みプラグインリストを config/integrated_plugins.yml から取得
@@ -109,7 +105,7 @@ foreach ($plugin in $integratedPlugins) {
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 
 # 統合済みプラグインリストを config/integrated_plugins.yml から取得
@@ -136,7 +132,7 @@ foreach ($plugin in $integratedPlugins) {
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 
 # 統合済みプラグインリストを config/integrated_plugins.yml から取得
@@ -157,7 +153,7 @@ foreach ($plugin in $integratedPlugins) {
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 
 # 統合済みプラグインリストを config/integrated_plugins.yml から取得

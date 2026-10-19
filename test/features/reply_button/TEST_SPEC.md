@@ -26,7 +26,7 @@ Reply Button 機能のテスト仕様。この文書から runner_test.rb, http_
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 $backupDir = "$redmineRoot\test_backup"
 
@@ -77,7 +77,7 @@ foreach ($plugin in $conflictingPlugins) {
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 $backupDir = "$redmineRoot\test_backup"
 

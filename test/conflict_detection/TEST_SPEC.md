@@ -28,7 +28,7 @@ redmine_studio_plugin が統合する各機能と、元となるプラグイン�
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 
 # 競合プラグインリストを config/integrated_plugins.yml から取得
@@ -59,7 +59,7 @@ foreach ($plugin in $conflictingPlugins) {
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 
 # 競合プラグインリストを config/integrated_plugins.yml から取得
@@ -96,7 +96,7 @@ foreach ($plugin in $conflictingPlugins) {
 
 **Windows PowerShell で実行:**
 ```powershell
-$redmineRoot = "C:\Docker\redmine_X.Y.Z"  # TEST_SPEC.md のパスから判定
+$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
 $pluginsDir = "$redmineRoot\plugins"
 
 # 競合プラグインリストを config/integrated_plugins.yml から取得

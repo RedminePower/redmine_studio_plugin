@@ -402,7 +402,7 @@ Authorization: Basic (bulkwrite_viewer)  ← Reporter ロール、add_issues な
 
 #### [2-C-3] 14 件 create（実運用想定）
 
-**リクエスト:** 14 件の create operations（東京エレクトロン報告と同シナリオ）
+**リクエスト:** 14 件の create operations（実運用で報告のあった件数と同じシナリオ）
 
 **期待結果:**
 - Status: 200

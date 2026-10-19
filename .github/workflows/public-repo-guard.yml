@@ -1,0 +1,44 @@
+# 公開リポジトリに書いてはいけない情報（テスト環境に固有の値など）の混入を検査する。
+# 検査内容は .github/scripts/public_repo_guard.py を参照。
+# 追加の禁止パターンは Secret `PUBLIC_REPO_GUARD_PATTERNS`（1 行 1 正規表現）に置く。
+#
+# 手元での確認: python .github/scripts/public_repo_guard.py files
+name: Public repo guard
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    env:
+      PUBLIC_REPO_GUARD_PATTERNS: ${{ secrets.PUBLIC_REPO_GUARD_PATTERNS }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Files
+        run: python3 .github/scripts/public_repo_guard.py files
+
+      - name: PR title and body
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" | python3 .github/scripts/public_repo_guard.py text "PR title/body"
+
+      - name: Commit messages
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if git cat-file -e "$BASE_SHA" 2>/dev/null; then range="$BASE_SHA..$HEAD_SHA"; else range="-1 $HEAD_SHA"; fi
+          git log --format='%B' $range | python3 .github/scripts/public_repo_guard.py text "commit messages"
