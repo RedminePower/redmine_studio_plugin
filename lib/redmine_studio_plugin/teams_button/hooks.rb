@@ -10,7 +10,7 @@ module RedmineStudioPlugin
 
       # Teamsボタンを表示する
       def view_issues_edit_notes_bottom(context = {})
-        return false unless context[:issue].project.module_enabled?(:teams_button)
+        return unless context[:issue].project.module_enabled?(:teams_button)
 
         context[:controller].send(:render_to_string, {
           :partial => "issues/teams_button/teams_button",
