@@ -1,0 +1,19 @@
+<% if roadmap_display.project_pattern.present? && roadmap_display.project_regexp.nil? %>
+  <p class="rd-error"><%= l(:rd_text_invalid_pattern) %></p>
+<% else %>
+  <% result = roadmap_display.project_matches %>
+  <% if result[:applied].empty? %>
+    <p class="rd-warning"><%= l(:rd_text_no_matched_projects) %></p>
+  <% else %>
+    <p class="rd-applied-count"><%= l(:rd_text_matched_count, :count => result[:applied].size) %></p>
+  <% end %>
+  <ul class="rd-project-list">
+    <% result[:applied].each do |project| %>
+      <li class="rd-applied"><%= project.name %> <code><%= project.identifier %></code></li>
+    <% end %>
+    <% result[:overridden].each do |project, winner| %>
+      <li class="rd-overridden"><%= project.name %> <code><%= project.identifier %></code>
+        <span><%= l(:rd_text_overridden_by, :name => winner.name) %></span></li>
+    <% end %>
+  </ul>
+<% end %>

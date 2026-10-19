@@ -1,0 +1,131 @@
+<%= error_messages_for 'roadmap_display' %>
+
+<div class="box tabular" id="roadmap-display-form">
+  <p>
+    <%= form.text_field :name, :size => 60, :required => true %>
+  </p>
+  <p>
+    <%= form.check_box :is_enabled %>
+  </p>
+  <p>
+    <%= form.text_field :project_pattern, :size => 40, :class => 'rd-pattern',
+          :label => l(:rd_field_project_pattern) %>
+    <em class="info"><%= l(:rd_text_project_pattern_info) %></em>
+  </p>
+  <div id="rd-matches" class="rd-matches">
+    <%= render :partial => 'roadmap_displays/matches', :locals => {:roadmap_display => @roadmap_display} %>
+  </div>
+
+  <%# Redmine 標準のカスタムクエリ編集画面と同じ並び（オプション → 並び替え → 項目）にする %>
+  <fieldset id="options"><legend><%= l(:label_options) %></legend>
+    <p id="group_by">
+      <label for="roadmap_display_group_by"><%= l(:field_group_by) %></label>
+      <%= select_tag 'roadmap_display[group_by]',
+            options_for_select([['', '']] + @query.groupable_columns.collect {|c| [c.caption, c.name.to_s]}, @roadmap_display.group_by),
+            :id => 'roadmap_display_group_by' %>
+    </p>
+
+    <p>
+      <label><%= l(:rd_field_status_scope) %></label>
+      <% RoadmapDisplay::STATUS_SCOPES.each do |scope| %>
+        <label class="inline">
+          <%= radio_button_tag 'roadmap_display[status_scope]', scope, @roadmap_display.status_scope == scope %>
+          <%= l("rd_status_scope_#{scope}") %>
+        </label>
+      <% end %>
+    </p>
+
+    <% unless @query.available_totalable_columns.empty? %>
+    <p class="totable_columns">
+      <label><%= l(:label_total_plural) %></label>
+      <%= hidden_field_tag 'roadmap_display[totalable_names][]', '', :id => nil %>
+      <%= available_totalable_columns_tags(@query, :name => 'roadmap_display[totalable_names]') %>
+    </p>
+    <% end %>
+
+    <p>
+      <label for="roadmap_display_keep_standard_list"><%= l(:rd_field_keep_standard_list) %></label>
+      <%= select_tag 'roadmap_display[keep_standard_list]',
+            options_for_select([[l(:rd_keep_standard_list_hide), '0'], [l(:rd_keep_standard_list_keep), '1']],
+                               @roadmap_display.keep_standard_list ? '1' : '0'),
+            :id => 'roadmap_display_keep_standard_list' %>
+    </p>
+  </fieldset>
+
+  <fieldset id="sort"><legend><%= l(:label_sort) %></legend>
+    <% 3.times do |i| %>
+      <%= content_tag(:span, "#{i + 1}:", :class => 'query_sort_criteria_count') %>
+      <%= select_tag("roadmap_display[sort_criteria][#{i}][]",
+            options_for_select([[]] + @query.available_columns.select(&:sortable?).collect {|column| [column.caption, column.name.to_s]},
+                               @query.sort_criteria_key(i)),
+            :id => "roadmap_display_sort_criteria_attribute_#{i}") %>
+      <%= select_tag("roadmap_display[sort_criteria][#{i}][]",
+            options_for_select([[], [l(:label_ascending), 'asc'], [l(:label_descending), 'desc']],
+                               @query.sort_criteria_order(i)),
+            :id => "roadmap_display_sort_criteria_direction_#{i}") %>
+      <br />
+    <% end %>
+  </fieldset>
+
+  <fieldset id="columns"><legend><%= l(:field_column_names) %></legend>
+    <div id="list-definition">
+      <div>
+        <%= render_query_columns_selection(@query, :name => 'roadmap_display[column_names]') %>
+      </div>
+    </div>
+  </fieldset>
+
+
+</div>
+
+<%# プレビューは .tabular の外に置く（.tabular の書式がチケット一覧の表に効いて崩れるため） %>
+<div class="box">
+  <fieldset class="rd-preview">
+    <legend><%= l(:label_preview) %></legend>
+    <p>
+      <label for="rd-preview-version"><%= l(:field_version) %></label>
+      <%= select_tag 'rd_preview_version_id',
+            grouped_options_for_select(
+              Version.visible.joins(:project).where(:status => %w[open locked])
+                .order("#{Project.table_name}.lft", "#{Version.table_name}.name").to_a
+                .group_by(&:project).map {|project, versions| [project.name, versions.map {|v| [v.name, v.id]}]}),
+            :id => 'rd-preview-version', :include_blank => true %>
+      <%= link_to l(:label_preview), '#', :id => 'rd-preview-button', :class => 'button' %>
+    </p>
+    <div id="rd-preview-result"></div>
+  </fieldset>
+</div>
+
+<%= javascript_tag do %>
+$(function() {
+  var timer = null;
+  var requestSeq = 0;
+  $('#roadmap_display_project_pattern').on('input', function() {
+    var value = $(this).val();
+    clearTimeout(timer);
+    timer = setTimeout(function() {
+      var seq = ++requestSeq;
+      $.ajax({
+        url: '<%= j matches_roadmap_displays_path %>',
+        data: { id: '<%= @roadmap_display.id %>', project_pattern: value },
+        <%# 入力中に応答の順序が入れ替わっても、最後の入力の結果だけを表示する %>
+        success: function(html) { if (seq === requestSeq) { $('#rd-matches').html(html); } }
+      });
+    }, 300);
+  });
+
+  $('#rd-preview-button').on('click', function(e) {
+    e.preventDefault();
+    var form = $(this).closest('form');
+    form.find('select[name="roadmap_display[column_names][]"] option:not(:disabled)').prop('selected', true);
+    var data = form.find(':input').not('[name=_method]').serialize();
+    data += '&id=<%= @roadmap_display.id %>&version_id=' + encodeURIComponent($('#rd-preview-version').val());
+    $.ajax({
+      url: '<%= j preview_roadmap_displays_path %>',
+      type: 'post',
+      data: data,
+      success: function(html) { $('#rd-preview-result').html(html); }
+    });
+  });
+});
+<% end %>

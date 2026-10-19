@@ -1,0 +1,62 @@
+<div class="contextual">
+  <%= link_to (respond_to?(:sprite_icon) ? sprite_icon('add', l(:rd_label_new)) : l(:rd_label_new)),
+        new_roadmap_display_path, :class => 'icon icon-add' %>
+</div>
+
+<%= title l(:rd_label_roadmap_display) %>
+
+<% if @roadmap_displays.empty? %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% else %>
+<table class="list roadmap_displays">
+  <thead>
+    <tr>
+      <th><%= l(:field_name) %></th>
+      <th><%= l(:rd_field_project_pattern) %></th>
+      <th><%= l(:rd_field_matched_projects) %></th>
+      <th><%= l(:field_is_enabled) %></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+  <% @roadmap_displays.each do |display| %>
+    <tr class="<%= 'disable' unless display.is_enabled %>">
+      <td class="name"><%= link_to display.name, edit_roadmap_display_path(display) %></td>
+      <td class="project_pattern">
+        <% if display.project_pattern.present? %>
+          <code><%= display.project_pattern %></code>
+        <% else %>
+          <span class="rd-muted"><%= l(:rd_text_all_projects) %></span>
+        <% end %>
+      </td>
+      <td class="matched_projects">
+        <% if display.is_enabled %>
+          <% applied = display.project_matches[:applied] %>
+          <% if applied.empty? %>
+            <span class="rd-warning"><%= l(:rd_text_no_matched_projects) %></span>
+          <% else %>
+            <%= applied.size %>: <%= applied.first(3).map(&:name).join(', ') %><%= ', …' if applied.size > 3 %>
+          <% end %>
+        <% else %>
+          <span class="rd-muted">-</span>
+        <% end %>
+      </td>
+      <td class="is_enabled"><%= checked_image display.is_enabled %></td>
+      <td class="buttons">
+        <%= reorder_handle(display) %>
+        <%# sprite_icon は Redmine 6.0 以降のみ %>
+        <%= link_to (respond_to?(:sprite_icon) ? sprite_icon('copy', l(:button_copy)) : l(:button_copy)),
+              new_roadmap_display_path(:copy_from => display.id), :class => 'icon icon-copy' %>
+        <%= delete_link roadmap_display_path(display) %>
+      </td>
+    </tr>
+  <% end %>
+  </tbody>
+</table>
+<p class="rd-help"><%= l(:rd_text_order_help) %></p>
+<% end %>
+
+<%= javascript_tag do %>
+  $(function() { $("table.roadmap_displays tbody").positionedItems(); });
+<% end %>
+

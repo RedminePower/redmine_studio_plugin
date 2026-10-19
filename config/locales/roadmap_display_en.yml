@@ -1,0 +1,27 @@
+en:
+  rd_label_roadmap_display: "Roadmap display"
+  rd_label_new: "New pattern"
+  rd_field_project_pattern: "Project pattern"
+  rd_field_matched_projects: "Matched projects"
+  rd_field_status_scope: "Issues"
+  rd_field_keep_standard_list: "Standard list"
+  rd_status_scope_all: "All"
+  rd_status_scope_open: "Open only"
+  rd_status_scope_closed: "Closed only"
+  rd_keep_standard_list_hide: "Hide"
+  rd_keep_standard_list_keep: "Keep below"
+  rd_text_all_projects: "(all)"
+  rd_text_project_pattern_info: "Regular expression matched against the project identifier. Leave blank to apply to all projects."
+  rd_text_order_help: "Patterns are checked from the top, and the first match is used. Projects that match no pattern keep the standard Redmine display."
+  rd_text_invalid_pattern: "The regular expression is invalid."
+  rd_text_no_matched_projects: "No project uses this pattern."
+  rd_text_matched_count: "Used by %{count} project(s)"
+  rd_text_overridden_by: "(not used: \"%{name}\" above takes precedence)"
+  rd_text_select_version: "Select a version."
+  rd_text_copy_of: "Copy of %{name}"
+  activerecord:
+    attributes:
+      roadmap_display:
+        name: "Name"
+        is_enabled: "Enabled"
+        project_pattern: "Project pattern"

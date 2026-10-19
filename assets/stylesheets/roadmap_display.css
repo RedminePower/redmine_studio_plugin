@@ -1,0 +1,46 @@
+/* 管理メニューのアイコン（Redmine 7.0 で本体のラスター画像が無くなっても表示されるよう SVG を同梱） */
+#admin-menu a.icon-roadmap_display,
+a.icon-roadmap_display {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23555' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 6h16'/><path d='M4 12h10'/><path d='M4 18h6'/><circle cx='19' cy='17' r='3'/></svg>");
+    background-position: 0 50%;
+    background-repeat: no-repeat;
+    padding-left: 20px;
+}
+/* Redmine 7.0 は選択中の項目を -6px ずらすため、自動クローズと同じく位置を合わせる（5.1/6.1 は html[dir] を出さないので対象外） */
+html[dir="ltr"] #admin-menu a.selected.icon-roadmap_display {
+    padding-left: 26px;
+    background-position: 6px 50%;
+}
+
+/* バージョン画面の一覧 */
+.rsp-roadmap-display { margin-top: 1em; }
+.rsp-roadmap-display-caption { font-weight: bold; text-align: left; margin: 0 0 4px; }
+.rsp-roadmap-tracker-filter ul { list-style: none; margin: 0; padding: 0 0 0 4px; }
+.rsp-roadmap-tracker-filter li { padding: 2px 0; }
+/* 標準のロードマップと同じく、終了したチケットに取り消し線を引く */
+.rsp-roadmap-display tr.issue.closed td.subject a,
+.rsp-roadmap-display tr.issue.closed td.id a {
+    color: #999;
+    text-decoration: line-through;
+}
+.rsp-roadmap-display td.assigned_to { white-space: nowrap; }
+.rsp-roadmap-display td.assigned_to img.gravatar,
+.rsp-roadmap-display td.assigned_to .avatar { vertical-align: middle; margin-right: 2px; }
+
+/* 管理画面 */
+.rd-muted { color: #999; }
+.rd-help { color: #666; font-size: 0.9em; }
+.rd-matches { margin: -4px 0 8px 180px; padding: 6px 10px; border: 1px solid #ddd; background: #fff; max-height: 220px; overflow-y: auto; }
+.rd-matches p { margin: 0 0 4px; padding: 0; }
+.rd-project-list { margin: 0; padding-left: 1.2em; }
+.rd-project-list li.rd-overridden { color: #999; }
+.rd-project-list li.rd-overridden span { color: #b26500; }
+.rd-error { color: #c00; }
+.rd-warning { color: #b26500; }
+.rd-applied-count { color: #2c7a2c; }
+#rd-preview-result { margin-top: 8px; }
+/* Redmine 5.x には #list-definition の並べ方が無いため、6.x と同じ見た目にそろえる */
+#roadmap-display-form #list-definition > div { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; margin: 6px 0; }
+#roadmap-display-form #list-definition .buttons button { width: 35px; display: block; }
+/* .tabular の項目名の寄せ方が、列選択の見出しに効かないようにする */
+#roadmap-display-form #list-definition label { float: none; display: block; width: auto; margin-left: 0; text-align: left; font-weight: normal; }
