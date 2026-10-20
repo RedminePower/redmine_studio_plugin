@@ -1589,7 +1589,7 @@ try {
 
 **確認方法:**
 ```powershell
-$nonAdminKey = '{NonAdminApiKey}'  # admin 以外のユーザの API キー
+$nonAdminKey = '{UserApiKey}'  # admin 以外のユーザの API キー
 try {
     Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'=$nonAdminKey}
 } catch {
@@ -1625,12 +1625,12 @@ $response.StatusCode
 `groups` は要求者（admin）の権限で全件返る（`target_user` にスコープしない）。自分（`user_id=1`）と他ユーザで
 件数が一致することで、スコープ基準が `User.current` であることを固定する。
 
-**前提条件:** admin 以外のユーザ（`{NonAdminUserId}`）が存在すること。
+**前提条件:** admin 以外のユーザ（`{UserId}`）が存在すること。
 
 **確認方法:**
 ```powershell
 $self  = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}).cache_bundle
-$other = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id={NonAdminUserId}' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}).cache_bundle
+$other = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id={UserId}' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}).cache_bundle
 ($self.users.Count -eq $other.users.Count) -and `
 ($self.custom_fields.Count -eq $other.custom_fields.Count) -and `
 ($self.groups.Count -eq $other.groups.Count)

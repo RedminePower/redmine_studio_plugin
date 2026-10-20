@@ -43,10 +43,30 @@
 | `{Username}` / `{Password}` | 管理者アカウントのログイン / パスワード |
 | `{ApiKey}` | 管理者の API キー |
 | `{UserApiKey}` | 非管理（限定権限）ユーザの API キー（一部のテストで使用） |
-
-注入例: ローカル Docker 環境なら、バージョンごとのポート・サブディレクトリ・コンテナ名・API キーの対応をまとめた各自の環境設定からこれらの値を与える。
+| `{UserId}` | 上記の非管理ユーザのユーザ ID（一部のテストで使用） |
+| `{Container}` | Redmine が動いている Docker コンテナ名（Runner テスト・再起動で使用） |
+| `{RedmineRoot}` | ホスト側の Redmine フォルダ（`plugins` を含むフォルダ。プラグインの無効化・有効化で使用） |
 
 なお、テスト内で新規作成するユーザのパスワードなど、テスト自身が用意する値は各 TEST_SPEC に記載する（環境からの注入対象ではない）。
+
+### 具体値の置き場所
+
+具体値は `test/env.local.json` に書く。このファイルは `.gitignore` 済みでリポジトリには入らない。キーはプレースホルダ名と同じで、メジャーバージョンごとに値を持つ（5.x・7.x も同じ形で並べる）。
+
+```json
+{
+  "6.x": {
+    "BaseUrl": "...", "Username": "...", "Password": "...", "ApiKey": "...",
+    "UserApiKey": "...", "UserId": "...", "Container": "...", "RedmineRoot": "..."
+  }
+}
+```
+
+テストを実行するときは `test/env.local.json` から対象バージョンの値を読み、TEST_SPEC のプレースホルダに当てはめる。`env.local.json` が無い場合や値が足りない場合は、TEST_SPEC やこの README に具体値を書き足すのではなく、実行する人に値を確認する。
+
+### 公開リポジトリとしての注意
+
+このリポジトリは公開されている。接続先・ポート・サブディレクトリ・コンテナ名・パッチ版・認証情報・API キーなど環境固有の値は、ファイル・コミットメッセージ・PR のタイトル/本文のどこにも書かない。PR とプッシュの際に自動チェック（`.github/workflows/public-repo-guard.yml`）が検査する。
 
 ## 共通の事前条件
 
@@ -60,7 +80,7 @@ features 配下のテストを実行する前に、統合済みプラグイン�
 ### テスト前: 無効化
 
 ```powershell
-$pluginsDir = "C:\Docker\redmine_X.Y.Z\plugins"  # 環境に合わせて変更
+$pluginsDir = "{RedmineRoot}\plugins"  # 実行環境から注入
 $configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
 $configContent = Get-Content $configPath -Raw
 $integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
@@ -87,7 +107,7 @@ foreach ($plugin in $integratedPlugins) {
 ### テスト後: 有効化
 
 ```powershell
-$pluginsDir = "C:\Docker\redmine_X.Y.Z\plugins"  # 環境に合わせて変更
+$pluginsDir = "{RedmineRoot}\plugins"  # 実行環境から注入
 $configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
 $configContent = Get-Content $configPath -Raw
 $integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }

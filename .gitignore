@@ -1,1 +1,4 @@
 *.rest
+
+# テスト実行環境の値（test/README.md 参照）
+test/env.local.json
