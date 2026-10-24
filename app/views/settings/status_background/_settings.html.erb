@@ -1,0 +1,84 @@
+<% builder = RedmineStudioPlugin::StatusBackground::StyleBuilder %>
+<fieldset class="box" id="status_background_settings">
+  <legend><%= l(:label_status_background) %></legend>
+  <p>
+    <label for="status_background_enabled"><%= l(:status_background_label_enabled) %></label>
+    <%= hidden_field_tag 'settings[status_background_enabled]', 'false', id: nil %>
+    <%= check_box_tag 'settings[status_background_enabled]', 'true', builder.enabled?(@settings), id: 'status_background_enabled' %><br/>
+    <em><%= l(:status_background_label_enabled_hint) %></em>
+  </p>
+
+  <table class="list status-background-colors">
+    <thead>
+      <tr>
+        <th><%= l(:field_status) %></th>
+        <th><%= l(:field_is_closed) %></th>
+        <th><%= l(:status_background_label_color) %></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% IssueStatus.sorted.each do |status| %>
+        <% choice = builder.choice_for(@settings, status) %>
+        <tr>
+          <td class="name"><%= status.name %></td>
+          <td><%= checked_image status.is_closed? %></td>
+          <td class="color">
+            <span class="status-background-swatch"></span>
+            <%= select_tag "settings[status_background_colors][#{status.id}]",
+                  options_for_select(
+                    [[l(:status_background_color_none), builder::NONE]] +
+                      builder::PRESET_COLORS.map { |key, color| [l("status_background_color_#{key}"), color] } +
+                      [[l(:status_background_color_custom), builder::CUSTOM]],
+                    choice
+                  ),
+                  class: 'status-background-choice' %>
+            <%= color_field_tag "settings[status_background_custom_colors][#{status.id}]",
+                  builder.custom_color_for(@settings, status),
+                  class: 'status-background-custom' %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+  <p><em><%= l(:status_background_label_default_hint) %></em></p>
+</fieldset>
+
+<style>
+  #status_background_settings table.status-background-colors { width: auto; margin: 0 0 6px 180px; }
+  #status_background_settings table.status-background-colors td { padding: 3px 12px; }
+  #status_background_settings td.color { text-align: left; white-space: nowrap; }
+  #status_background_settings .status-background-swatch {
+    display: inline-block; width: 18px; height: 18px; margin-right: 6px;
+    vertical-align: middle; border: 1px solid #bbb;
+  }
+  #status_background_settings .status-background-swatch.none {
+    background: repeating-linear-gradient(45deg, #fff, #fff 3px, #eee 3px, #eee 6px);
+  }
+  #status_background_settings .status-background-choice { min-width: 130px; }
+  #status_background_settings .status-background-custom { vertical-align: middle; }
+</style>
+
+<script>
+$(function() {
+  var $settings = $('#status_background_settings');
+
+  function refresh($cell) {
+    var choice = $cell.find('.status-background-choice').val();
+    var $custom = $cell.find('.status-background-custom');
+    var color = choice === 'custom' ? $custom.val() : choice;
+    $custom.toggle(choice === 'custom');
+    $cell.find('.status-background-swatch')
+      .toggleClass('none', !color)
+      .css('background-color', color || '');
+  }
+
+  $settings.find('td.color').each(function() { refresh($(this)); });
+  $settings.on('change input', '.status-background-choice, .status-background-custom', function() {
+    refresh($(this).closest('td.color'));
+  });
+  // 無効にしても選んだ色は保存したいので、disabled にせず薄く見せるだけにする
+  $('#status_background_enabled').change(function() {
+    $settings.find('table.status-background-colors').css('opacity', this.checked ? '' : '0.5');
+  }).change();
+});
+</script>

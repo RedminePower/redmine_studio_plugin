@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+ja:
+  label_status_background: "ステータスによるチケットの背景色"
+  status_background_label_enabled: "背景色を変える"
+  status_background_label_enabled_hint: "チケットの詳細画面で、説明などの枠の背景を、ステータスに合わせた色にします。"
+  status_background_label_color: "背景色"
+  status_background_label_default_hint: "何も設定しなければ、終了扱いのステータスだけ薄いグレーになります。"
+  status_background_color_none: "(変えない)"
+  status_background_color_gray: "薄いグレー"
+  status_background_color_blue: "薄い青"
+  status_background_color_green: "薄い緑"
+  status_background_color_red: "薄い赤"
+  status_background_color_custom: "色を指定"

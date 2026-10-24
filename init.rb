@@ -77,13 +77,16 @@ else
          html: { class: 'icon icon-roadmap_display' },
          if: proc { User.current.admin? }
 
-    # Subtask List Accordion settings
+    # Plugin settings (Status Background / Subtask List Accordion)
     settings default: {
+      'status_background_enabled' => true,
+      'status_background_colors' => {},
+      'status_background_custom_colors' => {},
       'subtask_list_accordion_enable_server_scripting_mode' => true,
       'subtask_list_accordion_expand_all' => false,
       'subtask_list_accordion_collapsed_trackers' => '',
       'subtask_list_accordion_collapsed_tracker_ids' => []
-    }, partial: 'settings/subtask_list_accordion/settings'
+    }, partial: 'settings/redmine_studio_plugin'
   end
 
   # Load hooks only when no conflicts
@@ -99,6 +102,10 @@ else
   # Load Date Independent
   require_relative 'lib/redmine_studio_plugin/date_independent/hooks'
   require_relative 'lib/redmine_studio_plugin/date_independent/issue_patch'
+
+  # Load Status Background
+  require_relative 'lib/redmine_studio_plugin/status_background/style_builder'
+  require_relative 'lib/redmine_studio_plugin/status_background/hooks'
 
   # Load Roadmap Display
   require_relative 'lib/redmine_studio_plugin/roadmap_display/hooks'
