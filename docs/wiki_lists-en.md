@@ -166,6 +166,8 @@ Displays a list of issues matching specified conditions. You can use custom quer
 | `-w=keyword` | Search by subject and description |
 | `-f:field=value` | Specify filter condition (use `\|` to separate multiple values) |
 | `-n=count` | Limit display count (default: 100, max: 1000) |
+| `-o=column[:desc]` | Specify sort order (use `\|` to separate multiple columns, max 3 columns) |
+| `-g=column` | Display issues in groups |
 | `-t` | Display subject as plain text (default is subject attribute) |
 | `-t=attribute` | Display specified attribute as plain text |
 | `-l` | Display subject as link (default is subject attribute) |
@@ -233,6 +235,25 @@ Arguments other than options are interpreted as column names.
 
 **Custom Fields:** Specify using `cf_number` format
 
+### Sort Order (-o Option)
+
+You can specify the sort order using the `-o=column[:desc]|column[:desc]...` format. It is written the same way as the `sort` parameter of the Redmine issue list, but since `,` separates macro arguments, use `|` to separate columns.
+
+- Add `:desc` for descending order; omit it or use `:asc` for ascending order
+- Up to 3 columns can be specified (same as the Redmine issue list)
+- If not specified, issues are sorted by issue number, newest first (or by the custom query's sort order when a custom query is used)
+- When specified together with a custom query (`-i` / `-q`), `-o` takes precedence
+- Specifying a column that cannot be sorted results in an error showing the list of available columns
+
+### Grouping (-g Option)
+
+You can use the `-g=column` format to display issues in groups with headings and counts, just like the "Group results by" setting of the Redmine issue list (e.g., `-g=assigned_to`, `-g=cf_12`).
+
+- Issues are ordered by group, and within each group by the `-o` sort order
+- When specified together with a custom query (`-i` / `-q`), `-g` takes precedence
+- Specifying a column that cannot be grouped results in an error showing the list of available columns
+- Ignored with `-c` (count only) and `-l` (display as links)
+
 ### Usage Examples
 
 - Display all issues in the current project
@@ -290,11 +311,23 @@ Arguments other than options are interpreted as column names.
   {{ref_issues(-s=bug)}}
   ```
 
+- Display issues by priority (highest first), then by due date (earliest first)
+  ```
+  {{ref_issues(-p, -o=priority:desc|due_date)}}
+  ```
+
+- Display issues grouped by assignee, sorted by due date
+  ```
+  {{ref_issues(-p, -g=assigned_to, -o=due_date)}}
+  ```
+
 ### Display Count Limit
 
 For server protection, a maximum of 100 issues are displayed when the `-n` option is not specified. A warning message is displayed if there are more than 100 issues.
 
 You can specify up to 1000 issues using the `-n` option.
+
+When used together with `-o`, the display count is counted from the top of the sorted order. Also, the count shown in each `-g` group heading is the count for the whole group, so when the display count is limited, it may not match the number of rows displayed.
 
 ## Notes
 

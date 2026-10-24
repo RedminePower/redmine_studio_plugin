@@ -143,7 +143,7 @@ Provides macros to display issue and page lists on Wiki pages.
 
 - `{{wiki_list}}` - Displays a list of wiki pages in table format
 - `{{issue_name_link}}` - Creates a link from issue subject
-- `{{ref_issues}}` - Displays a list of issues matching conditions
+- `{{ref_issues}}` - Displays a list of issues matching conditions (sort order and grouping can also be specified)
 
 For details, see [docs/wiki_lists-en.md](docs/wiki_lists-en.md).
 

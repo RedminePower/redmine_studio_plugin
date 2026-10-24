@@ -35,7 +35,9 @@ usage: {{ref_issues([option].., [column]..)}}<br>
 -l[=column] : display linked text<br>
 -c : count issues<br>
 -0 : no display if no issues<br>
--n=NUMBER : display limit (default: 100, max: 1000)
+-n=NUMBER : display limit (default: 100, max: 1000)<br>
+-o=COLUMN[:desc][|COLUMN[:desc]...] : sort order (max 3 columns)<br>
+-g=COLUMN : group by
 <br>[columns]<br> {
 TEXT
 
@@ -64,8 +66,36 @@ TEXT
             extend QueriesHelper
             extend IssuesHelper
 
+            # 使える列の一覧を 5 個ずつ改行してエラーに添える
+            name_lines = lambda do |names|
+              names.each_slice(5).collect {|slice| slice.join(', ')}.join(',<br>')
+            end
+
+            # -o はカスタムクエリ（-i / -q）の並び順より優先する
+            if parser.sort_criteria
+              sortable = @query.sortable_columns.select {|_name, sql| sql}.keys
+              parser.sort_criteria.each do |name, _order|
+                unless sortable.include?(name)
+                  raise "- can not sort by '#{name}'<br><br>[SORT]<br>#{name_lines.call(sortable)}<br>".html_safe
+                end
+              end
+              default_sort = parser.sort_criteria
+            else
+              default_sort = @query.sort_criteria.empty? ? [['id', 'desc']] : @query.sort_criteria
+            end
+
+            # -g はカスタムクエリのグループ条件より優先する。
+            # 件数のみ（-c）・リンクのみ（-l）は見出しを出せないため使わない
+            if parser.group_by && !parser.count_flag && !parser.only_link
+              groupable = @query.groupable_columns.collect {|column| column.name.to_s}
+              unless groupable.include?(parser.group_by)
+                raise "- can not group by '#{parser.group_by}'<br><br>[GROUP]<br>#{name_lines.call(groupable)}<br>".html_safe
+              end
+              @query.group_by = parser.group_by
+            end
+
             sort_clear
-            sort_init(@query.sort_criteria.empty? ? [['id', 'desc']] : @query.sort_criteria)
+            sort_init(default_sort)
             sort_update(@query.sortable_columns)
             #@issue_count_by_group = @query.issue_count_by_group
 

@@ -145,7 +145,7 @@ Wikiページにチケットやページの一覧を表示するマクロを提�
 
 - `{{wiki_list}}` - Wikiページの一覧を表形式で表示
 - `{{issue_name_link}}` - チケットの件名からリンクを生成
-- `{{ref_issues}}` - 条件に合うチケットの一覧を表示
+- `{{ref_issues}}` - 条件に合うチケットの一覧を表示（並び順・グループも指定可能）
 
 詳細は [docs/wiki_lists.md](docs/wiki_lists.md) をご覧ください。
 
