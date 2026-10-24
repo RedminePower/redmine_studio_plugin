@@ -16,6 +16,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Reply Count** - Displays assignee change count (reply count) in the issue list
 - **Children Count** - Displays the number of direct child issues in the issue list
 - **Roadmap Display** - Adds columns such as status and assignee, and grouping, to the roadmap's issue list
+- **Status Background** - Lets you color the issue page to match the issue's status (closed issues in light gray)
 - **API** - APIs used internally by Redmine Studio
   - **Plugin API** - Retrieves plugin information
   - **Info API** - Retrieves Redmine environment information
@@ -199,6 +200,17 @@ Replaces the "Related issues" list on the roadmap's version page with a table in
 - Filter by tracker instantly on the version page. The roadmap page (all versions) is also supported
 
 For details, see [docs/roadmap_display-en.md](docs/roadmap_display-en.md).
+
+## Status Background
+
+Colors the box with the description and other fields on the issue page to match the issue's status. By default, closed issues stay the same yellow as open ones; when this feature is turned on, issues in a closed status (such as Closed or Rejected) are shown in light gray, so you can see at a glance that they are finished.
+
+- Off by default. Installing the plugin does not change the look
+- Turn it on in Administration → Plugins → Redmine Studio plugin. Without choosing colors, only closed statuses are shown in light gray
+- Colors can also be chosen per status
+- The text color does not change, so comments on closed issues stay easy to read
+
+For details, see [docs/status_background-en.md](docs/status_background-en.md).
 
 ## API
 

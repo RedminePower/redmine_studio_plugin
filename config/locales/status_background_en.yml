@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+en:
+  label_status_background: "Issue background by status"
+  status_background_label_enabled: "Change the background color"
+  status_background_label_enabled_hint: "On the issue page, the box with the description and other fields is colored to match the issue's status."
+  status_background_label_color: "Background color"
+  status_background_label_default_hint: "Off by default. When turned on without choosing colors, only closed statuses are shown in light gray."
+  status_background_color_none: "(Do not change)"
+  status_background_color_gray: "Light gray"
+  status_background_color_blue: "Light blue"
+  status_background_color_green: "Light green"
+  status_background_color_red: "Light red"
+  status_background_color_custom: "Custom color"
