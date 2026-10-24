@@ -205,6 +205,10 @@ For details, see [docs/roadmap_display-en.md](docs/roadmap_display-en.md).
 
 Colors the box with the description and other fields on the issue page to match the issue's status. By default, closed issues stay the same yellow as open ones; when this feature is turned on, issues in a closed status (such as Closed or Rejected) are shown in light gray, so you can see at a glance that they are finished.
 
+<img src="docs/images/status_background_01.png" width="800">
+
+Left: an open issue (the usual yellow). Right: a closed issue (light gray).
+
 - Off by default. Installing the plugin does not change the look
 - Turn it on in Administration → Plugins → Redmine Studio plugin. Without choosing colors, only closed statuses are shown in light gray
 - Colors can also be chosen per status
