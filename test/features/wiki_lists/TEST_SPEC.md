@@ -493,6 +493,68 @@ puts "[1-7] PASS"
 
 **期待結果:** 過去7日以内に作成されたチケット
 
+### 並び順・グループ
+
+#### [4-R-36] -o オプション（昇順）
+
+**マクロ:** `{{ref_issues(-p, -o=subject, subject)}}`
+
+**期待結果:** IssueNameLinkTest、RefIssuesTest1、RefIssuesTest2、RefIssuesTest3 の順に表示
+
+#### [4-R-37] -o オプション（降順）
+
+**マクロ:** `{{ref_issues(-p, -o=subject:desc, subject)}}`
+
+**期待結果:** RefIssuesTest3、RefIssuesTest2、RefIssuesTest1、IssueNameLinkTest の順に表示
+
+#### [4-R-38] -o オプション（複数カラム）
+
+**マクロ:** `{{ref_issues(-p, -o=tracker|subject:desc, tracker, subject)}}`
+
+**期待結果:** トラッカーの順（管理画面のトラッカーの並び順）に並び、同じトラッカーの中は題名の降順
+
+#### [4-R-39] -g オプション
+
+**マクロ:** `{{ref_issues(-p, -g=tracker, -o=subject)}}`
+
+**期待結果:** トラッカーごとの見出しが表示される（バグ: 3件、機能: 1件）。各グループの中は題名の昇順
+
+#### [4-R-40] -g オプション（担当者）
+
+**マクロ:** `{{ref_issues(-p, -g=assigned_to)}}`
+
+**期待結果:** 担当者ごとの見出しが表示される（admin: 3件、Wiki List User: 1件）
+
+#### [4-R-41] -o・-g とカスタムクエリ
+
+**マクロ:** `{{ref_issues(-q=WikiListTestQuery, -o=subject:desc, -g=tracker)}}`
+
+**期待結果:** クエリの条件（新規のみ）で絞り込まれたまま、トラッカーごとの見出しで分かれ、各グループの中は題名の降順
+
+#### [4-R-42] -o と -n
+
+**マクロ:** `{{ref_issues(-p, -o=subject:desc, -n=2)}}`
+
+**期待結果:** RefIssuesTest3、RefIssuesTest2 の2件のみ表示（並べた順の上から2件）
+
+#### [4-R-43] -g と -n
+
+**マクロ:** `{{ref_issues(-p, -g=tracker, -o=subject, -n=2)}}`
+
+**期待結果:** 「バグ」の見出しと IssueNameLinkTest、RefIssuesTest1 の2行のみ表示。見出しの件数はグループ全体の 3
+
+#### [4-R-44] -g と -c
+
+**マクロ:** `{{ref_issues(-p, -g=tracker, -c)}}`
+
+**期待結果:** 件数（4）のみが数字で表示（-g は使われない）
+
+#### [4-R-45] -g と -l
+
+**マクロ:** `{{ref_issues(-p, -g=tracker, -l)}}`
+
+**期待結果:** 題名がリンクとして横並びで表示され、見出しは表示されない
+
 ### エラーケース
 
 #### [4-R-28] 存在しないクエリID
@@ -542,6 +604,42 @@ puts "[1-7] PASS"
 **マクロ:** `{{ref_issues(-f:tracker=存在しない)}}`
 
 **期待結果:** `can not resolve` エラー
+
+#### [4-R-46] 並べ替えできないカラム
+
+**マクロ:** `{{ref_issues(-p, -o=unknown)}}`
+
+**期待結果:** `can not sort by 'unknown'` エラー。`[SORT]` の後に使えるカラムの一覧が表示される
+
+#### [4-R-47] 不正な並び順の向き
+
+**マクロ:** `{{ref_issues(-p, -o=subject:up)}}`
+
+**期待結果:** `sort order must be 'asc' or 'desc'` エラー
+
+#### [4-R-48] 並び順のカラム数超過
+
+**マクロ:** `{{ref_issues(-p, -o=id|subject|tracker|status)}}`
+
+**期待結果:** `too many sort columns (max 3)` エラー
+
+#### [4-R-49] 並び順の指定なし
+
+**マクロ:** `{{ref_issues(-p, -o)}}`
+
+**期待結果:** `no sort order specified` エラー
+
+#### [4-R-50] グループにできないカラム
+
+**マクロ:** `{{ref_issues(-p, -g=subject)}}`
+
+**期待結果:** `can not group by 'subject'` エラー。`[GROUP]` の後に使えるカラムの一覧が表示される
+
+#### [4-R-51] グループの指定なし
+
+**マクロ:** `{{ref_issues(-p, -g)}}`
+
+**期待結果:** `no group column specified` エラー
 
 ---
 

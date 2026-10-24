@@ -7,10 +7,12 @@ module RedmineStudioPlugin
         EXTENDED_OPERATORS = ['=='].freeze
         DEFAULT_DISPLAY_LIMIT = 100
         MAX_DISPLAY_LIMIT = 1000
+        # Redmine の並び替え条件は先頭 3 列までしか使われない（Redmine::SortCriteria）
+        MAX_SORT_COLUMNS = 3
 
         attr_reader :search_words_s, :search_words_d, :search_words_w, :columns,
                     :custom_query_name, :custom_query_id, :additional_filter, :only_text, :only_link, :count_flag, :zero_flag,
-                    :display_limit, :display_limit_specified
+                    :display_limit, :display_limit_specified, :sort_criteria, :group_by
 
         def initialize(obj, args = nil, project = nil)
           parse_args(obj, args, project) if args
@@ -32,6 +34,8 @@ module RedmineStudioPlugin
           # サーバ保護のため -n オプション未指定なら上限 100 件
           @display_limit = DEFAULT_DISPLAY_LIMIT
           @display_limit_specified = false
+          @sort_criteria = nil
+          @group_by = nil
 
           args.each do |arg|
             arg.strip!
@@ -125,6 +129,18 @@ module RedmineStudioPlugin
                   @display_limit_specified = true
                 else
                   raise "- no display limit specified: #{arg}"
+                end
+              when 'o'
+                if sep && words.present?
+                  @sort_criteria = words_to_sort_criteria(words)
+                else
+                  raise "- no sort order specified: #{arg}"
+                end
+              when 'g'
+                if sep && words.present?
+                  @group_by = words
+                else
+                  raise "- no group column specified: #{arg}"
                 end
               else
                 raise "- unknown option:#{arg}"
@@ -286,6 +302,25 @@ module RedmineStudioPlugin
 
             return super(field, operator, value, db_table, db_field, is_custom_filter)
           end
+        end
+
+        # "priority:desc|due_date" -> [['priority', 'desc'], ['due_date', 'asc']]
+        # 列の区切りは「,」がマクロの引数の区切りのため「|」にする
+        def words_to_sort_criteria(words)
+          criteria = words.split('|').collect do |word|
+            name, order = word.split(':', 2).collect(&:strip)
+            raise "- no sort column specified: -o=#{words}" if name.blank?
+            order = order.blank? ? 'asc' : order.downcase
+            unless ['asc', 'desc'].include?(order)
+              raise "- sort order must be 'asc' or 'desc': -o=#{words}"
+            end
+            [name, order]
+          end
+
+          if criteria.size > MAX_SORT_COLUMNS
+            raise "- too many sort columns (max #{MAX_SORT_COLUMNS}): -o=#{words}"
+          end
+          criteria
         end
 
         def words_to_word_array(obj, words)
