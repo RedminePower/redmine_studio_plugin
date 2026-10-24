@@ -44,7 +44,8 @@
 </fieldset>
 
 <style>
-  #status_background_settings table.status-background-colors { width: auto; margin: 0 0 6px 180px; }
+  #status_background_settings table.status-background-colors { width: auto; margin: 0; }
+  #status_background_settings table.status-background-colors th,
   #status_background_settings table.status-background-colors td { padding: 3px 12px; }
   #status_background_settings td.color { text-align: left; white-space: nowrap; }
   #status_background_settings .status-background-swatch {
@@ -71,6 +72,14 @@ $(function() {
       .toggleClass('none', !color)
       .css('background-color', color || '');
   }
+
+  // 表を上下の説明文と同じ字下げにする（字下げはテーマや画面の幅で変わる）
+  function alignTable() {
+    $settings.find('table.status-background-colors')
+      .css('margin-left', $settings.find('p').first().css('padding-left'));
+  }
+  alignTable();
+  $(window).on('resize', alignTable);
 
   $settings.find('td.color').each(function() { refresh($(this)); });
   $settings.on('change input', '.status-background-choice, .status-background-custom', function() {
