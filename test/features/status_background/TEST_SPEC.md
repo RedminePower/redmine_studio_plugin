@@ -4,7 +4,7 @@
 
 redmine_studio_plugin の Status Background 機能のテスト仕様。
 
-チケットの詳細画面で、説明などの枠（`div.issue`）の背景を、ステータスに合わせた色にする機能をテストする。何も設定しなければ、終了扱いのステータスだけ薄いグレーになる。
+チケットの詳細画面で、説明などの枠（`div.issue`）の背景を、ステータスに合わせた色にする機能をテストする。入れただけでは何も変わらず（初期値は無効）、管理者が有効にすると、色を選んでいなければ終了扱いのステータスだけ薄いグレーになる。
 
 対象バージョン: 5.x / 6.x / 7.x
 
@@ -26,7 +26,7 @@ redmine_studio_plugin の Status Background 機能のテスト仕様。
 
 | 項目 | 設定キー | 値 |
 |------|----------|-----|
-| 背景色を変える | `status_background_enabled` | `'true'` / `'false'`。キーが無いとき（この機能より前に設定を保存した環境）は有効として扱う |
+| 背景色を変える | `status_background_enabled` | `'true'` / `'false'`。初期値は無効。キーが無いとき（この機能より前に設定を保存した環境）も無効として扱う |
 | ステータスごとの背景色 | `status_background_colors` | ステータス ID → `''`（変えない）/ 候補の色（`#f2f2f2` `#e8f1fb` `#e9f5e9` `#fbeaea`）/ `'custom'`。ID が無いときは、終了扱いなら `#f2f2f2`、それ以外は変えない |
 | 指定した色 | `status_background_custom_colors` | ステータス ID → `#rrggbb`。`'custom'` を選んだときだけ使う |
 
@@ -52,10 +52,19 @@ docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid
 docker restart {Container}
 ```
 
-### フェーズ 3: HTTP テスト・ブラウザテスト
+### フェーズ 3: ブラウザテスト（初期状態と有効化）
 
-- [2-1] 〜 [2-3] を実行する。終了扱いのステータスのチケットと、そうでないチケットを1件ずつ使う（無ければ作る）
-- [3-1] 〜 [3-4] をブラウザで確認する
+- [3-1] をブラウザで確認する。終了扱いのステータスのチケットと、そうでないチケットを1件ずつ使う（無ければ作る）
+- テストの前の「背景色を変える」の状態を控えておく
+
+### フェーズ 4: HTTP テスト
+
+- [3-1] で有効にした状態で、[2-1] 〜 [2-3] を実行する
+
+### フェーズ 5: ブラウザテスト（色の選択・無効化・再オープン）
+
+- [3-2] 〜 [3-4] をブラウザで確認する
+- 終わったら、「背景色を変える」と色の選択をテストの前の状態に戻す
 
 ---
 
@@ -82,31 +91,32 @@ puts Redmine::Hook.hook_listeners(:view_layouts_base_html_head).map(&:class).map
 
 ```ruby
 defaults = Redmine::Plugin.find(:redmine_studio_plugin).settings[:default]
-puts defaults['status_background_enabled'] == true
+puts defaults['status_background_enabled'] == false
 puts defaults['status_background_colors'] == {}
 puts defaults['status_background_custom_colors'] == {}
 ```
 
 **期待結果:** すべて `true`
 
-### [1-3] 何も設定しないと、終了扱いだけ薄いグレー
+### [1-3] 有効にして色を選んでいないと、終了扱いだけ薄いグレー
 
 ```ruby
-puts B.css({ 'status_background_enabled' => true }, statuses)
+puts B.css({ 'status_background_enabled' => 'true' }, statuses)
 ```
 
 **期待結果:** `div.issue.details.status-902 { background-color: #f2f2f2; border-color: #d5d5d5; }` の1行だけ（status-901 は出ない）
 
-### [1-4] 設定の項目が無い環境でも有効になる
+### [1-4] 初期値と、設定の項目が無い環境では無効
 
-この機能より前に設定を保存した環境では、`status_background_enabled` のキーが無い。
+この機能より前に設定を保存した環境では、`status_background_enabled` のキーが無い。入れただけ・上げただけで全員の画面が変わらないよう、どちらも無効にする。
 
 ```ruby
+puts B.enabled?({ 'status_background_enabled' => false })
 puts B.enabled?({ 'subtask_list_accordion_expand_all' => false })
-puts B.css({ 'subtask_list_accordion_expand_all' => false }, statuses).include?('status-902')
+puts B.css({ 'subtask_list_accordion_expand_all' => false }, statuses).empty?
 ```
 
-**期待結果:** すべて `true`
+**期待結果:** `false`、`false`、`true`
 
 ### [1-5] 無効にすると CSS を出さない
 
@@ -199,11 +209,17 @@ $html -match 'id="sla_expand_all_checkbox"'
 
 ## 3. ブラウザテスト
 
-### [3-1] 入れただけで、終了したチケットが薄いグレーになる
+### [3-1] 入れただけでは変わらず、有効にすると終了したチケットが薄いグレーになる
 
-設定を一度も変えていない状態で、終了扱いのチケットと、そうでないチケットの詳細画面を開く。
+1. 背景色の設定を一度も保存していない状態で、終了扱いのチケットの詳細画面を開く
+2. 設定画面を開く
+3. 「背景色を変える」にチェックを入れて「適用」を押す
+4. 終了扱いのチケットと、そうでないチケットの詳細画面を開く
 
-**期待結果:** 終了扱いのチケットは枠の背景が薄いグレー・枠線が少し濃いグレー。そうでないチケットは元の色のまま。文字の色は変わらない
+**期待結果:**
+- 1: 元の色のまま
+- 2: 「背景色を変える」にチェックが入っておらず、色の表が薄く表示されている。終了扱いのステータスは「薄いグレー」、それ以外は「(変えない)」が選ばれている
+- 4: 終了扱いのチケットは枠の背景が薄いグレー・枠線が少し濃いグレー。そうでないチケットは元の色のまま。文字の色は変わらない
 
 ### [3-2] 設定画面で色を選ぶ
 
@@ -227,4 +243,4 @@ $html -match 'id="sla_expand_all_checkbox"'
 
 終了扱いのチケットを、終了扱いでないステータスに戻す。
 
-**期待結果:** 詳細画面の背景が、戻したステータスの色（何も設定していなければ元の色）になる
+**期待結果:** 詳細画面の背景が、戻したステータスの色（色を選んでいなければ元の色）になる

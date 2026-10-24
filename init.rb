@@ -79,7 +79,7 @@ else
 
     # Plugin settings (Status Background / Subtask List Accordion)
     settings default: {
-      'status_background_enabled' => true,
+      'status_background_enabled' => false,
       'status_background_colors' => {},
       'status_background_custom_colors' => {},
       'subtask_list_accordion_enable_server_scripting_mode' => true,

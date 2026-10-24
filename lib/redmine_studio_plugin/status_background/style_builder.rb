@@ -19,13 +19,13 @@ module RedmineStudioPlugin
 
       module_function
 
-      # 項目が無い（この機能より前に設定を保存した）ときも有効として扱う
+      # 入れただけで全員の画面が変わらないよう、管理者が有効にするまでは使わない
+      # （この機能より前に設定を保存していて項目が無いときも無効）
       def enabled?(settings)
-        value = settings['status_background_enabled']
-        value.nil? || value.to_s == 'true'
+        settings['status_background_enabled'].to_s == 'true'
       end
 
-      # 設定画面の選択肢の値。未設定なら、終了扱いのステータスだけ薄いグレー
+      # 設定画面の選択肢の値。未設定なら、終了扱いのステータスだけ薄いグレー（有効にしたときのおすすめ）
       def choice_for(settings, status)
         choice = hash_setting(settings, 'status_background_colors')[status.id.to_s]
         return (status.is_closed? ? DEFAULT_CLOSED_COLOR : NONE) if choice.nil?
