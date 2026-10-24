@@ -97,6 +97,8 @@ TEXT
             sort_clear
             sort_init(default_sort)
             sort_update(@query.sortable_columns)
+            # 列の見出しの並び替えの印はクエリの並び順を見るため、-o のときはクエリにも渡す
+            @query.sort_criteria = sort_criteria.to_a if parser.sort_criteria
             #@issue_count_by_group = @query.issue_count_by_group
 
             parser.search_words_s.each do |words|
