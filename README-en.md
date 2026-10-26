@@ -15,7 +15,6 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 - **Journals List** - Displays comment history with status and assignee in the issue list
 - **Reply Count** - Displays assignee change count (reply count) in the issue list
 - **Children Count** - Displays the number of direct child issues in the issue list
-- **Roadmap Display** - Adds columns such as status and assignee, and grouping, to the roadmap's issue list
 - **Status Background** - Lets you color the issue page to match the issue's status (closed issues in light gray)
 - **API** - APIs used internally by Redmine Studio
   - **Plugin API** - Retrieves plugin information
@@ -190,16 +189,6 @@ Displays the number of direct child issues in the issue list. Useful for quickly
 - Hover over the count to see child issue IDs and subjects in a tooltip
 
 For details, see [docs/children_count-en.md](docs/children_count-en.md).
-
-## Roadmap Display
-
-Replaces the "Related issues" list on the roadmap's version page with a table in the same form as the issue list. The standard page only shows subjects and whether issues are closed; with columns such as status, assignee, and % done, and grouping by assignee or status, you can see a version's progress at a glance.
-
-- Choose columns, grouping, and sort order from "Roadmap display" in the Administration menu
-- Switch the display per project with a regular expression on the project identifier
-- Filter by tracker instantly on the version page. The roadmap page (all versions) is also supported
-
-For details, see [docs/roadmap_display-en.md](docs/roadmap_display-en.md).
 
 ## Status Background
 

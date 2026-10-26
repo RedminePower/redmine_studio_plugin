@@ -31,14 +31,6 @@ Rails.application.routes.draw do
   # Date Independent
   resources :date_independents
 
-  # Roadmap Display
-  resources :roadmap_displays, except: [:show] do
-    collection do
-      get 'matches'
-      post 'preview'
-    end
-  end
-
   # Studio Settings
   resources :studio_settings, only: [:index, :show, :create, :update, :destroy] do
     member do
