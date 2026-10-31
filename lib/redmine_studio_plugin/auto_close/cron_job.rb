@@ -19,6 +19,8 @@ module RedmineStudioPlugin
       SYSTEM_PATH = '/usr/local/bin:/usr/bin:/bin'
       # cron の中と同じ条件（環境変数を引き継がず、PATH は /usr/bin:/bin だけ）
       CRON_ENV = { 'PATH' => '/usr/bin:/bin' }.freeze
+      # crontab がまだ無いときの crontab -l の文（cronie などは "no crontab for"、busybox は "can't open ... No such file"）
+      NO_CRONTAB = /no crontab|can't open .*no such file/i
 
       module_function
 
@@ -138,8 +140,7 @@ module RedmineStudioPlugin
       def read_crontab
         out, err, status = Open3.capture3('crontab', '-l')
         return [out, nil] if status.success?
-        # crontab がまだ無い（cronie などは "no crontab for"、busybox は "can't open ... No such file"）
-        return ['', nil] if err =~ /no crontab|can't open .*no such file/i
+        return ['', nil] if err =~ NO_CRONTAB
 
         [nil, err.strip]
       rescue SystemCallError => e
