@@ -79,7 +79,7 @@ docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid
 - [2-H] エッジケーステスト
 
 **バッチ 4: rake タスク（[2-I]）**
-- [2-I] rake タスク（install / uninstall）
+- [2-I] rake タスク（install / uninstall。[2-I-1b]・[2-I-1c] は crontab が入っている環境で行う）
 - reenable/invoke が必要なため別バッチで実行
 
 ### フェーズ 3: コンテナ再起動
@@ -855,11 +855,57 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 - ログに「Install completed」が出力される
 - `redmine_studio_plugin:auto_close:check_expired` を含む cron エントリが存在する
 - 実行時刻が `0 3 * * *`（毎日3時）である
+- エントリに `PATH=` が含まれ、その中に Ruby のフォルダー（公式 Docker イメージなら `/usr/local/bin`）がある
+- ログに「Registered in the crontab of user '<実行した利用者>'」か「Already registered in the crontab of user ...」が出力される
+- ログに、cron と同じ条件で rake を起動できたか（「Checked: rake can be started under cron.」または「WARNING: ...」）が出力される
 
 **備考:**
 - install タスクは旧プラグイン削除、DB マイグレーション、cron 登録を一括で行う
 - 登録した cron エントリはテスト後も削除しない
-- 実際の cron 実行は本番環境でログを確認して検証する
+- 公式 Docker イメージでは gem の置き場所を環境変数で決めているため、「WARNING」になる（別の不具合として扱っている）
+
+### [2-I-1b] 古い形の行の置き換えと、cron と同じ条件での実行
+
+**条件:**
+- crontab が入っている環境
+
+**手順:**
+1. 古い版が登録していた形の行を、時刻を毎分にして登録する:
+   ```bash
+   echo "* * * * * cd /usr/src/redmine && bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production >> log/auto_close.log 2>&1" | crontab -
+   ```
+2. `bundle exec rake redmine_studio_plugin:install` を実行
+3. `crontab -l` で cron の内容を確認
+4. 登録された行の時刻より後ろを、cron と同じ条件で実行する:
+   ```bash
+   env -i PATH=/usr/bin:/bin HOME=$HOME GEM_HOME=$GEM_HOME BUNDLE_APP_CONFIG=$BUNDLE_APP_CONFIG sh -c '<登録された行の時刻より後ろ>'
+   ```
+   （`GEM_HOME`・`BUNDLE_APP_CONFIG` は、公式 Docker イメージで別の不具合を避けるために渡す。PATH は渡さない）
+5. `log/auto_close.log` を確認
+
+**期待結果:**
+- ログに「Removed: <古い行>」と「Registered in the crontab of user ...: <新しい行>」が出力される
+- 行が 1 本だけで、時刻が `* * * * *` のまま、`PATH=` を含む形に置き換わっている
+- `log/auto_close.log` に「Completed」を含む行が出る
+- もう一度 install を実行すると「Already registered」になり、crontab は変わらない
+
+### [2-I-1c] /etc/cron.d に登録がある場合（二重にしない）
+
+**条件:**
+- [2-I-1b] の後（実行した利用者の crontab に、この Redmine の行がある）
+
+**手順:**
+1. `/etc/cron.d/redmine_auto_close` に、この Redmine の行（利用者の欄つき）を書く
+2. 実行した利用者の crontab に、別の Redmine の行を足す（例: `cd /other/redmine && bundle exec rake redmine_studio_plugin:auto_close:check_expired`）
+3. `bundle exec rake redmine_studio_plugin:install` を実行
+4. `crontab -l` で cron の内容を確認
+
+**期待結果:**
+- ログに「Removed: <この Redmine の行>」「Already registered in /etc/cron.d/redmine_auto_close: ...」「Not added to the crontab of user ...」が出力される
+- crontab には別の Redmine の行だけが残っている
+
+**後片づけ:**
+- `/etc/cron.d/redmine_auto_close` と、足した別の Redmine の行を消し、[2-I-1] の状態に戻す（install を再実行）
 
 ### [2-I-1a] install タスクによる旧 cron エントリの削除
 
@@ -875,7 +921,7 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 3. `crontab -l` で cron の内容を確認
 
 **期待結果:**
-- ログに「Removed legacy cron job (redmine_auto_close)」が出力される
+- ログに「Removed: <旧エントリ>」が出力される
 - 旧エントリ（`redmine_auto_close:check_expired`）が削除されている
 - 新エントリ（`redmine_studio_plugin:auto_close:check_expired`）が登録されている
 
@@ -889,7 +935,9 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 **期待結果:**
 - エラーなく完了する
 - ログに「Uninstall completed」が出力される
-- cron エントリが削除されている
+- ログに「Removed: <この Redmine の行>」が出力され、cron エントリが削除されている
+- 別の Redmine の行・コメントにした行は残っている
+- 実行した利用者の crontab に行が無いときは「No cron job in the crontab of user ...」が出力される
 - `auto_closes` テーブルが存在しない
 
 **備考:**

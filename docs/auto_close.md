@@ -96,4 +96,5 @@
 bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production
 ```
 
-実行ログは `log/auto_close.log` に出力されます（詳細は `log/production.log` を確認）。
+手動で実行したときは、結果が画面に出ます。cron で動いたときの結果は `log/auto_close.log` に出ます（詳細は `log/production.log` を確認）。
+cron の登録のしかたと、動いているかの確かめ方は、[README](../README.md) のインストールの「定期実行（cron）の登録について」を見てください。

@@ -96,4 +96,5 @@ The overdue trigger runs automatically via cron daily at 3:00, but you can run i
 bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production
 ```
 
-Execution logs are output to `log/auto_close.log` (check `log/production.log` for details).
+When run manually, the result is shown on the screen. When run by cron, the result is written to `log/auto_close.log` (check `log/production.log` for details).
+For how the cron job is registered and how to check that it works, see "About the cron job" under Installation in the [README](../README-en.md).

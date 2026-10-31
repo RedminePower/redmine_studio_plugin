@@ -65,6 +65,17 @@ cd /var/lib/redmine
 bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 ```
 
+#### 定期実行（cron）の登録について
+
+期限切れ時の自動クローズは、cron で毎日 3:00 に動きます。このコマンドは、**実行した利用者の crontab** にその行を登録します。
+
+- Redmine を動かしている利用者（`www-data`・`apache` など）で実行してください。例: `sudo -u www-data bundle exec rake redmine_studio_plugin:install RAILS_ENV=production`
+- 登録した行が cron の中でも動くかを、最後に試します。動かないときは `WARNING` が出ます
+- `/etc/crontab` や `/etc/cron.d` に、この Redmine の自動クローズの行を自分で書いている場合は、二重にならないように登録しません（実行した利用者の crontab にある行は外します）
+- 前に別の利用者で実行した場合は、その利用者の crontab に残った行を外してください（`sudo crontab -u <利用者> -l` で確かめられます）
+
+動いているかは、次の日に `log/auto_close.log` を見て確かめます。実行のたびに `Completed` を含む行が 1 行増えます。
+
 ### 3. Redmine の再起動
 
 Redmine を再起動して変更を反映してください。
@@ -82,6 +93,8 @@ git pull
 
 既に適用済みの処理はスキップされるため、
 新規インストールと同じコマンドでアップデートできます。
+インストールのときと同じ利用者で実行してください。
+古い版で登録された定期実行の行は、新しい形に置き換わります（時刻を変えていれば、その時刻のまま）。
 
 ```bash
 cd /var/lib/redmine
@@ -230,6 +243,7 @@ Redmine Studio が内部で使用する API 群です。各 API の詳細はリ�
 ### 1. アンインストールコマンドの実行
 
 cron 解除と DB ロールバックを行います。
+インストールのときと同じ利用者で実行してください。外すのは、その利用者の crontab にある、この Redmine の行だけです。`/etc/cron.d` などに自分で書いた行は、場所が表示されるので手で外してください。
 
 ```bash
 cd /var/lib/redmine
