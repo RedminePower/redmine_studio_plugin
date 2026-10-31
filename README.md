@@ -76,6 +76,15 @@ bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 
 動いているかは、次の日に `log/auto_close.log` を見て確かめます。実行のたびに `Completed` を含む行が 1 行増えます。
 
+登録する行には、cron の中でも Ruby のコマンドと gem が見つかるように、PATH と gem の置き場所の設定（`GEM_HOME` など、設定されているものだけ）を書きます。
+
+crontab の無い環境（Redmine 公式の Docker イメージなど）では、install は `WARNING` を出し、登録するはずだった行を表示して先へ進みます。期限切れ時の自動クローズを使うときは、その行を自分で毎日動かしてください。Docker の場合は、ホスト側の cron から `docker exec` で動かせます。
+
+```bash
+# ホスト側の crontab に書く例（<コンテナ名> と '...' は、表示された行の「0 3 * * *」より後ろに置き換える）
+0 3 * * * docker exec -u redmine <コンテナ名> sh -c '...'
+```
+
 ### 3. Redmine の再起動
 
 Redmine を再起動して変更を反映してください。
