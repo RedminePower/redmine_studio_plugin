@@ -22,9 +22,10 @@ module RedmineStudioPlugin
       # crontab がまだ無いときの crontab -l の文（cronie などは "no crontab for"、busybox は "can't open ... No such file"）
       NO_CRONTAB = /no crontab|can't open .*no such file/i
 
-      # gem・bundler の置き場所を決める環境変数。install を実行したときに設定されていれば、行に付ける
-      # （BUNDLE_* をまとめて写さないのは、認証情報を入れる変数があり crontab に平文で残るため）
-      GEM_ENV_NAMES = %w[GEM_HOME GEM_PATH BUNDLE_APP_CONFIG BUNDLE_PATH BUNDLE_GEMFILE].freeze
+      # 行に付ける環境変数。install を実行したときに設定されていれば付ける
+      # - gem・bundler の置き場所（BUNDLE_* をまとめて写さないのは、認証情報を入れる変数があり crontab に平文で残るため）
+      # - 時間帯の TZ（cron はジョブに環境変数を渡さないため、付けないと期限切れの判定の「今日」が OS の時間帯になる）
+      CRON_ENV_NAMES = %w[GEM_HOME GEM_PATH BUNDLE_APP_CONFIG BUNDLE_PATH BUNDLE_GEMFILE TZ].freeze
 
       module_function
 
@@ -39,11 +40,11 @@ module RedmineStudioPlugin
         home.to_s.empty? ? nil : File.join(home, 'bin')
       end
 
-      # 行に付ける環境変数（PATH と、設定されている gem・bundler の置き場所）
+      # 行に付ける環境変数（PATH と、CRON_ENV_NAMES のうち設定されているもの）
       # bundle exec の中では bundler が書き換えるため、書き換える前の値（Bundler.original_env）を使う
       # 改行を含む値は crontab の行が割れるため付けない
       def cron_env(env = original_env, path = cron_path)
-        GEM_ENV_NAMES.each_with_object({ 'PATH' => path }) do |name, result|
+        CRON_ENV_NAMES.each_with_object({ 'PATH' => path }) do |name, result|
           value = env[name].to_s
           result[name] = value unless value.empty? || value.include?("\n")
         end

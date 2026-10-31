@@ -76,7 +76,7 @@ bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 
 動いているかは、次の日に `log/auto_close.log` を見て確かめます。実行のたびに `Completed` を含む行が 1 行増えます。
 
-登録する行には、cron の中でも Ruby のコマンドと gem が見つかるように、PATH と gem の置き場所の設定（`GEM_HOME` など、設定されているものだけ）を書きます。
+登録する行には、cron の中でも Ruby のコマンドと gem が見つかるように、PATH と gem の置き場所の設定（`GEM_HOME` など、設定されているものだけ）を書きます。install を実行したときに環境変数 `TZ` が設定されていれば、期限切れの判定に使う日付の時間帯として `TZ` も書きます（cron は環境変数を引き継がないため）。Redmine を動かしているときの `TZ` と同じ値になっているかを確かめてください。
 
 crontab の無い環境（Redmine 公式の Docker イメージなど）では、install は `WARNING` を出し、登録するはずだった行を表示して先へ進みます。期限切れ時の自動クローズを使うときは、その行を自分で毎日動かしてください。Docker の場合は、ホスト側の cron から `docker exec` で動かせます。
 

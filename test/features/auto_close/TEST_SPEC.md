@@ -79,7 +79,7 @@ docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid
 - [2-H] エッジケーステスト
 
 **バッチ 4: rake タスク（[2-I]）**
-- [2-I] rake タスク（install / uninstall。[2-I-1b]・[2-I-1c] は crontab が入っている環境、[2-I-1d] は入っていない環境で行う）
+- [2-I] rake タスク（install / uninstall。[2-I-1b]・[2-I-1e]・[2-I-1c] は crontab が入っている環境、[2-I-1d] は入っていない環境で行う）
 - reenable/invoke が必要なため別バッチで実行
 
 ### フェーズ 3: コンテナ再起動
@@ -857,6 +857,7 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 - 実行時刻が `0 3 * * *`（毎日3時）である
 - エントリに `PATH=` が含まれ、その中に Ruby のフォルダー（公式 Docker イメージなら `/usr/local/bin`）がある
 - 公式 Docker イメージでは、エントリに `GEM_HOME=/usr/local/bundle` と `BUNDLE_APP_CONFIG=/usr/local/bundle` も含まれる
+- install を実行した環境に `TZ` が設定されていれば、エントリに `TZ=<その値>` も含まれる。設定されていなければ含まれない
 - ログに「Registered in the crontab of user '<実行した利用者>'」か「Already registered in the crontab of user ...」が出力される
 - ログに「Checked: rake can be started under cron.」が出力される
 
@@ -897,6 +898,25 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 - 行が 1 本だけで、時刻が `* * * * *` のまま、`PATH=` を含む形に置き換わっている
 - `log/auto_close.log` に「Completed」を含む行が出る
 - もう一度 install を実行すると「Already registered」になり、crontab は変わらない
+
+### [2-I-1e] 時間帯（TZ）を行に付ける
+
+**条件:**
+- [2-I-1b] の後（実行した利用者の crontab に、この Redmine の行がある）
+- OS の時間帯の設定（`/etc/localtime`）が UTC
+
+**手順:**
+1. `TZ=Asia/Tokyo bundle exec rake redmine_studio_plugin:install` を実行し、`crontab -l` で確認
+2. もう一度、同じコマンドを実行
+3. 期日が「日本時間の昨日」のチケットと「日本時間の今日」のチケットを、期限切れのルールの対象にして用意する
+4. 登録された行の時刻より後ろを、cron と同じ条件で実行する（[2-I-1b] の手順 4 と同じ）。日本時間と UTC で日付が違う時間帯（日本時間の 0:00〜9:00）に行う
+5. `TZ` を付けずに `bundle exec rake redmine_studio_plugin:install` を実行し、`crontab -l` で確認
+
+**期待結果:**
+- 1: ログに「Removed: <TZ の無い行>」と「Registered in the crontab of user ...: <新しい行>」が出力され、行に `TZ=Asia/Tokyo` が含まれる
+- 2: 「Already registered」になり、crontab は変わらない
+- 4: 「日本時間の昨日」が期日のチケットは処理され、「日本時間の今日」が期日のチケットは処理されない
+- 5: 行から `TZ=` が外れる
 
 ### [2-I-1c] /etc/cron.d に登録がある場合（二重にしない）
 
