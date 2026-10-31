@@ -79,7 +79,7 @@ docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid
 - [2-H] エッジケーステスト
 
 **バッチ 4: rake タスク（[2-I]）**
-- [2-I] rake タスク（install / uninstall。[2-I-1b]・[2-I-1c] は crontab が入っている環境で行う）
+- [2-I] rake タスク（install / uninstall。[2-I-1b]・[2-I-1c] は crontab が入っている環境、[2-I-1d] は入っていない環境で行う）
 - reenable/invoke が必要なため別バッチで実行
 
 ### フェーズ 3: コンテナ再起動
@@ -856,13 +856,23 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 - `redmine_studio_plugin:auto_close:check_expired` を含む cron エントリが存在する
 - 実行時刻が `0 3 * * *`（毎日3時）である
 - エントリに `PATH=` が含まれ、その中に Ruby のフォルダー（公式 Docker イメージなら `/usr/local/bin`）がある
+- 公式 Docker イメージでは、エントリに `GEM_HOME=/usr/local/bundle` と `BUNDLE_APP_CONFIG=/usr/local/bundle` も含まれる
 - ログに「Registered in the crontab of user '<実行した利用者>'」か「Already registered in the crontab of user ...」が出力される
-- ログに、cron と同じ条件で rake を起動できたか（「Checked: rake can be started under cron.」または「WARNING: ...」）が出力される
+- ログに「Checked: rake can be started under cron.」が出力される
 
 **備考:**
 - install タスクは旧プラグイン削除、DB マイグレーション、cron 登録を一括で行う
 - 登録した cron エントリはテスト後も削除しない
-- 公式 Docker イメージでは gem の置き場所を環境変数で決めているため、「WARNING」になる（別の不具合として扱っている）
+
+### [2-I-1d] crontab が入っていない環境（公式 Docker イメージのまま）
+
+**手順:**
+1. `bundle exec rake redmine_studio_plugin:install` を実行
+2. `bundle exec rake redmine_studio_plugin:uninstall` を実行（そのあと install で元に戻す）
+
+**期待結果:**
+- install: 「WARNING: The crontab command was not found, so the cron job was not registered.」と、登録するはずだった行・「Checked: the line above can start rake.」が出たうえで、「Install completed」まで進む。終了コードは 0
+- uninstall: 「The crontab command was not found, so removing the cron job was skipped.」と、自分で用意した定期実行を外す案内が出て、DB を元に戻し、「Uninstall completed」まで進む。「WARNING: A cron job for this Redmine may remain」は出ない
 
 ### [2-I-1b] 古い形の行の置き換えと、cron と同じ条件での実行
 
@@ -878,9 +888,8 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 3. `crontab -l` で cron の内容を確認
 4. 登録された行の時刻より後ろを、cron と同じ条件で実行する:
    ```bash
-   env -i PATH=/usr/bin:/bin HOME=$HOME GEM_HOME=$GEM_HOME BUNDLE_APP_CONFIG=$BUNDLE_APP_CONFIG sh -c '<登録された行の時刻より後ろ>'
+   env -i PATH=/usr/bin:/bin HOME=$HOME sh -c '<登録された行の時刻より後ろ>'
    ```
-   （`GEM_HOME`・`BUNDLE_APP_CONFIG` は、公式 Docker イメージで別の不具合を避けるために渡す。PATH は渡さない）
 5. `log/auto_close.log` を確認
 
 **期待結果:**
