@@ -7,7 +7,7 @@ name: Public repo guard
 
 on:
   push:
-    branches: [master]
+    branches: [master, 'v*_dev']
   pull_request:
     types: [opened, edited, synchronize, reopened]
 
