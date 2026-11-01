@@ -34,7 +34,11 @@ namespace :redmine_studio_plugin do
     user = cron.user_name
     cleared = true
     current, error = cron.read_crontab
-    if current.nil?
+    if error == :no_crontab_command
+      # crontab が無い環境（Docker の公式イメージなど）には、install が登録した行も無い
+      puts '  The crontab command was not found, so removing the cron job was skipped.'
+      puts '  If you set up the daily run yourself (such as on the Docker host), remove it.'
+    elsif current.nil?
       puts "  Could not read the crontab of user '#{user}': #{error}"
       cleared = false
     else

@@ -61,21 +61,35 @@ namespace :redmine_studio_plugin do
     cron = RedmineStudioPlugin::AutoClose::CronJob
     root = Rails.root
     user = cron.user_name
+    env = cron.cron_env
+    elsewhere = cron.system_entries(root)
     current, error = cron.read_crontab
+    if error == :no_crontab_command
+      # crontab が無い環境（Docker の公式イメージなど）では、止めずに知らせて続ける
+      if elsewhere.any?
+        elsewhere.each { |file, line| puts "  Already registered in #{file}: #{line}" }
+        return
+      end
+      puts '  WARNING: The crontab command was not found, so the cron job was not registered.'
+      puts '  To use the overdue trigger of Auto Close, add the following line to a crontab yourself'
+      puts '  (for Docker, add it to the crontab on the host. See "About the cron job" in README):'
+      puts "    #{cron.build_line(root, env)}"
+      redmine_studio_plugin_check_cron_job(cron, root, env, 'Checked: the line above can start rake.')
+      return
+    end
     if current.nil?
       puts "  Could not read the crontab of user '#{user}': #{error}"
       puts '  The cron job was not registered.'
       return
     end
 
-    path = cron.cron_path
-    elsewhere = cron.system_entries(root)
-    plan = cron.plan_install(current, root, path, registered_elsewhere: elsewhere.any?)
+    plan = cron.plan_install(current, root, env, registered_elsewhere: elsewhere.any?)
 
     if plan[:text] != current
       ok, message = cron.write_crontab(plan[:text])
       unless ok
         puts "  Could not write the crontab of user '#{user}': #{message}"
+        puts '  The cron job was not registered, and the crontab was not changed.'
         return
       end
     end
@@ -90,11 +104,14 @@ namespace :redmine_studio_plugin do
 
     state = plan[:added] ? 'Registered' : 'Already registered'
     puts "  #{state} in the crontab of user '#{user}': #{plan[:line]}"
+    redmine_studio_plugin_check_cron_job(cron, root, env, 'Checked: rake can be started under cron.')
+  end
 
-    # cron の中と同じ条件で、rake を起動できるかを試す
-    ok, output = cron.self_test(root, path)
+  # cron の中と同じ条件で、登録する行の rake を起動できるかを試して表示する
+  def redmine_studio_plugin_check_cron_job(cron, root, env, checked_message)
+    ok, output = cron.self_test(root, env)
     if ok
-      puts '  Checked: rake can be started under cron.'
+      puts "  #{checked_message}"
     else
       puts '  WARNING: rake could not be started in the same environment as cron (PATH=/usr/bin:/bin, no other variables).'
       puts '  The cron job will probably fail. Error:'
