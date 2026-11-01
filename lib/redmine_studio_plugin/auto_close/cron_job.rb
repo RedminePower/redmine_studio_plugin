@@ -22,27 +22,60 @@ module RedmineStudioPlugin
       # crontab がまだ無いときの crontab -l の文（cronie などは "no crontab for"、busybox は "can't open ... No such file"）
       NO_CRONTAB = /no crontab|can't open .*no such file/i
 
+      # gem・bundler の置き場所を決める環境変数。install を実行したときに設定されていれば、行に付ける
+      # （BUNDLE_* をまとめて写さないのは、認証情報を入れる変数があり crontab に平文で残るため）
+      GEM_ENV_NAMES = %w[GEM_HOME GEM_PATH BUNDLE_APP_CONFIG BUNDLE_PATH BUNDLE_GEMFILE].freeze
+
       module_function
 
       # cron の中で bundle・rake が見つかる PATH（今動いている Ruby と gem のコマンドのフォルダーを前に足す）
-      def cron_path(ruby_dir = File.dirname(RbConfig.ruby), gem_bindir = Gem.bindir)
-        ([ruby_dir, gem_bindir] + SYSTEM_PATH.split(':')).uniq.join(':')
+      # bundle exec が GEM_HOME を書き換えていることがあるため、書き換える前の GEM_HOME のコマンドのフォルダーも足す
+      def cron_path(ruby_dir = File.dirname(RbConfig.ruby), gem_bindirs = [Gem.bindir, original_gem_bindir].compact)
+        ([ruby_dir, *gem_bindirs] + SYSTEM_PATH.split(':')).uniq.join(':')
       end
 
-      def command(root, path, rake_args)
-        "cd #{Shellwords.escape(root.to_s)} && PATH=#{Shellwords.escape(path)} bundle exec rake #{rake_args}"
+      def original_gem_bindir
+        home = original_env['GEM_HOME']
+        home.to_s.empty? ? nil : File.join(home, 'bin')
       end
 
-      def build_line(root, path, schedule = DEFAULT_SCHEDULE)
-        body = command(root, path, "#{TASK} RAILS_ENV=production >> log/auto_close.log 2>&1")
+      # 行に付ける環境変数（PATH と、設定されている gem・bundler の置き場所）
+      # bundle exec の中では bundler が書き換えるため、書き換える前の値（Bundler.original_env）を使う
+      # 改行を含む値は crontab の行が割れるため付けない
+      def cron_env(env = original_env, path = cron_path)
+        GEM_ENV_NAMES.each_with_object({ 'PATH' => path }) do |name, result|
+          value = env[name].to_s
+          result[name] = value unless value.empty? || value.include?("\n")
+        end
+      end
+
+      def original_env
+        defined?(Bundler) && Bundler.respond_to?(:original_env) ? Bundler.original_env : ENV.to_h
+      end
+
+      def command(root, env, rake_args)
+        vars = env.map { |name, value| "#{name}=#{quote(value)}" }.join(' ')
+        "cd #{quote(root.to_s)} && #{vars} bundle exec rake #{rake_args}"
+      end
+
+      # シェルの引用。記号を含む値は単一引用で包む
+      # （Shellwords.escape は % を \% にするため、そのあと crontab 用に % を \% にすると \\% になり、cron がそこで行を切る）
+      def quote(value)
+        return value if value.match?(%r{\A[A-Za-z0-9_\-.,:+/@]+\z})
+
+        "'#{value.gsub("'", %q('\\\\''))}'"
+      end
+
+      def build_line(root, env, schedule = DEFAULT_SCHEDULE)
+        body = command(root, env, "#{TASK} RAILS_ENV=production >> log/auto_close.log 2>&1")
         # crontab では % が改行の意味になるため \% にする
         "#{schedule} #{body.gsub('%', '\%')}"
       end
 
-      # 登録した行が cron の中で動くかを、rake を起動するところまで試す
-      def self_test(root, path = cron_path)
+      # 登録する行が cron の中で動くかを、rake を起動するところまで試す
+      def self_test(root, env = cron_env)
         output, status = Open3.capture2e(CRON_ENV.merge('HOME' => home_dir), 'sh', '-c',
-                                         command(root, path, '--version'), unsetenv_others: true)
+                                         command(root, env, '--version'), unsetenv_others: true)
         [status.success?, output]
       end
 
@@ -90,7 +123,7 @@ module RedmineStudioPlugin
 
       # install: 自分の crontab の中身から、新しい中身と変わった行を求める
       # registered_elsewhere が true なら（/etc/cron.d などに登録がある）、自分の crontab には足さない
-      def plan_install(current, root, path, registered_elsewhere: false)
+      def plan_install(current, root, env, registered_elsewhere: false)
         line = nil
         removed = []
         lines = current.lines.map(&:chomp).each_with_object([]) do |l, result|
@@ -102,7 +135,7 @@ module RedmineStudioPlugin
               removed << l
             else
               # 1 本目は新しい形に置き換える（時刻は引き継ぐ）
-              line = build_line(root, path, schedule_of(l))
+              line = build_line(root, env, schedule_of(l))
               removed << l unless l == line
               result << line
             end
@@ -111,7 +144,7 @@ module RedmineStudioPlugin
           end
         end
         if line.nil? && !registered_elsewhere
-          line = build_line(root, path)
+          line = build_line(root, env)
           lines << line
         end
         # added: 新しく足した行・置き換えた行（前と同じ行なら nil）
@@ -137,12 +170,15 @@ module RedmineStudioPlugin
       end
 
       # 実行した利用者の crontab を読む。読めなかったら nil と理由を返す（そのときは書き込まない）
+      # crontab コマンドが無い環境（Docker の公式イメージなど）では、理由は :no_crontab_command
       def read_crontab
         out, err, status = Open3.capture3('crontab', '-l')
         return [out, nil] if status.success?
         return ['', nil] if err =~ NO_CRONTAB
 
         [nil, err.strip]
+      rescue Errno::ENOENT
+        [nil, :no_crontab_command]
       rescue SystemCallError => e
         [nil, e.message]
       end
