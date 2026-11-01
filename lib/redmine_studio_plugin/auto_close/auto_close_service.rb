@@ -120,6 +120,7 @@ module RedmineStudioPlugin
       end
 
       # Apply an auto_close rule to an issue
+      # Returns false if the issue could not be saved (reasons are left in issue.errors)
       def self.apply_rule(rule, issue)
         # Determine what changes to apply
         new_status_id = rule.action_status if rule.action_status.present?
@@ -145,7 +146,7 @@ module RedmineStudioPlugin
             issue.init_journal(User.current, has_comment ? rule.action_comment : nil)
             issue.status_id = new_status_id if new_status_id.present?
             issue.assigned_to_id = new_assigned_to_id if new_assigned_to_id.present?
-            issue.save
+            return false unless issue.save
           rescue ActiveRecord::StaleObjectError
             raise if retries >= 2
 
@@ -160,9 +161,13 @@ module RedmineStudioPlugin
           if parent.present?
             parent.reload
             parent.init_journal(User.current, rule.action_comment)
-            parent.save
+            unless parent.save
+              Rails.logger.error "[redmine_studio_plugin:auto_close] Error: Failed to add comment to parent issue ##{parent.id}: #{parent.errors.full_messages.join(', ')}"
+            end
           end
         end
+
+        true
       end
     end
   end
