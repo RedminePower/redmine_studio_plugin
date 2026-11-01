@@ -200,10 +200,12 @@ class AutoClose < ActiveRecord::Base
     end
 
     # アクションが一つも設定されていなかった場合
-    return unless action_status.blank? && action_assigned_to.blank? && action_comment.blank?
+    return unless action_status.blank? && action_assigned_to.blank? &&
+                  action_assigned_to_custom_field.blank? && action_comment.blank?
 
     errors.add(:action_status, I18n.t(:error_set_one_or_more_actions))
     errors.add(:action_assigned_to, I18n.t(:error_set_one_or_more_actions))
+    errors.add(:action_assigned_to_custom_field, I18n.t(:error_set_one_or_more_actions))
     errors.add(:action_comment, I18n.t(:error_set_one_or_more_actions))
   end
 
