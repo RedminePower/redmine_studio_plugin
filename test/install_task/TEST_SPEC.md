@@ -13,9 +13,12 @@
 本テストでは主に「設定移行」と「統合済みプラグインの削除」機能を検証する。
 DB マイグレーションと cron 登録のテストは `features/auto_close/TEST_SPEC.md` の [2-I] セクションを参照。
 
+対象バージョン: 5.x / 6.x / 7.x
+
 ## 環境パラメータ
 
 `{Container}`・`{RedmineRoot}` は実行環境から注入する（プレースホルダの契約は `test/README.md`）。
+プラグインがコンテナの中にしか無い環境では `{RedmineRoot}` は空になる。その場合は、各フェーズの「コンテナの中で行う」書き方を使う。
 
 ## タスクの内部実装
 
@@ -69,217 +72,237 @@ DB マイグレーションと cron 登録のテストは `features/auto_close/T
 
 ## テスト実行フロー
 
-Rake タスクは `reenable` / `invoke` で再実行可能なため、コンテナ再起動は不要。
+Rake タスクは `reenable` / `invoke` で再実行可能なため、コンテナ再起動は不要。Puma も止めない（公式 Docker イメージでは Puma がコンテナの PID 1 なので、止めるとコンテナごと止まる）。
 
-### フェーズ 1: 事前処理（退避）
+install は流すたびに cron の登録も行う（扱うのは実行した利用者の crontab の、この Redmine の行だけ）。テストの前に crontab を控え、終わったあとに変わっていないことを確かめる。
 
-既存の統合済みプラグインを無効化する（init.rb をリネーム）。
+コンテナの中のコマンドは `-u redmine -w /usr/src/redmine` を付けて `redmine` 利用者で動かす。root で動かすと、ログや plugins の中に root の持ち物のファイルができ、あとで Redmine や cron から書けなくなることがある。
 
-**Windows PowerShell で実行:**
+`bash` のブロックは bash で流す（Windows では Git Bash で、`MSYS_NO_PATHCONV=1` を付ける。付けないと `/usr/src/redmine` や `/tmp/...` が Windows のパスに書き換わる）。PowerShell から `sh -c '...'` を渡すと、中の `"` が消えて壊れる。
+
+フェーズ 0 と 3 は、「コンテナの中で行う」か「`{RedmineRoot}` がある環境」のどちらか一方の書き方を最初から最後まで使う（退避先が違うため）。
+
+### フェーズ 0: 事前処理（退避・crontab の控え）
+
+install は統合済みプラグイン（`config/integrated_plugins.yml` に並ぶもの）のフォルダを消す。テストで消されないよう、フォルダがあれば plugins の外へフォルダごと移しておく（`test/README.md` の「共通の事前条件」の init.rb・lib の名前の変更では足りない）。
+
+**コンテナの中で行う:**
+```bash
+docker exec -u redmine -w /usr/src/redmine {Container} sh -c '
+if [ -n "$(ls -A /tmp/install_task_backup 2>/dev/null)" ]; then echo "A backup from a previous run remains. Restore it with phase 3 first."; exit 1; fi
+mkdir -p /tmp/install_task_backup
+for p in $(sed -n "s/^ *- *//p" plugins/redmine_studio_plugin/config/integrated_plugins.yml | tr -d "\r"); do
+  if [ -d "plugins/$p" ]; then mv "plugins/$p" /tmp/install_task_backup/ || exit 1; echo "Moved out: $p"; fi
+  if [ -d "plugins/$p" ]; then echo "FAILED: plugins/$p remains"; exit 1; fi
+done
+crontab -l > /tmp/install_task_crontab_before.txt 2>&1
+echo "Phase 0 done"'
+```
+
+**`{RedmineRoot}` がある環境（Windows PowerShell）:**
 ```powershell
-$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
-$pluginsDir = "$redmineRoot\plugins"
+$ErrorActionPreference = 'Stop'  # 移せなかったら、そこで止める
+$pluginsDir = "{RedmineRoot}\plugins"  # 実行環境から注入（test/README.md）
+$backupDir = "{RedmineRoot}\install_task_backup"  # plugins の外
+$integratedPlugins = Get-Content "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml" | ForEach-Object { if ($_ -match '^\s+-\s+(.+)$') { $Matches[1].Trim() } }
 
-# 統合済みプラグインリストを config/integrated_plugins.yml から取得
-$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
-$configContent = Get-Content $configPath -Raw
-$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
-
-# 統合済みプラグインを無効化（init.rb → init.rb.bak）
+if ((Test-Path $backupDir) -and (Get-ChildItem $backupDir)) { throw "A backup from a previous run remains. Restore it with phase 3 first." }
+New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
 foreach ($plugin in $integratedPlugins) {
-    $initPath = "$pluginsDir\$plugin\init.rb"
-    if (Test-Path $initPath) {
-        Rename-Item -Path $initPath -NewName "init.rb.bak" -Force
-        Write-Host "Disabled: $plugin"
+    if (Test-Path "$pluginsDir\$plugin") {
+        Move-Item -Path "$pluginsDir\$plugin" -Destination $backupDir
+        Write-Host "Moved out: $plugin"
     }
 }
 ```
+crontab は Redmine が動いている機械で `crontab -l` を流して控える。
 
-### フェーズ 2: 削除対象なしテスト
+**期待結果:** `Phase 0 done` が出る（PowerShell は止まらずに終わる）。統合済みプラグインのフォルダが plugins の中に 1 つも無い（もともと無ければ何も移さない）。移せなかったときは `FAILED` などで止まるので、先へ進まない
 
-1. [1-1] を実行（統合済みプラグインなし → エラーなくスキップ）
+### フェーズ 1: Runner テスト（[1-1]・[1-2]・[2-1]〜[2-8]）
 
-### フェーズ 3: 削除対象ありテスト
+[1-1]・[1-2]・[2-1]〜[2-8] を順に並べた 1 本の Ruby スクリプトを作り、先頭に「Runner スクリプトの共通部分」を置く。リポジトリにスクリプトは置かない（この仕様書から作る）。
 
-1. ダミーの統合済みプラグインを作成
+スクリプトはファイルにしてコンテナにコピーして流す。`rails runner '...'` にコードを直接渡すと、`!` や引用符の扱いで壊れやすい。
 
-**Windows PowerShell で実行:**
-```powershell
-$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
-$pluginsDir = "$redmineRoot\plugins"
-
-# 統合済みプラグインリストを config/integrated_plugins.yml から取得
-$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
-$configContent = Get-Content $configPath -Raw
-$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
-
-foreach ($plugin in $integratedPlugins) {
-    $pluginPath = "$pluginsDir\$plugin"
-    if (Test-Path $pluginPath) {
-        Remove-Item -Path $pluginPath -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $pluginPath | Out-Null
-    New-Item -ItemType File -Path "$pluginPath\init.rb" -Force | Out-Null
-    Write-Host "Created dummy: $plugin"
-}
+```bash
+docker cp install_task_test.rb {Container}:/tmp/install_task_test.rb
+docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/install_task_test.rb
 ```
 
-2. [1-2], [1-3] を実行（統合済みプラグインあり → 削除される、ログ確認）
+- `SQLite3::BusyException`（database is locked）が出たときは、少し待って流し直す
 
-### フェーズ 4: 事後処理（復元）
+### フェーズ 2: ログの確認（[1-3]）
 
-1. ダミーフォルダを削除（タスク実行で削除済みのはずだが念のため）
+[1-3] に書いた手順で、Runner スクリプトとは別に行う。
 
-**Windows PowerShell で実行:**
+### フェーズ 3: 事後処理（復元・crontab の確認）
+
+1. 統合済みプラグインのダミーが残っていれば（[1-2] が失敗したときだけ）plugins の外へ移し、フェーズ 0 で退避したフォルダを戻す。フェーズ 0 のあと plugins にある統合済みプラグインのフォルダは、テストで作ったダミーだけ
+2. crontab がフェーズ 0 の控えと同じことを確かめる
+
+**コンテナの中で行う:**
+```bash
+docker exec -u redmine -w /usr/src/redmine {Container} sh -c '
+leftover=/tmp/install_task_leftover_$(date +%Y%m%d%H%M%S)
+for p in $(sed -n "s/^ *- *//p" plugins/redmine_studio_plugin/config/integrated_plugins.yml | tr -d "\r"); do
+  if [ -d "plugins/$p" ]; then mkdir -p "$leftover" && mv "plugins/$p" "$leftover/" || exit 1; echo "Moved leftover dummy: $p"; fi
+  if [ -d "/tmp/install_task_backup/$p" ]; then mv "/tmp/install_task_backup/$p" plugins/ || exit 1; echo "Restored: $p"; fi
+done
+crontab -l 2>&1 | diff /tmp/install_task_crontab_before.txt - && echo "crontab unchanged"'
+```
+
+**`{RedmineRoot}` がある環境（Windows PowerShell）:**
 ```powershell
-$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
-$pluginsDir = "$redmineRoot\plugins"
-
-# 統合済みプラグインリストを config/integrated_plugins.yml から取得
-$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
-$configContent = Get-Content $configPath -Raw
-$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
+$ErrorActionPreference = 'Stop'  # 移せなかったら、そこで止める
+$pluginsDir = "{RedmineRoot}\plugins"  # 実行環境から注入（test/README.md）
+$backupDir = "{RedmineRoot}\install_task_backup"
+$leftoverDir = "{RedmineRoot}\install_task_leftover_$(Get-Date -Format yyyyMMddHHmmss)"
+$integratedPlugins = Get-Content "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml" | ForEach-Object { if ($_ -match '^\s+-\s+(.+)$') { $Matches[1].Trim() } }
 
 foreach ($plugin in $integratedPlugins) {
-    $pluginPath = "$pluginsDir\$plugin"
-    if (Test-Path $pluginPath) {
-        Remove-Item -Path $pluginPath -Recurse -Force
-        Write-Host "Removed dummy: $plugin"
+    if (Test-Path "$pluginsDir\$plugin") {  # フェーズ 0 のあとにあるのは、テストで作ったダミーだけ
+        New-Item -ItemType Directory -Path $leftoverDir -Force | Out-Null
+        Move-Item -Path "$pluginsDir\$plugin" -Destination $leftoverDir
+        Write-Host "Moved leftover dummy: $plugin"
+    }
+    if (Test-Path "$backupDir\$plugin") {
+        Move-Item -Path "$backupDir\$plugin" -Destination $pluginsDir
+        Write-Host "Restored: $plugin"
     }
 }
 ```
+crontab は Redmine が動いている機械で `crontab -l` を流し、フェーズ 0 の控えと比べる。
 
-2. 退避したプラグインを有効化（init.rb.bak → init.rb）
+**期待結果:**
+- フェーズ 0 で移したフォルダが plugins に戻っている
+- `crontab unchanged` が出る。違っていたら差分を報告し、控えに戻す。控えが crontab の行なら `crontab /tmp/install_task_crontab_before.txt`、控えが `no crontab for ...`（crontab が無かった）なら `crontab -r` で戻す。控えのエラー文をそのまま `crontab` に渡さない
+- crontab コマンドが無い環境では、控えも今も同じエラー文になる。その場合は crontab の比較は対象外とする
 
-**Windows PowerShell で実行:**
-```powershell
-$redmineRoot = "{RedmineRoot}"  # 実行環境から注入（test/README.md）
-$pluginsDir = "$redmineRoot\plugins"
+---
 
-# 統合済みプラグインリストを config/integrated_plugins.yml から取得
-$configPath = "$pluginsDir\redmine_studio_plugin\config\integrated_plugins.yml"
-$configContent = Get-Content $configPath -Raw
-$integratedPlugins = [regex]::Matches($configContent, '^\s+-\s+(.+)$', 'Multiline') | ForEach-Object { $_.Groups[1].Value.Trim() }
+## Runner スクリプトの共通部分
 
-foreach ($plugin in $integratedPlugins) {
-    $initBakPath = "$pluginsDir\$plugin\init.rb.bak"
-    if (Test-Path $initBakPath) {
-        Rename-Item -Path $initBakPath -NewName "init.rb" -Force
-        Write-Host "Enabled: $plugin"
-    }
-}
+フェーズ 1 のスクリプトの先頭に置く。各テストの「確認方法」はこの関数と定数を使う。
+
+```ruby
+require 'rake'
+require 'stringio'
+Rails.application.load_tasks  # rails runner では rake のタスクが読み込まれていないため
+
+PLUGINS_DIR = Rails.root.join('plugins')
+INTEGRATED_PLUGINS = YAML.load_file(PLUGINS_DIR.join('redmine_studio_plugin', 'config', 'integrated_plugins.yml'))['integrated_plugins'] || []
+
+# テスト前の設定を控える（[2-8] で戻す）。[1-1] の install より前に控えるので、旧設定が残っている環境でも戻せる
+SUBTASK_KEYS = %w[enable_server_scripting_mode expand_all collapsed_trackers collapsed_tracker_ids].map { |key| "subtask_list_accordion_#{key}" }
+ORIGINAL_SUBTASK_SETTINGS = (Setting.plugin_redmine_studio_plugin || {}).slice(*SUBTASK_KEYS)
+ORIGINAL_LEGACY_VALUE = Setting.find_by(name: 'plugin_redmine_subtask_list_accordion')&.[](:value)
+
+# ブロックの中で puts された文字列を返す
+def capture_stdout
+  original = $stdout
+  $stdout = StringIO.new
+  yield
+  $stdout.string
+ensure
+  $stdout = original
+end
+
+# install を流し直し、出力を返す（redmine:plugins:migrate も install の中で呼ばれるため reenable する）
+def run_install
+  Rake::Task['redmine_studio_plugin:install'].reenable
+  Rake::Task['redmine:plugins:migrate'].reenable
+  capture_stdout { Rake::Task['redmine_studio_plugin:install'].invoke }
+end
+
+# 旧プラグインの設定を DB に直接書く。
+# 旧プラグインが入っていない環境では、Setting.create! と Setting.plugin_redmine_subtask_list_accordion= は
+# 設定名の検査で使えない（Name is not included in the list。7.x では NoMethodError）。
+# install は旧設定を DB のレコードから直接読むので、旧プラグインを消したあとに旧設定だけが残る場面と同じになる。
+def write_legacy_setting(text)
+  Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
+  Setting.new(name: 'plugin_redmine_subtask_list_accordion', value: text).save!(validate: false)
+end
 ```
 
 ---
 
-## 1. rails runner テスト
-
-**実行方法:**
-```bash
-docker exec {Container} rails runner plugins/redmine_studio_plugin/test/install_task/runner_test.rb
-```
+## 1. 統合済みプラグインの削除テスト
 
 ### [1-1] 統合済みプラグインが存在しない場合 → エラーなくスキップ
 
 **事前条件:**
-- 統合済みプラグイン（`config/integrated_plugins.yml` 参照）のフォルダが存在しない
+- 統合済みプラグインのフォルダが存在しない（フェーズ 0 で plugins の外へ移してある）
 
 **確認方法:**
 ```ruby
-plugins_dir = Rails.root.join('plugins')
-config_path = Rails.root.join('plugins', 'redmine_studio_plugin', 'config', 'integrated_plugins.yml')
-config = YAML.load_file(config_path)
-integrated_plugins = config['integrated_plugins'] || []
-
-# フォルダがないことを確認
-integrated_plugins.each do |plugin|
-  plugin_path = plugins_dir.join(plugin)
-  FileUtils.rm_rf(plugin_path) if File.directory?(plugin_path)
-end
+# フォルダが無いことを確かめる（あればスクリプトはここで止まる。フェーズ 0 からやり直す。ここでは消さない）
+existing = INTEGRATED_PLUGINS.select { |plugin| File.directory?(PLUGINS_DIR.join(plugin)) }
+raise "[1-1] 統合済みプラグインのフォルダがある: #{existing.join(', ')}" if existing.any?
 
 # タスク実行（エラーが発生しないこと）
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+output = run_install
+puts "[1-1] No plugins to remove: #{output.include?('No plugins to remove.')}"
+puts "[1-1] Install completed: #{output.include?('=== Install completed ===')}"
 ```
 
 **期待結果:**
 - 例外が発生しない
-- タスクが正常に完了する
-- 出力に `No plugins to remove.` が含まれる
+- 出力がすべて `true`
 
 ---
 
 ### [1-2] 統合済みプラグインが存在する場合 → 削除される
 
 **事前条件:**
-- 統合済みプラグインのダミーフォルダを作成（`init.rb` 付き）
+- [1-1] のあと（統合済みプラグインのフォルダが存在しない）
 
 **確認方法:**
 ```ruby
-plugins_dir = Rails.root.join('plugins')
-config_path = Rails.root.join('plugins', 'redmine_studio_plugin', 'config', 'integrated_plugins.yml')
-config = YAML.load_file(config_path)
-integrated_plugins = config['integrated_plugins'] || []
-
-# ダミーフォルダ作成
-integrated_plugins.each do |plugin|
-  plugin_path = plugins_dir.join(plugin)
-  FileUtils.mkdir_p(plugin_path)
-  FileUtils.touch(plugin_path.join('init.rb'))
+# ダミーフォルダ作成（init.rb 付き）
+INTEGRATED_PLUGINS.each do |plugin|
+  FileUtils.mkdir_p(PLUGINS_DIR.join(plugin))
+  FileUtils.touch(PLUGINS_DIR.join(plugin, 'init.rb'))
 end
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+output = run_install
 
 # 確認
-results = integrated_plugins.map do |plugin|
-  plugin_path = plugins_dir.join(plugin)
-  (File.directory?(plugin_path) == false)
-end
-results.all?
+puts "[1-2] all removed: #{INTEGRATED_PLUGINS.none? { |plugin| File.directory?(PLUGINS_DIR.join(plugin)) }}"
+puts "[1-2] removed count: #{output.include?("#{INTEGRATED_PLUGINS.size} plugin(s) removed.")}"
 ```
 
 **期待結果:**
-- 各プラグインフォルダが削除されている（`File.directory?(plugin_path)` が false）
-- 出力に `{統合済みプラグイン数} plugin(s) removed.` が含まれる
+- 出力がすべて `true`（各ダミーフォルダが削除され、出力に `{統合済みプラグイン数} plugin(s) removed.` が含まれる）
 
 ---
 
 ### [1-3] ログに実行記録が残る
 
-**確認方法（ファイルログの場合）:**
-```ruby
-# ログファイルのパス
-log_file = Rails.root.join('log', "#{Rails.env}.log")
+フェーズ 2 で、Runner スクリプトとは別に行う。ログの出先は環境で違うので、先に確かめる。
 
-# 実行前のログサイズを記録
+```bash
+docker exec {Container} printenv RAILS_LOG_TO_STDOUT
+```
+
+**値が出る場合（Docker の公式イメージは `true`）:** Redmine の `config/environments/production.rb` は、この変数が空でなければログを標準出力に出す（`log/production.log` には残らない）。rake を流した出力に、開始・完了の 2 行が出ることを確かめる。
+
+```bash
+docker exec -u redmine -w /usr/src/redmine {Container} sh -c 'bundle exec rake redmine_studio_plugin:install 2>&1 | grep -F "[redmine_studio_plugin] Install task"'
+```
+
+**何も出ない場合（変数が無い・ログをファイルに書く環境）:** 次の Ruby を「Runner スクリプトの共通部分」の後ろに置いて流す。
+
+```ruby
+log_file = Rails.root.join('log', "#{Rails.env}.log")
 log_size_before = File.size(log_file)
 
-# タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+run_install
 
-# ログの新規部分を読み取り
-File.open(log_file) do |f|
-  f.seek(log_size_before)
-  new_log = f.read
-  new_log.include?('[redmine_studio_plugin] Install task started') &&
-  new_log.include?('[redmine_studio_plugin] Install task completed')
-end
-```
-
-**Docker 環境での確認方法:**
-
-Docker 環境ではログがファイルではなく stdout に出力される場合がある。
-その場合、タスク実行時のコンソール出力で以下のログを目視確認する:
-
-```
-I, [2026-02-05T...] INFO -- : [redmine_studio_plugin] Install task started
-I, [2026-02-05T...] INFO -- : [redmine_studio_plugin] Install task completed
+new_log = File.open(log_file) { |f| f.seek(log_size_before); f.read }
+puts "[1-3] started: #{new_log.include?('[redmine_studio_plugin] Install task started')}"
+puts "[1-3] completed: #{new_log.include?('[redmine_studio_plugin] Install task completed')}"
 ```
 
 **期待結果:**
@@ -293,28 +316,20 @@ I, [2026-02-05T...] INFO -- : [redmine_studio_plugin] Install task completed
 ### [2-1] subtask_list_accordion: 旧プラグインの設定がない場合 → スキップ
 
 **事前条件:**
-- `Setting.plugin_redmine_subtask_list_accordion` が存在しない、または空
+- DB に `plugin_redmine_subtask_list_accordion` のレコードが存在しない
 
 **確認方法:**
 ```ruby
 # 旧設定をクリア（存在する場合）
-begin
-  Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
-rescue
-  # 設定が存在しない場合は無視
-end
+Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-
-# 出力をキャプチャ
-output = capture_stdout { Rake::Task['redmine_studio_plugin:install'].invoke }
-puts output.include?('No settings to migrate')
+output = run_install
+puts "[2-1] No settings to migrate: #{output.include?('No settings to migrate')}"
 ```
 
 **期待結果:**
-- 出力に `No settings to migrate` が含まれる
+- 出力が `true`（出力に `No settings to migrate` が含まれる）
 - エラーが発生しない
 
 ---
@@ -322,7 +337,7 @@ puts output.include?('No settings to migrate')
 ### [2-2] subtask_list_accordion: 旧プラグインの設定がある場合 → 移行される
 
 **事前条件:**
-- `Setting.plugin_redmine_subtask_list_accordion` に設定値が存在する
+- DB に旧プラグインの設定値が存在する
 
 **確認方法:**
 ```ruby
@@ -333,10 +348,10 @@ legacy_settings = {
   'collapsed_trackers' => 'test',
   'collapsed_tracker_ids' => ['1', '2']
 }
-Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+write_legacy_setting(legacy_settings.to_yaml)
 
 # 新設定から対象キーを削除（移行をテストするため）
-new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings = (Setting.plugin_redmine_studio_plugin || {}).dup
 new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
 new_settings.delete('subtask_list_accordion_expand_all')
 new_settings.delete('subtask_list_accordion_collapsed_trackers')
@@ -344,28 +359,26 @@ new_settings.delete('subtask_list_accordion_collapsed_tracker_ids')
 Setting.plugin_redmine_studio_plugin = new_settings
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+output = run_install
 
 # 確認
 new_settings = Setting.plugin_redmine_studio_plugin
-puts "enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
-puts "expand_all: #{new_settings['subtask_list_accordion_expand_all'] == true}"
-puts "collapsed_trackers: #{new_settings['subtask_list_accordion_collapsed_trackers'] == 'test'}"
-puts "collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tracker_ids'] == ['1', '2']}"
+puts "[2-2] enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
+puts "[2-2] expand_all: #{new_settings['subtask_list_accordion_expand_all'] == true}"
+puts "[2-2] collapsed_trackers: #{new_settings['subtask_list_accordion_collapsed_trackers'] == 'test'}"
+puts "[2-2] collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tracker_ids'] == ['1', '2']}"
+puts "[2-2] Migrated 4: #{output.include?('Migrated 4 setting(s)')}"
 ```
 
 **期待結果:**
-- 各設定値が正しく移行される（すべて `true`）
-- 出力に `Migrated 4 setting(s)` が含まれる
+- 出力がすべて `true`（各設定値が正しく移行され、出力に `Migrated 4 setting(s)` が含まれる）
 
 ---
 
 ### [2-3] subtask_list_accordion: 既に移行済みの場合 → 上書きしない
 
 **事前条件:**
-- `Setting.plugin_redmine_subtask_list_accordion` に設定値が存在する
+- DB に旧プラグインの設定値が存在する
 - `Setting.plugin_redmine_studio_plugin` に既に同じキーの設定が存在する
 
 **確認方法:**
@@ -375,35 +388,33 @@ legacy_settings = {
   'enable_server_scripting_mode' => false,
   'expand_all' => true
 }
-Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+write_legacy_setting(legacy_settings.to_yaml)
 
 # 新設定に既に値を設定（既存の値）
-new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings = (Setting.plugin_redmine_studio_plugin || {}).dup
 new_settings['subtask_list_accordion_enable_server_scripting_mode'] = true  # 旧設定と異なる値
 new_settings['subtask_list_accordion_expand_all'] = false  # 旧設定と異なる値
 Setting.plugin_redmine_studio_plugin = new_settings
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+output = run_install
 
 # 確認（既存の値が維持されていること）
 new_settings = Setting.plugin_redmine_studio_plugin
-puts "enable_server_scripting_mode preserved: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == true}"
-puts "expand_all preserved: #{new_settings['subtask_list_accordion_expand_all'] == false}"
+puts "[2-3] enable_server_scripting_mode preserved: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == true}"
+puts "[2-3] expand_all preserved: #{new_settings['subtask_list_accordion_expand_all'] == false}"
+puts "[2-3] already migrated: #{output.include?('Settings already migrated or using defaults')}"
 ```
 
 **期待結果:**
-- 既存の設定値が上書きされない（既存の値が維持される）
-- 出力に `Settings already migrated or using defaults` が含まれる
+- 出力がすべて `true`（既存の設定値が上書きされず、出力に `Settings already migrated or using defaults` が含まれる）
 
 ---
 
 ### [2-4] subtask_list_accordion: 一部のキーのみ存在する場合 → 存在するキーのみ移行
 
 **事前条件:**
-- `Setting.plugin_redmine_subtask_list_accordion` に一部のキーのみ存在する
+- DB の旧プラグインの設定に一部のキーのみ存在する
 
 **確認方法:**
 ```ruby
@@ -412,29 +423,26 @@ legacy_settings = {
   'enable_server_scripting_mode' => false
   # expand_all, collapsed_tracker_ids は未設定
 }
-Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+write_legacy_setting(legacy_settings.to_yaml)
 
 # 新設定から対象キーを削除
-new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings = (Setting.plugin_redmine_studio_plugin || {}).dup
 new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
 new_settings.delete('subtask_list_accordion_expand_all')
 new_settings.delete('subtask_list_accordion_collapsed_tracker_ids')
 Setting.plugin_redmine_studio_plugin = new_settings
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+run_install
 
 # 確認
 new_settings = Setting.plugin_redmine_studio_plugin
-puts "enable_server_scripting_mode migrated: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
-puts "expand_all not migrated: #{new_settings['subtask_list_accordion_expand_all'].nil?}"
+puts "[2-4] enable_server_scripting_mode migrated: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
+puts "[2-4] expand_all not migrated: #{new_settings['subtask_list_accordion_expand_all'].nil?}"
 ```
 
 **期待結果:**
-- 存在するキー（`enable_server_scripting_mode`）のみ移行される
-- 存在しないキー（`expand_all` 等）は移行されない（nil のまま）
+- 出力がすべて `true`（存在するキー `enable_server_scripting_mode` のみ移行され、存在しないキー `expand_all` 等は nil のまま）
 - エラーが発生しない
 
 ---
@@ -442,7 +450,7 @@ puts "expand_all not migrated: #{new_settings['subtask_list_accordion_expand_all
 ### [2-5] subtask_list_accordion: 空の値（nil, 空文字, 空配列）の場合 → 正しく移行
 
 **事前条件:**
-- `Setting.plugin_redmine_subtask_list_accordion` に空の値が含まれる
+- DB の旧プラグインの設定に空の値が含まれる
 
 **確認方法:**
 ```ruby
@@ -453,10 +461,10 @@ legacy_settings = {
   'collapsed_trackers' => '',
   'collapsed_tracker_ids' => []
 }
-Setting.plugin_redmine_subtask_list_accordion = legacy_settings
+write_legacy_setting(legacy_settings.to_yaml)
 
 # 新設定から対象キーを削除
-new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings = (Setting.plugin_redmine_studio_plugin || {}).dup
 new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
 new_settings.delete('subtask_list_accordion_expand_all')
 new_settings.delete('subtask_list_accordion_collapsed_trackers')
@@ -464,20 +472,18 @@ new_settings.delete('subtask_list_accordion_collapsed_tracker_ids')
 Setting.plugin_redmine_studio_plugin = new_settings
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+run_install
 
 # 確認
 new_settings = Setting.plugin_redmine_studio_plugin
-puts "enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'].nil?}"
-puts "expand_all: #{new_settings['subtask_list_accordion_expand_all'] == false}"
-puts "collapsed_trackers: #{new_settings['subtask_list_accordion_collapsed_trackers'] == ''}"
-puts "collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tracker_ids'] == []}"
+puts "[2-5] enable_server_scripting_mode: #{new_settings.key?('subtask_list_accordion_enable_server_scripting_mode') && new_settings['subtask_list_accordion_enable_server_scripting_mode'].nil?}"
+puts "[2-5] expand_all: #{new_settings['subtask_list_accordion_expand_all'] == false}"
+puts "[2-5] collapsed_trackers: #{new_settings['subtask_list_accordion_collapsed_trackers'] == ''}"
+puts "[2-5] collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tracker_ids'] == []}"
 ```
 
 **期待結果:**
-- 空の値（nil, 空文字, 空配列, false）も正しく移行される
+- 出力がすべて `true`（空の値 nil・空文字・空配列・false も正しく移行される）
 - エラーが発生しない
 
 ---
@@ -490,24 +496,20 @@ puts "collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tr
 **確認方法:**
 ```ruby
 # 不正な YAML を直接 DB に書き込み
-Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
-Setting.create!(name: 'plugin_redmine_subtask_list_accordion', value: "invalid: yaml: ::\n  broken")
+write_legacy_setting("invalid: yaml: ::\n  broken")
 
 # タスク実行（例外が発生しないこと）
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-
 begin
-  Rake::Task['redmine_studio_plugin:install'].invoke
-  puts "No exception raised: true"
+  output = run_install
+  puts "[2-6] No exception raised: true"
+  puts "[2-6] No settings to migrate: #{output.include?('No settings to migrate')}"
 rescue => e
-  puts "No exception raised: false (#{e.message})"
+  puts "[2-6] No exception raised: false (#{e.message})"
 end
 ```
 
 **期待結果:**
-- 例外が発生しない（rescue で処理される）
-- 出力に `No settings to migrate` が含まれる
+- 出力がすべて `true`（例外が発生せず、出力に `No settings to migrate` が含まれる）
 
 ---
 
@@ -525,62 +527,62 @@ end
 ```ruby
 # 旧プラグインフォルダが存在しないことを確認
 legacy_plugin_path = Rails.root.join('plugins', 'redmine_subtask_list_accordion')
-puts "Legacy plugin exists: #{File.directory?(legacy_plugin_path)}"
+puts "[2-7] Legacy plugin absent: #{!File.directory?(legacy_plugin_path)}"
 
 # DB に直接レコードを作成（YAML 形式）
-Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
-legacy_yaml = {
+legacy_settings = {
   'enable_server_scripting_mode' => false,
   'expand_all' => true
-}.to_yaml
-Setting.create!(name: 'plugin_redmine_subtask_list_accordion', value: legacy_yaml)
+}
+write_legacy_setting(legacy_settings.to_yaml)
 
 # 新設定から対象キーを削除
-new_settings = Setting.plugin_redmine_studio_plugin || {}
+new_settings = (Setting.plugin_redmine_studio_plugin || {}).dup
 new_settings.delete('subtask_list_accordion_enable_server_scripting_mode')
 new_settings.delete('subtask_list_accordion_expand_all')
 Setting.plugin_redmine_studio_plugin = new_settings
 
 # タスク実行
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
+run_install
 
 # 確認
 new_settings = Setting.plugin_redmine_studio_plugin
-puts "enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
-puts "expand_all: #{new_settings['subtask_list_accordion_expand_all'] == true}"
+puts "[2-7] enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == false}"
+puts "[2-7] expand_all: #{new_settings['subtask_list_accordion_expand_all'] == true}"
 ```
 
 **期待結果:**
-- 旧プラグインが削除されていても、DB から設定を読み取って移行できる
-- 設定値が正しく移行される
+- 出力がすべて `true`（旧プラグインが削除されていても、DB から設定を読み取って移行できる）
 
 ---
 
-### [2-8] 後処理: テスト用設定のクリーンアップ
+### [2-8] 後処理: テスト前の設定に戻す
+
+「Runner スクリプトの共通部分」で控えた値に戻す。
 
 **確認方法:**
 ```ruby
-# 旧設定を削除
-begin
-  Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
-rescue
-  # 設定が存在しない場合は無視
-end
+# 旧設定をテスト前に戻す（無かったら消すだけ）
+Setting.where(name: 'plugin_redmine_subtask_list_accordion').destroy_all
+write_legacy_setting(ORIGINAL_LEGACY_VALUE) if ORIGINAL_LEGACY_VALUE
 
-# 新設定をデフォルトに戻す
-new_settings = Setting.plugin_redmine_studio_plugin || {}
-new_settings['subtask_list_accordion_enable_server_scripting_mode'] = true
-new_settings['subtask_list_accordion_expand_all'] = false
-new_settings['subtask_list_accordion_collapsed_trackers'] = ''
-new_settings['subtask_list_accordion_collapsed_tracker_ids'] = []
+# 新設定の対象キーをテスト前に戻す（無かったキーは消す）
+new_settings = (Setting.plugin_redmine_studio_plugin || {}).dup
+SUBTASK_KEYS.each do |key|
+  if ORIGINAL_SUBTASK_SETTINGS.key?(key)
+    new_settings[key] = ORIGINAL_SUBTASK_SETTINGS[key]
+  else
+    new_settings.delete(key)
+  end
+end
 Setting.plugin_redmine_studio_plugin = new_settings
 
-puts "Cleanup completed"
+restored = Setting.plugin_redmine_studio_plugin.slice(*SUBTASK_KEYS) == ORIGINAL_SUBTASK_SETTINGS &&
+           Setting.find_by(name: 'plugin_redmine_subtask_list_accordion')&.[](:value) == ORIGINAL_LEGACY_VALUE
+puts "[2-8] restored: #{restored}"
 ```
 
-**期待結果:** `Cleanup completed` が出力される
+**期待結果:** 出力が `true`
 
 ---
 
@@ -589,14 +591,7 @@ puts "Cleanup completed"
 ### タスクの再実行
 
 Rake タスクは一度実行すると「実行済み」としてマークされるため、
-テストで複数回実行する場合は `reenable` を呼ぶ必要がある:
-
-```ruby
-Rake::Task['redmine_studio_plugin:install'].reenable
-Rake::Task['redmine:plugins:migrate'].reenable
-Rake::Task['redmine_studio_plugin:install'].invoke
-```
-
+テストで複数回実行する場合は `reenable` を呼ぶ必要がある（「Runner スクリプトの共通部分」の `run_install`）。
 `redmine:plugins:migrate` も `reenable` が必要（install タスク内で呼び出されるため）。
 
 ---
@@ -605,8 +600,7 @@ Rake::Task['redmine_studio_plugin:install'].invoke
 
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-1. フェーズ 1: 既存の統合済みプラグインを無効化（init.rb → init.rb.bak, lib → lib.bak）
-2. フェーズ 2: 削除対象なしテスト実行（[1-1]）
-3. フェーズ 3: ダミープラグイン作成 → 削除対象ありテスト実行（[1-2], [1-3]）
-4. フェーズ 4: 設定移行テスト実行（[2-1] 〜 [2-7]）
-5. フェーズ 5: クリーンアップ（[2-8]）・有効化（init.rb.bak → init.rb, lib.bak → lib）
+1. フェーズ 0: 統合済みプラグインのフォルダを plugins の外へ移し、crontab を控える
+2. フェーズ 1: Runner スクリプト（共通部分＋[1-1]・[1-2]・[2-1]〜[2-8]）を流す
+3. フェーズ 2: ログの確認（[1-3]）
+4. フェーズ 3: 移したフォルダを戻し、crontab が控えと同じことを確かめる
