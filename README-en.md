@@ -64,6 +64,26 @@ cd /var/lib/redmine
 bundle exec rake redmine_studio_plugin:install RAILS_ENV=production
 ```
 
+#### About the cron job
+
+The overdue trigger of Auto Close runs daily at 3:00 via cron. This command registers the job in **the crontab of the user who runs it**.
+
+- Run it as the user that runs Redmine (such as `www-data` or `apache`). Example: `sudo -u www-data bundle exec rake redmine_studio_plugin:install RAILS_ENV=production`
+- At the end, it checks whether the registered job can be started under cron. If not, a `WARNING` is shown
+- If you have written an Auto Close line for this Redmine in `/etc/crontab` or `/etc/cron.d` yourself, the job is not registered to avoid running twice (the line in the crontab of the user who runs the command is removed)
+- If you ran the command before as another user, remove the line left in that user's crontab (check it with `sudo crontab -u <user> -l`)
+
+To check that it works, look at `log/auto_close.log` the next day. Each run adds one line containing `Completed`.
+
+So that the Ruby commands and gems are found under cron, the registered line includes PATH and the gem location settings (such as `GEM_HOME`, only those that are set). If the `TZ` environment variable is set when you run the install, `TZ` is also included as the time zone for the date used by the overdue check (cron does not pass environment variables). Make sure it has the same value as the `TZ` that Redmine runs with.
+
+Where crontab is not installed (such as the official Redmine Docker image), the install shows a `WARNING` and the line it would have registered, and continues. To use the overdue trigger of Auto Close, run that line daily yourself. For Docker, you can run it with `docker exec` from cron on the host.
+
+```bash
+# Example for the crontab on the host (replace <container> and '...' with the part of the shown line after "0 3 * * *")
+0 3 * * * docker exec -u redmine <container> sh -c '...'
+```
+
 ### 3. Restart Redmine
 
 Restart Redmine to apply the changes.
@@ -80,6 +100,8 @@ git pull
 ### 2. Update
 
 Already-applied steps are skipped, so you can use the same command as for a fresh install.
+Run it as the same user as for the install.
+A cron line registered by an older version is replaced with the new form (if you changed its time, the time is kept).
 
 ```bash
 cd /var/lib/redmine
@@ -228,6 +250,7 @@ APIs used internally by Redmine Studio. See the linked documents for details.
 ### 1. Run the uninstall command
 
 Removes cron job and rolls back DB migration.
+Run it as the same user as for the install. Only the line for this Redmine in that user's crontab is removed. Lines you wrote yourself in `/etc/cron.d` and so on are shown with their location, so remove them manually.
 
 ```bash
 cd /var/lib/redmine
