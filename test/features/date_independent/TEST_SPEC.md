@@ -52,7 +52,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 プラグインの登録状態を確認する。
 
-- バッチ 1: [1-1] 〜 [1-5] を1つのスクリプトにまとめて実行
+- バッチ 1: [1-1] 〜 [1-6] を1つのスクリプトにまとめて実行
 
 ### フェーズ 2: 機能テスト（バッチ 2〜3）
 
@@ -191,12 +191,20 @@ puts en_ok
 **チケット:**（プロジェクトを消すと一緒に消える）
 - date-independent-test-1 に、子チケットを 1 つ持つ親チケットを 3 つ（ステータス「新規」「進行中」「終了」）と、子チケットのないチケットを 1 つ
 - date-independent-test-2 に、子チケットを 1 つ持つ親チケットを 1 つ（ステータス「新規」）
+- 親チケットは「新規」で作り、子チケットを付けてから、親のステータスを変える（終了扱いの親には、終了していない子を付けられない）
 - 各テストの「親チケットID」は、特に書いていなければ date-independent-test-1 の「新規」の親チケット
 
 **ステータス:**
-- 既存の「新規」「進行中」「終了」ステータスを使用
+- 既存のステータスを使う。英語で作った環境でも同じに流せるように、名前では探さず、並び順で選ぶ。この仕様書の「新規」「進行中」「終了」は、次の 3 つを指す（判定はステータスの ID だけを見るので、名前が違っても結果は同じ）
+
+```ruby
+status_new = IssueStatus.where(is_closed: false).sorted.first          # 「新規」: 終了扱いでないものの 1 番目
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second # 「進行中」: 終了扱いでないものの 2 番目
+status_closed = IssueStatus.where(is_closed: true).sorted.first        # 「終了」: 終了扱いのものの 1 番目
+```
 
 **前提条件:**
+- Redmine の初期データ（既定の設定）を読み込み済みであること（言語は問わない）
 - Redmine の設定「子チケットの値から算出」が有効であること
   - `Setting.parent_issue_dates = 'derived'`
 
@@ -347,7 +355,7 @@ puts issue2.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
+status_new = IssueStatus.where(is_closed: false).sorted.first
 rule = DateIndependent.create(
   title: 'Allow New Status',
   is_enabled: true,
@@ -370,8 +378,8 @@ puts issue.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
-status_in_progress = IssueStatus.find_by(name: '進行中')
+status_new = IssueStatus.where(is_closed: false).sorted.first
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second
 rule = DateIndependent.create(
   title: 'Allow New Status Only',
   is_enabled: true,
@@ -395,8 +403,8 @@ puts issue.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
-status_in_progress = IssueStatus.find_by(name: '進行中')
+status_new = IssueStatus.where(is_closed: false).sorted.first
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second
 
 rule1 = DateIndependent.create(
   title: 'Rule 1',
@@ -427,9 +435,9 @@ puts issue.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
-status_in_progress = IssueStatus.find_by(name: '進行中')
-status_closed = IssueStatus.find_by(name: '終了')
+status_new = IssueStatus.where(is_closed: false).sorted.first
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second
+status_closed = IssueStatus.where(is_closed: true).sorted.first
 
 rule = DateIndependent.create(
   title: 'Multiple Statuses',

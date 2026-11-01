@@ -58,6 +58,7 @@ docker cp batch2.rb {Container}:/tmp/auto_close_batch2.rb
 docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/auto_close_batch2.rb
 ```
 
+- `bash` のブロックは bash で流す（Windows では Git Bash で、`MSYS_NO_PATHCONV=1` を付ける。付けないと `/usr/src/redmine` や `/tmp/...` が Windows のパスに書き換わる）
 - `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine や cron から書けなくなることがある。root が要る手順（`/etc/cron.d` を書く・cron を動かす）だけ `-u` を付けずに行う
 - `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
