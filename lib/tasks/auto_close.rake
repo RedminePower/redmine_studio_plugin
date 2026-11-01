@@ -41,9 +41,13 @@ namespace :redmine_studio_plugin do
             end
 
             User.current = action_user
-            RedmineStudioPlugin::AutoClose::AutoCloseService.apply_rule(rule, issue)
-            processed_ids << issue.id
-            already_processed[issue.id] = rule.id
+            if RedmineStudioPlugin::AutoClose::AutoCloseService.apply_rule(rule, issue)
+              processed_ids << issue.id
+              already_processed[issue.id] = rule.id
+            else
+              Rails.logger.error "[redmine_studio_plugin:auto_close] Error: Failed to process issue ##{issue.id}: #{issue.errors.full_messages.join(', ')}"
+              failed_ids << issue.id
+            end
           rescue => e
             Rails.logger.error "[redmine_studio_plugin:auto_close] Error: Failed to process issue ##{issue.id}: #{e.message}"
             failed_ids << issue.id
