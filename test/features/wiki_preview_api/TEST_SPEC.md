@@ -18,7 +18,8 @@ Redmine 本体のプレビュー画面と同じ `textilizable` を使用し、�
 | ルーティング | `POST /wiki_preview.json`, `POST /wiki_preview.xml` |
 | View ファイル | `app/views/wiki_previews/create.api.rsb` |
 | 認証 | ログイン必須（本体の `login_required` 設定に関わらず一律。未認証は 401）。`before_action :require_login`（`accept_api_auth :create` と併用で API キー認証も可） |
-| レンダリング | `view_context.textilizable(text, :project => project)` |
+| レンダリング | `@project` に指定のプロジェクトを入れてから `view_context.textilizable(text, :project => @project)`。マクロ（`ref_issues` の `-p`・`[current_project_id]` など）はビューの `@project` を「このページのプロジェクト」として使うため、Wiki の画面と同じく設定する |
+| プロジェクトの利用記録 | `skip_after_action :record_project_usage`。プレビューでは「最近使ったプロジェクト」の並びを変えない |
 | フォーマット固定 | textilizable 実行中だけ `lookup_context.formats = [:html]`（ensure で復元）。マクロが描画する HTML パーシャル（`issues/_list` 等）を解決するため。固定しないと JSON/XML 応答の format で `Missing partial` になる |
 | スタイルシート解決 | `stylesheet_urls` が表示用 CSS の URL を返す。Redmine 本体のレイアウトと同じ規則（`application.css` を持つテーマが設定されていればテーマ側、なければコアの `application.css`）で `view_context.stylesheet_path` により解決する |
 
@@ -77,6 +78,15 @@ API は JSON と XML の両方をサポートする。
   環境に存在するチケット ID／プロジェクト ID に合わせて調整する）。
 - `ref_issues` マクロ展開（[2-12]）には **`redmine_studio_plugin` が有効**で、対象プロジェクト
   （既定 `test-plugin`）に**チケットと wiki モジュール**があること。
+- 「このページのプロジェクト」の解決（[2-19]・[2-20]）には、`test-plugin` の**プロジェクト ID**（`{TestPluginProjectId}`）を使う。
+  また `test-plugin` **以外のプロジェクトにも閲覧できるチケットがあること**（なければ絞り込みの有無で件数が変わらず、判定できない）。
+  Runner で確認する:
+
+  ```ruby
+  p = Project.find_by(identifier: 'test-plugin')
+  others = Issue.visible(User.find_by(admin: true)).where.not(project_id: p.id).count
+  puts "TEST_PLUGIN_PROJECT_ID=#{p.id} OTHER_ISSUES=#{others}"   # OTHER_ISSUES が 1 以上であること
+  ```
 - 可視性 404（[2-15]）の検証には、以下のインフラデータを作成する（命名 `wikipreview_*`／再利用・削除しない）。
   Runner で作成する（`rails runner`）:
 
@@ -518,6 +528,55 @@ $response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.xml' -Method Post -Bo
 **期待結果:**
 - `<stylesheets type="array">` 配下に `<stylesheet>` 要素として CSS の URL が含まれる
 - URL の形式は環境により異なる（Redmine 6.x はダイジェスト付き `application-xxxx.css`、5.x はクエリ付き `application.css?タイムスタンプ`）ため、`.css` の後のクエリ文字列を許容して判定する
+
+---
+
+### [2-19] プロジェクト名なしの `-p` が project_id のプロジェクトに絞られる
+
+Wiki に貼ったときの `{{ref_issues(-p)}}` は、貼ったページのプロジェクトに絞られる。プレビューでも
+`project_id` のプロジェクトを「このページのプロジェクト」として同じ結果になることを確認する。
+
+**前提条件:** テスト前提条件の `{TestPluginProjectId}` を確認済み・`test-plugin` 以外にもチケットがある。
+
+**確認方法:**
+```powershell
+$h = @{'X-Redmine-API-Key'='{ApiKey}'}
+$count = {
+  param($text)
+  $body = @{ text = $text; project_id = {TestPluginProjectId} } | ConvertTo-Json
+  $r = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
+  $r.wiki_preview.html -replace '<[^>]+>', '' -replace '\s', ''
+}
+$current = & $count '{{ref_issues(-p, -c)}}'
+$named   = & $count '{{ref_issues(-p=test-plugin, -c)}}'
+"current=$current named=$named"
+($current -match '^\d+$') -and ($current -eq $named)
+```
+
+**期待結果:**
+- `-p`（プロジェクト名なし）の件数が `-p=test-plugin` の件数と同じ（すべてのプロジェクトの件数にならない）
+
+---
+
+### [2-20] `[current_project_id]` が project_id のプロジェクトの番号になる
+
+**前提条件:** [2-19] と同じ。
+
+**確認方法:**
+```powershell
+$h = @{'X-Redmine-API-Key'='{ApiKey}'}
+$body = @{ text = '{{ref_issues(-f:project_id=[current_project_id], -c)}}'; project_id = {TestPluginProjectId} } | ConvertTo-Json
+$r = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
+$current = $r.wiki_preview.html -replace '<[^>]+>', '' -replace '\s', ''
+$body = @{ text = '{{ref_issues(-f:project_id={TestPluginProjectId}, -c)}}'; project_id = {TestPluginProjectId} } | ConvertTo-Json
+$r = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
+$named = $r.wiki_preview.html -replace '<[^>]+>', '' -replace '\s', ''
+"current=$current named=$named"
+($current -match '^\d+$') -and ($current -eq $named)
+```
+
+**期待結果:**
+- エラー（`Error executing`）にならず、件数がプロジェクトの番号をじかに書いた `-f:project_id={TestPluginProjectId}` の件数と同じ（`-p` と違い、子プロジェクトのチケットは含まない）
 
 ---
 

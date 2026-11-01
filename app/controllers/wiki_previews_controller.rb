@@ -4,13 +4,18 @@ class WikiPreviewsController < ApplicationController
   accept_api_auth :create
   # 追加 API は本体の login_required 設定に関わらず一律ログイン必須にする（匿名アクセス遮断）
   before_action :require_login
+  # プレビューはプロジェクトを使ったことにしない（「最近使ったプロジェクト」の並びを変えない）
+  skip_after_action :record_project_usage, raise: false
 
   # POST /wiki_preview
   def create
     return unless validate_params!
 
-    project = find_project
-    @html = render_wiki(params[:text].to_s, project)
+    # マクロ（ref_issues の -p・[current_project_id] など）はビューの @project を
+    # 「このページのプロジェクト」として使う。Wiki の画面では Redmine 本体が設定するので、
+    # ここでも設定してから view_context を作る（ビューは作った時点でインスタンス変数を写す）。
+    @project = find_project
+    @html = render_wiki(params[:text].to_s, @project)
     @stylesheets = stylesheet_urls
 
     respond_to do |format|
