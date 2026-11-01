@@ -47,14 +47,19 @@ redmine_studio_plugin の Auto Close 機能のテスト仕様。以下の2つの
 
 ## テスト実行フロー
 
-### フェーズ 0: Puma 停止
+### フェーズ 0: Runner テストの流し方
 
-SQLite ロック競合を回避するため、Runner テスト実行前に Puma を停止する。
-詳細は CLAUDE.md の「SQLite ロック競合の回避」を参照。
+Puma は止めずに、動かしたまま Runner テストを流す。公式 Docker イメージでは Puma がコンテナの PID 1 なので、止めるとコンテナごと止まり、`docker exec` が使えなくなる。
+
+各バッチの Ruby スクリプトはファイルにしてコンテナにコピーし、`redmine` 利用者で実行する。`bash -c "... rails runner '...'"` の形でコードを直接渡すと、`!` や引用符の扱いで壊れやすい。
 
 ```bash
-docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
+docker cp batch2.rb {Container}:/tmp/auto_close_batch2.rb
+docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/auto_close_batch2.rb
 ```
+
+- `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine や cron から書けなくなることがある。root が要る手順（`/etc/cron.d` を書く・cron を動かす）だけ `-u` を付けずに行う
+- `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
 ### フェーズ 1: 登録確認テスト（バッチ 1）
 
@@ -79,12 +84,12 @@ docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid
 - [2-H] エッジケーステスト
 
 **バッチ 4: rake タスク（[2-I]）**
-- [2-I] rake タスク（install / uninstall。[2-I-1b]・[2-I-1c] は crontab が入っている環境、[2-I-1d] は入っていない環境で行う）
+- [2-I] rake タスク（install / uninstall。[2-I-1b]・[2-I-1e]・[2-I-1c] は crontab が入っている環境、[2-I-1d] は入っていない環境で行う）
 - reenable/invoke が必要なため別バッチで実行
 
 ### フェーズ 3: コンテナ再起動
 
-HTTP テスト・ブラウザテストに備え、コンテナを再起動して Puma を復帰させる。
+HTTP テスト・ブラウザテストに備え、コンテナを再起動する。バッチ 4 の install / uninstall で変わった DB を Puma に読み直させ、cron のプロセスの残骸（[2-I] の「cron が動いているかの確かめ方」）も片づける。crontab の中身は残るが、再起動したあとの cron は動いていない。
 
 ```bash
 docker restart {Container}
@@ -551,7 +556,8 @@ puts ac.valid? # true
 **手順:**
 ```ruby
 # nil の場合（after_initialize で 50 にデフォルト設定されるため有効）
-ac = AutoClose.new(title: 'Test', trigger_type: 'expired', action_status: 1, action_user: 'author', max_issues_per_run: nil)
+# 期限切れのルールは条件が 1 つは要るので、trigger_tracker を付ける
+ac = AutoClose.new(title: 'Test', trigger_type: 'expired', trigger_tracker: Tracker.first.id, action_status: 1, action_user: 'author', max_issues_per_run: nil)
 puts ac.valid? # true（max_issues_per_run は 50 になる）
 
 # 0の場合
@@ -873,6 +879,27 @@ rake タスク `check_expired` を実行し、期限切れチケットの検出�
 プラグインのインストール・アンインストール用 rake タスクのテスト。
 install / uninstall はプラグイン全体のタスク（`redmine_studio_plugin:install` / `redmine_studio_plugin:uninstall`）。
 
+この章の手順に書いたコマンド（rake・`crontab`・`env -i ...` など）は、コンテナの中で、フェーズ 0 と同じく `redmine` 利用者で実行する（cron の行は、実行した利用者の crontab に入る）。ホストから流すときは、パイプ・`$HOME`・`TZ=...` の前置きがコンテナの中で効くように、`sh -c` に包んで渡す:
+
+```bash
+docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rake redmine_studio_plugin:install
+docker exec -i -u redmine -w /usr/src/redmine {Container} sh -c '<手順に書いたコマンド>'
+```
+
+- root が要るのは、`/etc/cron.d` を書く・消すときと、cron を入れる・動かすときだけ（`-u` を付けない）
+- 「crontab が入っている環境」は、root で `apt-get update && apt-get install -y cron` を実行して作る
+- install は統合済みの旧プラグインのフォルダを消すので、`plugins` の中を `redmine` 利用者が書き換えられない環境では権限のエラーになる。そのときは `plugins` の持ち主を確かめる
+
+**cron が動いているかの確かめ方:**
+
+手順の多くは登録した行を `env -i ...` で手で流すので、cron が動いていなくても確かめられる。cron に実際に動かさせて確かめるときは、root で `docker exec {Container} cron` を実行して cron を動かす。
+
+公式 Docker イメージでは、止めた cron のプロセスが PID 1 の Puma に片づけられず、`[cron] <defunct>`（状態 `Z`）として残る。`pgrep cron` はこれも数えるので、動いていなくても見つかる。状態を見て、`Z` でないものがあるかで確かめる:
+
+```bash
+docker exec {Container} ps -o pid,stat,comm -C cron
+```
+
 ### [2-I-1] install タスクの実行
 
 **手順:**
@@ -886,6 +913,7 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 - 実行時刻が `0 3 * * *`（毎日3時）である
 - エントリに `PATH=` が含まれ、その中に Ruby のフォルダー（公式 Docker イメージなら `/usr/local/bin`）がある
 - 公式 Docker イメージでは、エントリに `GEM_HOME=/usr/local/bundle` と `BUNDLE_APP_CONFIG=/usr/local/bundle` も含まれる
+- install を実行した環境に `TZ` が設定されていれば、エントリに `TZ=<その値>` も含まれる。設定されていなければ含まれない
 - ログに「Registered in the crontab of user '<実行した利用者>'」か「Already registered in the crontab of user ...」が出力される
 - ログに「Checked: rake can be started under cron.」が出力される
 
@@ -927,13 +955,32 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 - `log/auto_close.log` に「Completed」を含む行が出る
 - もう一度 install を実行すると「Already registered」になり、crontab は変わらない
 
+### [2-I-1e] 時間帯（TZ）を行に付ける
+
+**条件:**
+- [2-I-1b] の後（実行した利用者の crontab に、この Redmine の行がある）
+- OS の時間帯の設定（`/etc/localtime`）が UTC
+
+**手順:**
+1. `TZ=Asia/Tokyo bundle exec rake redmine_studio_plugin:install` を実行し、`crontab -l` で確認
+2. もう一度、同じコマンドを実行
+3. 期日が「日本時間の昨日」のチケットと「日本時間の今日」のチケットを、期限切れのルールの対象にして用意する
+4. 登録された行の時刻より後ろを、cron と同じ条件で実行する（[2-I-1b] の手順 4 と同じ）。日本時間と UTC で日付が違う時間帯（日本時間の 0:00〜9:00）に行う
+5. `TZ` を付けずに `bundle exec rake redmine_studio_plugin:install` を実行し、`crontab -l` で確認
+
+**期待結果:**
+- 1: ログに「Removed: <TZ の無い行>」と「Registered in the crontab of user ...: <新しい行>」が出力され、行に `TZ=Asia/Tokyo` が含まれる
+- 2: 「Already registered」になり、crontab は変わらない
+- 4: 「日本時間の昨日」が期日のチケットは処理され、「日本時間の今日」が期日のチケットは処理されない
+- 5: 行から `TZ=` が外れる
+
 ### [2-I-1c] /etc/cron.d に登録がある場合（二重にしない）
 
 **条件:**
 - [2-I-1b] の後（実行した利用者の crontab に、この Redmine の行がある）
 
 **手順:**
-1. `/etc/cron.d/redmine_auto_close` に、この Redmine の行（利用者の欄つき）を書く
+1. root で、`/etc/cron.d/redmine_auto_close` に、この Redmine の行（利用者の欄つき）を書く
 2. 実行した利用者の crontab に、別の Redmine の行を足す（例: `cd /other/redmine && bundle exec rake redmine_studio_plugin:auto_close:check_expired`）
 3. `bundle exec rake redmine_studio_plugin:install` を実行
 4. `crontab -l` で cron の内容を確認
@@ -968,7 +1015,7 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 **手順:**
 1. `bundle exec rake redmine_studio_plugin:uninstall` を実行
 2. `crontab -l` で cron が解除されていることを確認
-3. `auto_closes` テーブルが削除されていることを確認
+3. プラグインのテーブル（`auto_closes` など）が削除されていることを確認
 
 **期待結果:**
 - エラーなく完了する
@@ -976,11 +1023,11 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 - ログに「Removed: <この Redmine の行>」が出力され、cron エントリが削除されている
 - 別の Redmine の行・コメントにした行は残っている
 - 実行した利用者の crontab に行が無いときは「No cron job in the crontab of user ...」が出力される
-- `auto_closes` テーブルが存在しない
+- プラグインのテーブル（`db/migrate` で作るものすべて。`auto_closes` のほか、ほかの機能のテーブルも）が存在しない
 
 **備考:**
-- uninstall は cron 解除と DB ロールバック（`auto_closes` テーブル削除）を行う
-- 他のテーブル（Redmine 本体、他プラグイン）には影響しない
+- uninstall は cron 解除と、プラグインのマイグレーションを最初（`VERSION=0`）まで戻す処理を行う。自動クローズ以外の機能のテーブルとデータも消える。uninstall のあとは必ず install し直し、ほかの機能のテストはそのあとに流す
+- Redmine 本体・他プラグインのテーブルには影響しない
 - 通常のテストでは実行しない（プラグイン削除時のみ使用）
 - 実行後はプラグインが動作しなくなるため、再度 `install` が必要
 
@@ -1026,17 +1073,20 @@ install / uninstall はプラグイン全体のタスク（`redmine_studio_plugi
 
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-1. フェーズ 0: Puma 停止（SQLite ロック回避）
+1. フェーズ 0: Runner テストの流し方を確かめる（Puma は止めない）
 2. フェーズ 1: 登録確認テスト実行（バッチ 1）
 3. フェーズ 2: 機能テスト実行（セットアップ → バッチ 2～4）
 4. フェーズ 3: コンテナ再起動（HTTP テスト・ブラウザテストに備える）
 5. HTTP テスト実行
 6. ブラウザテスト実行
 
-テストデータの管理は CLAUDE.md の「テストデータの管理」ルールに従う。
+### テストデータの管理
+
+- テストデータ（「2. 機能テスト」の「テストデータ」に挙げたプロジェクト・ユーザー・カスタムフィールドと、テストで作ったルール）は、セットアップの最初に前回の残りを消してから作り、バッチ 3 のあと（バッチ 4 の uninstall より前）に消す。何度流しても同じ結果になるようにするため
+- 既存のトラッカー・ステータスは使うだけで、変えない
 
 ### Runner テスト実行時の注意事項
 
-- バッチ実行のガイドラインは CLAUDE.md の「Runner テストのバッチ実行」を参照
-- SQLite ロック回避は CLAUDE.md の「SQLite ロック競合の回避」を参照
-- bash 経由での `!` エスケープ問題は CLAUDE.md の「Runner テスト」セクションを参照
+- バッチごとに 1 つのスクリプトにまとめ、各テストの結果を `[2-A-1] OK` / `[2-A-1] NG: <理由>` の形で出す。1 つのテストが例外で止まっても、後続のテストは流れるように、テストごとに `begin`〜`rescue` で囲む
+- スクリプトはファイルにして渡す（フェーズ 0）。bash の引数に Ruby のコードを直接書くと、`!` が履歴展開されたり引用符がずれたりする
+- SQLite のロックエラーが出たときは、少し待ってそのバッチを流し直す（フェーズ 0）

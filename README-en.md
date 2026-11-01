@@ -75,7 +75,7 @@ The overdue trigger of Auto Close runs daily at 3:00 via cron. This command regi
 
 To check that it works, look at `log/auto_close.log` the next day. Each run adds one line containing `Completed`.
 
-So that the Ruby commands and gems are found under cron, the registered line includes PATH and the gem location settings (such as `GEM_HOME`, only those that are set).
+So that the Ruby commands and gems are found under cron, the registered line includes PATH and the gem location settings (such as `GEM_HOME`, only those that are set). If the `TZ` environment variable is set when you run the install, `TZ` is also included as the time zone for the date used by the overdue check (cron does not pass environment variables). Make sure it has the same value as the `TZ` that Redmine runs with.
 
 Where crontab is not installed (such as the official Redmine Docker image), the install shows a `WARNING` and the line it would have registered, and continues. To use the overdue trigger of Auto Close, run that line daily yourself. For Docker, you can run it with `docker exec` from cron on the host.
 
