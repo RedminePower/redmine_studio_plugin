@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'yaml'
+require_relative '../redmine_studio_plugin/auto_close/cron_job'
 
 namespace :redmine_studio_plugin do
   desc 'プラグインのインストール（設定移行 + 旧プラグイン削除 + DBマイグレーション + cron登録）'
@@ -46,30 +47,60 @@ namespace :redmine_studio_plugin do
     Rake::Task['redmine:plugins:migrate'].invoke
     puts 'Done'
 
-    # 4. cron登録
+    # 4. cron登録（扱うのは実行した利用者の crontab の、この Redmine の行だけ）
     puts "\n[4/4] Registering cron job..."
-    redmine_path = Rails.root
-    cron_line = "0 3 * * * cd #{redmine_path} && bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production >> log/auto_close.log 2>&1"
-    current_cron = `crontab -l 2>/dev/null` rescue ''
-
-    # 旧プラグイン（redmine_auto_close）の cron エントリを削除
-    if current_cron.include?('redmine_auto_close:check_expired')
-      current_cron = current_cron.lines.reject { |line| line.include?('redmine_auto_close:check_expired') }.join
-      IO.popen('crontab -', 'w') { |io| io.write(current_cron) }
-      puts 'Removed legacy cron job (redmine_auto_close)'
-    end
-
-    if current_cron.include?('redmine_studio_plugin:auto_close:check_expired')
-      puts 'Already registered'
-    else
-      new_cron = current_cron.chomp + "\n" + cron_line + "\n"
-      IO.popen('crontab -', 'w') { |io| io.write(new_cron) }
-      puts "Registered cron job: #{cron_line}"
-    end
+    redmine_studio_plugin_register_cron_job
 
     puts "\n=== Install completed ==="
     puts 'Please restart Redmine to apply changes.'
     Rails.logger.info '[redmine_studio_plugin] Install task completed'
+  end
+
+  # 期限切れ時の自動クローズを毎日動かす cron の行を登録する
+  def redmine_studio_plugin_register_cron_job
+    cron = RedmineStudioPlugin::AutoClose::CronJob
+    root = Rails.root
+    user = cron.user_name
+    current, error = cron.read_crontab
+    if current.nil?
+      puts "  Could not read the crontab of user '#{user}': #{error}"
+      puts '  The cron job was not registered.'
+      return
+    end
+
+    path = cron.cron_path
+    elsewhere = cron.system_entries(root)
+    plan = cron.plan_install(current, root, path, registered_elsewhere: elsewhere.any?)
+
+    if plan[:text] != current
+      ok, message = cron.write_crontab(plan[:text])
+      unless ok
+        puts "  Could not write the crontab of user '#{user}': #{message}"
+        return
+      end
+    end
+
+    plan[:removed].each { |line| puts "  Removed: #{line}" }
+    cron.other_lines(current, root).each { |line| puts "  Left as is (not for this Redmine): #{line}" }
+    if elsewhere.any?
+      elsewhere.each { |file, line| puts "  Already registered in #{file}: #{line}" }
+      puts "  Not added to the crontab of user '#{user}' to avoid running twice."
+      return
+    end
+
+    state = plan[:added] ? 'Registered' : 'Already registered'
+    puts "  #{state} in the crontab of user '#{user}': #{plan[:line]}"
+
+    # cron の中と同じ条件で、rake を起動できるかを試す
+    ok, output = cron.self_test(root, path)
+    if ok
+      puts '  Checked: rake can be started under cron.'
+    else
+      puts '  WARNING: rake could not be started in the same environment as cron (PATH=/usr/bin:/bin, no other variables).'
+      puts '  The cron job will probably fail. Error:'
+      output.lines.reject { |line| line.start_with?("\tfrom") }.first(3).each { |line| puts "    #{line.chomp[0, 300]}" }
+    end
+    puts '  Each run writes its result to log/auto_close.log ("Completed" on success).'
   end
 
   # Subtask List Accordion の設定移行
