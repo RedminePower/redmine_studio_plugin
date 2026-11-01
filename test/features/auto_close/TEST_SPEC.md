@@ -273,6 +273,35 @@ puts en_ok
 **期待結果:**
 - 親チケットのステータスは変化しない
 
+#### [2-A-3] アクションのバリデーション（1つ以上必須）
+
+**手順:**
+```ruby
+cf = IssueCustomField.find_by(name: 'AutoClose_UserField')
+
+# アクションなし
+ac = AutoClose.new(title: 'Test')
+puts ac.valid? # false
+puts ac.errors[:action_assigned_to_custom_field].any? # true
+
+# 「親チケットにも追加」だけ
+ac = AutoClose.new(title: 'Test', is_action_comment_parent: true)
+puts ac.valid? # false
+
+# 「カスタムフィールドで指定」だけ
+ac = AutoClose.new(title: 'Test', action_assigned_to_custom_field: cf.id)
+puts ac.valid? # true
+
+# 「コメントを追加」だけ
+ac = AutoClose.new(title: 'Test', action_comment: 'test')
+puts ac.valid? # true
+```
+
+**期待結果:**
+- アクションなし・「親チケットにも追加」だけの場合はバリデーションエラー（「いずれか一つ以上のアクションを設定してください。」）
+- アクションなしの場合、「カスタムフィールドで指定」にもエラーが付く
+- 「カスタムフィールドで指定」だけ・「コメントを追加」だけの場合は有効
+
 ---
 
 ### [2-B] トリガー条件テスト
