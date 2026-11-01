@@ -193,32 +193,32 @@ nil の場合はプロパティ自体が省略される（`"deleted_by": null` �
 
 ## テスト実行フロー
 
-### フェーズ 0: Puma 停止
+### フェーズ 0: Runner テストの流し方
 
-SQLite ロック競合を回避するため、Runner テスト実行前に Puma を停止する。
+Puma は止めずに、動かしたまま Runner テストを流す。公式 Docker イメージでは Puma がコンテナの PID 1 なので、止めるとコンテナごと止まり、`docker exec` が使えなくなる。
+
+各バッチの Ruby スクリプトはファイルにしてコンテナにコピーし、`redmine` 利用者で実行する。`bash -c "... rails runner '...'"` の形でコードを直接渡すと、`!` や引用符の扱いで壊れやすい。
 
 ```bash
-docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
+docker cp batch1.rb {Container}:/tmp/studio_settings_api_batch1.rb
+docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/studio_settings_api_batch1.rb
 ```
 
-### フェーズ 1: 登録確認テスト（バッチ 1-2）
+- `bash` のブロックは bash で流す（Windows では Git Bash で、`MSYS_NO_PATHCONV=1` を付ける。付けないと `/usr/src/redmine` や `/tmp/...` が Windows のパスに書き換わる）
+- `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine から書けなくなることがある。root が要る手順だけ `-u` を付けずに行う
+- `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
-プラグインの登録状態を確認する。
+### フェーズ 1: Runner テスト（バッチ 1-3）
+
+プラグインの登録状態と、設定・履歴・可視性の動きを確認する。
 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
+- バッチ 3: [1-30] ～ [1-34] を1つのスクリプトにまとめて実行（可視性）
 
-### フェーズ 2: コンテナ再起動
+### フェーズ 2: HTTP テスト
 
-HTTP テストに備え、コンテナを再起動して Puma を復帰させる。
-
-```bash
-docker restart {Container}
-```
-
-### フェーズ 3: HTTP テスト
-
-API の動作を確認する。
+API の動作を確認する。コンテナの再起動は要らない。Runner テストで変えるのは DB の中身だけで、Puma はリクエストのたびに DB を読む。
 
 ---
 
@@ -2698,22 +2698,21 @@ $body = @{ version = 1 } | ConvertTo-Json
 
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-1. フェーズ 0: Puma 停止（SQLite ロック回避）
-2. フェーズ 1: 登録確認テスト実行
+1. フェーズ 0: Runner テストの流し方を確かめる（Puma は止めない）
+2. フェーズ 1: Runner テスト実行
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
    - バッチ 3: [1-30]～[1-34] 可視性（Runner）。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id を出力する
-3. フェーズ 2: コンテナ再起動（HTTP テストに備える）
-4. フェーズ 3: HTTP テスト実行
+3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
    - [2-14]～[2-23]: 可視性（HTTP）。バッチ 3 の出力キー / ID を事前準備に設定してから実行する
 
 ### Runner テスト実行時の注意事項
 
-- バッチ実行のガイドラインは CLAUDE.md の「Runner テストのバッチ実行」を参照
-- SQLite ロック回避は CLAUDE.md の「SQLite ロック競合の回避」を参照
-- bash 経由での `!` エスケープ問題は CLAUDE.md の「Runner テスト」セクションを参照
+- バッチごとに 1 つのスクリプトにまとめ、各テストの結果を `[1-1] OK` / `[1-1] NG: <理由>` の形で出す。1 つのテストが例外で止まっても、後続のテストは流れるように、テストごとに `begin`〜`rescue` で囲む
+- スクリプトはファイルにして渡す（フェーズ 0）。bash の引数に Ruby のコードを直接書くと、`!` が履歴展開されたり引用符がずれたりする
+- SQLite のロックエラーが出たときは、少し待ってそのバッチを流し直す（フェーズ 0）
 
 ### HTTP テスト実行時の注意事項
 
