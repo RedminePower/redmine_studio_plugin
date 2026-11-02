@@ -1,7 +1,5 @@
 # 開発の進め方
 
-[English](CONTRIBUTING-en.md)
-
 ## ブランチ
 
 master は、利用者に配っている版です。README の手順で `git clone` すると master が入るので、master に入れたものは、そのまま利用者に届きます。
