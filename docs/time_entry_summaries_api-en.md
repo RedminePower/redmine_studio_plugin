@@ -96,10 +96,11 @@ The digest is built from the following values of the time entries in the group (
 | An issue is moved to another project | The group of the old project changes (or disappears) and the group of the new project changes (or appears) |
 | Permissions change and the visible time entries change | The digest is computed from the visible entries, so it changes |
 
-The following changes do not change the digest. Both are rare, and clients are expected to have a way to re-fetch (such as a reload).
+The following changes do not change the digest. All of them are rare, and clients are expected to have a way to re-fetch (such as a reload).
 
 - Only comments or custom fields are bulk-updated without changing the updated time
 - Issue IDs are swapped so that their sum stays the same
+- Only the comment is edited within the same second as the digest was requested (on databases that store the updated time only to the second)
 
 The way the digest is computed may change in later versions. Clients may store digests, but must not interpret their content.
 

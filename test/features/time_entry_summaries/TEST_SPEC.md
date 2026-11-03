@@ -97,10 +97,14 @@ puts File.exist?(File.join(plugin_dir, 'app/views/time_entry_summaries/index.api
 | [2-3] | 消す: 2 件のうち 1 件を消すと要約値が変わり、最後の 1 件を消すと区切りごと返らなくなる |
 | [2-4] | 付け替える: チケットを消して作業時間を別のチケットへ付け替える（更新日時は変わらない）と要約値が変わる。作業分類を消して別の分類へ付け替えたときも変わる |
 | [2-5] | プロジェクトを移す: チケットを別のプロジェクトへ移すと、元のプロジェクトの区切りが消え、移した先の区切りが返る |
-| [2-6] | 権限を変える: 「すべての作業時間」→「自分の作業時間だけ」→ プロジェクトのメンバーから外す → `view_time_entries` を外す、で見える区切りが変わり、毎回、標準の `GET /time_entries.json` で見える区切りと同じになる |
+| [2-6] | 権限を変える: 「すべての作業時間」→「自分の作業時間だけ」→ プロジェクトのメンバーから外す → `view_time_entries` を外す、で見える区切りが変わり、毎回、標準の `GET /time_entries.json` で見える区切り（外した後は状態コード）と同じになる |
 | [2-7] | `user_id` で人を絞れる |
-| [2-8] | 引数の確認: from・to が無い・形が違う・ありえない日付・to が from より前・63 日は 422、62 日・1 日は 200。`user_id` が 101 人は 422、100 人は 200 |
-| [2-9] | 未認証は 401 |
+| [2-8] | 引数の確認: from・to が無い・形が違う・ありえない日付・to が from より前・63 日は 422、62 日・1 日は 200。`user_id` が 101 人は 422（`user_id[]=` の配列の形でも）、100 人は 200。知らない引数は無視して 200 |
+| [2-9] | 匿名でも作業時間が見える状態（公開プロジェクト・匿名のロールに `view_time_entries`・ログイン不要）でも、未認証は 401（標準の一覧は 200） |
+| [2-10] | from・to の当日は含み、範囲の外の作業日は返らない |
+| [2-11] | `project_id` を付けると、そのプロジェクトの区切りだけが返り、標準の一覧と同じになる。メンバーでない非公開プロジェクトは標準の一覧と同じ状態コード |
+| [2-12] | 保存した絞り込み（`query_id`）は使わず、from・to の期間で返る |
+| [2-13] | 区切りが 30 個あっても、ページに分けずにすべて返る |
 
 作業日は 2001 年 1 月を使い、`user_id` でテスト用のユーザーに絞るので、ほかのデータとは混ざらない。
 
@@ -113,6 +117,7 @@ def cleanup
   User.where("login LIKE ?", "#{PREFIX}%").each(&:destroy)
   Role.where("name LIKE ?", "#{PREFIX}%").each(&:destroy)
   TimeEntryActivity.where("name LIKE ?", "#{PREFIX}%").each { |a| a.destroy_without_reassign rescue nil }
+  TimeEntryQuery.where("name LIKE ?", "#{PREFIX}%").each(&:destroy)
 end
 
 def result(id)
@@ -132,10 +137,16 @@ def call_api(key, params)
   [$session.response.status, body]
 end
 
+# 標準の作業時間の一覧（/time_entries.json）の状態コード
+def standard_status(key, params)
+  headers = key ? { 'X-Redmine-API-Key' => key } : {}
+  $session.get '/time_entries.json', :params => params.merge(:limit => 100), :headers => headers
+  $session.response.status
+end
+
 # 標準の作業時間の一覧（/time_entries.json）から、同じ区切りの一覧を作る
 def standard_keys(key, params)
-  $session.get '/time_entries.json', :params => params.merge(:limit => 100), :headers => { 'X-Redmine-API-Key' => key }
-  return nil unless $session.response.status == 200
+  return nil unless standard_status(key, params) == 200
 
   JSON.parse($session.response.body)['time_entries'].map { |e| [e['user']['id'], e['spent_on'], e['project']['id']] }.uniq.sort
 end
@@ -272,12 +283,13 @@ begin
     # view_time_entries を持つロールがほかに無ければ 403、公開プロジェクトの組み込みロールなどにあれば 200（区切りは 0 件）。どちらも標準と同じ
     no_perm_status, no_perm_body = call_api(u2_key, base)
     no_perm_rows = no_perm_status == 200 ? no_perm_body['time_entry_summaries'] : []
+    no_perm_std_status = standard_status(u2_key, base)
     ok = all_rows.keys.sort == [k_d1p2, [u1.id, '2001-01-11', p2.id], k_d2p1, k_u2].sort &&
          own_rows.keys == [k_u2] &&
          no_p2_rows.keys.sort == [k_d2p1, k_u2].sort &&
-         [200, 403].include?(no_perm_status) && no_perm_rows.empty? &&
+         no_perm_status == no_perm_std_status && no_perm_rows.empty? &&
          [all_rows, own_rows, no_p2_rows].each_with_index.all? { |rows, i| rows.keys.sort == std[i] }
-    [ok, "all=#{all_rows.keys.inspect} own=#{own_rows.keys.inspect} no_p2=#{no_p2_rows.keys.inspect} no_perm=#{no_perm_status} std=#{std.inspect}"]
+    [ok, "all=#{all_rows.keys.inspect} own=#{own_rows.keys.inspect} no_p2=#{no_p2_rows.keys.inspect} no_perm=#{no_perm_status}/#{no_perm_std_status} std=#{std.inspect}"]
   end
 
   result('2-7') do
@@ -296,7 +308,9 @@ begin
       { :from => '2001-01-01', :to => '2001-03-03' } => 200, # 62 日
       { :from => '2001-01-10', :to => '2001-01-10' } => 200, # 1 日
       { :from => '2001-01-01', :to => '2001-01-31', :user_id => (1..101).to_a.join('|') } => 422,
-      { :from => '2001-01-01', :to => '2001-01-31', :user_id => (1..100).to_a.join('|') } => 200
+      { :from => '2001-01-01', :to => '2001-01-31', :user_id => (1..100).to_a.join('|') } => 200,
+      { :from => '2001-01-01', :to => '2001-01-31', :user_id => (1..101).map(&:to_s) } => 422, # user_id[]= の配列
+      { :from => '2001-01-01', :to => '2001-01-31', :unknown_param => 'x' } => 200 # 知らない引数は無視する
     }
     bad = cases.filter_map do |params, expected|
       s, b = call_api(admin_key, params)
@@ -307,8 +321,61 @@ begin
   end
 
   result('2-9') do
-    s, = call_api(nil, base)
-    [s == 401, "status=#{s}"]
+    # 匿名でも作業時間が見える状態（公開プロジェクト・匿名のロールに view_time_entries）にしても、本 API は 401 にする
+    old_login_required = Setting.login_required
+    anon = Role.anonymous
+    old_anon_perms = anon.permissions.dup
+    begin
+      Setting.login_required = '0'
+      anon.add_permission!(:view_time_entries)
+      p1.reload.update!(:is_public => true)
+      s, = call_api(nil, base)
+      std_s = standard_status(nil, base)
+      [s == 401 && std_s == 200, "status=#{s} standard=#{std_s}"]
+    ensure
+      p1.reload.update!(:is_public => false)
+      anon.reload.update!(:permissions => old_anon_perms)
+      Setting.login_required = old_login_required
+    end
+  end
+
+  # ここから先は、u2 のロールに view_time_entries を戻し、p2 のメンバーからは外れたままの状態で確かめる
+  r_view.reload.add_permission!(:view_time_entries)
+
+  result('2-10') do
+    # この時点の作業時間: u1 は 01-10（p2）・01-11（p1・p2）、u2 は 01-10（p1）
+    day10 = snap.call(admin_key, base.merge(:from => '2001-01-10', :to => '2001-01-10')).keys.map { |k| k[1] }.uniq
+    day11 = snap.call(admin_key, base.merge(:from => '2001-01-11', :to => '2001-01-11')).keys.map { |k| k[1] }.uniq
+    span = snap.call(admin_key, base.merge(:from => '2001-01-10', :to => '2001-01-11')).keys.map { |k| k[1] }.uniq.sort
+    outside = snap.call(admin_key, base.merge(:from => '2001-01-12', :to => '2001-01-31'))
+    [day10 == ['2001-01-10'] && day11 == ['2001-01-11'] && span == %w[2001-01-10 2001-01-11] && outside.empty?,
+     "day10=#{day10} day11=#{day11} span=#{span} outside=#{outside.keys}"]
+  end
+
+  result('2-11') do
+    in_p1 = snap.call(u2_key, base.merge(:project_id => p1.id))
+    std_p1 = standard_keys(u2_key, base.merge(:project_id => p1.id))
+    s_p2, = call_api(u2_key, base.merge(:project_id => p2.id))
+    std_s_p2 = standard_status(u2_key, base.merge(:project_id => p2.id))
+    [in_p1.any? && in_p1.keys.all? { |k| k[2] == p1.id } && in_p1.keys.sort == std_p1 && s_p2 == std_s_p2 && s_p2 != 200,
+     "p1=#{in_p1.keys} std=#{std_p1} p2=#{s_p2}/#{std_s_p2}"]
+  end
+
+  result('2-12') do
+    # 01-10 だけに絞る保存済みの絞り込みを作り、query_id を付けて 01-11 を聞く。保存済みの絞り込みは使わず、01-11 が返る
+    q = TimeEntryQuery.new(:name => "#{PREFIX}-query", :visibility => Query::VISIBILITY_PUBLIC, :user => admin)
+    q.filters = { 'spent_on' => { :operator => '><', :values => %w[2001-01-10 2001-01-10] } }
+    q.save!
+    days = snap.call(admin_key, base.merge(:from => '2001-01-11', :to => '2001-01-11', :query_id => q.id)).keys.map { |k| k[1] }.uniq
+    [days == ['2001-01-11'], "days=#{days}"]
+  end
+
+  result('2-13') do
+    # 区切りが 30 個あっても、ページに分けずにすべて返る
+    feb = Date.new(2001, 2, 1)
+    30.times { |i| mk_entry.call(u1, p1, nil, feb + i, 1.0, a2) }
+    rows = snap.call(admin_key, base.merge(:from => '2001-02-01', :to => '2001-03-02', :user_id => u1.id.to_s))
+    [rows.size == 30, "size=#{rows.size}"]
   end
 ensure
   cleanup
@@ -316,7 +383,7 @@ ensure
 end
 ```
 
-**期待結果:** `[2-1] OK` 〜 `[2-9] OK` がすべて出る
+**期待結果:** `[2-1] OK` 〜 `[2-13] OK` がすべて出る
 
 ---
 
@@ -378,8 +445,8 @@ Write-Host "status: $($r.StatusCode)"
 
 ### テストデータの管理
 
-- バッチ 2 は、名前・識別子・ログインが `tes-summary-test` で始まるプロジェクト・ユーザー・ロール・作業分類を作り、最初と最後（`ensure`）に消す。作業時間・チケットはプロジェクトと一緒に消える。途中で止まっても、流し直せば最初に消してから作り直す
-- バッチ 2 は REST API の設定を一時的に有効にし、最後に元の値に戻す
+- バッチ 2 は、名前・識別子・ログインが `tes-summary-test` で始まるプロジェクト・ユーザー・ロール・作業分類・保存した絞り込みを作り、最初と最後（`ensure`）に消す。作業時間・チケットはプロジェクトと一緒に消える。途中で止まっても、流し直せば最初に消してから作り直す
+- バッチ 2 は REST API の設定を一時的に有効にし、最後に元の値に戻す。[2-9] は「認証が必要」の設定と匿名のロールの権限を一時的に変え、そのテストの中で元に戻す
 - HTTP テストはデータを変えない
 
 ### Runner テスト実行時の注意事項

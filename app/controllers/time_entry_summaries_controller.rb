@@ -86,7 +86,8 @@ class TimeEntrySummariesController < TimelogController
         errors << "the period must be #{MAX_DAYS} days or less"
       end
     end
-    if params[:user_id].present? && params[:user_id].to_s.split('|').size > MAX_USERS
+    # user_id は "1|2|3" の形のほか、user_id[]= の配列でも来る
+    if Array(params[:user_id]).flat_map { |v| v.to_s.split('|') }.size > MAX_USERS
       errors << "user_id must list #{MAX_USERS} users or less"
     end
     return true if errors.empty?
