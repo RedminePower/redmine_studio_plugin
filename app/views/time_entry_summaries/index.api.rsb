@@ -1,0 +1,10 @@
+api.array :time_entry_summaries do
+  @summaries.each do |summary|
+    api.time_entry_summary do
+      api.user_id summary[:user_id]
+      api.spent_on summary[:spent_on]
+      api.project_id summary[:project_id]
+      api.digest summary[:digest]
+    end
+  end
+end

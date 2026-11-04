@@ -58,6 +58,7 @@ docker cp batch2.rb {Container}:/tmp/auto_close_batch2.rb
 docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/auto_close_batch2.rb
 ```
 
+- `bash` のブロックは bash で流す（Windows では Git Bash で、`MSYS_NO_PATHCONV=1` を付ける。付けないと `/usr/src/redmine` や `/tmp/...` が Windows のパスに書き換わる）
 - `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine や cron から書けなくなることがある。root が要る手順（`/etc/cron.d` を書く・cron を動かす）だけ `-u` を付けずに行う
 - `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
@@ -232,6 +233,7 @@ puts en_ok
 **ユーザー:**
 - autoclose-testuser1（担当者変更テスト用）
 - autoclose-testuser2（担当者変更テスト用）
+- autoclose-testuser3（保存の失敗のテスト用。どのテスト用プロジェクトのメンバーにもしない）
 
 **カスタムフィールド:**
 - AutoClose_BoolField（真偽値型、トリガー条件用）
@@ -520,6 +522,17 @@ puts ac.valid? # true
 
 **期待結果:**
 - 親チケットのコメントは「ルール1」（ID が小さい方が優先）
+
+#### [2-D-5] 親チケットを保存できない場合
+
+**条件:**
+- ルール: action_status=終了, action_assigned_to=autoclose-testuser3（プロジェクトのメンバーでないので、親チケットの保存が「担当者が無効」で失敗する）
+- 親チケット1件、子チケット1件
+
+**期待結果:**
+- 子チケットは終了になる（子チケットの保存は失敗しない）
+- 親チケットは変わらない（ステータス・担当者とも元のまま、履歴も増えない）
+- Redmine のログ（`log/<環境>.log`）に `[redmine_studio_plugin:auto_close] Error: Failed to process issue #<親チケット>: ` と、保存できなかった理由が出力される
 
 ---
 
@@ -871,6 +884,24 @@ rake タスク `check_expired` を実行し、期限切れチケットの検出�
 - チケット1はスキップ（エラーログ出力）
 - チケット2は正常に処理される
 - サマリーに processed: 1, failed: 1 と出力
+
+#### [2-H-5] チケットを保存できない場合は failed に数える
+
+**条件:**
+- ルール1: trigger_type=expired, trigger_subject_pattern=チケット1 だけに当たる形, action_user=author, action_assigned_to=autoclose-testuser3, action_comment=`ルール1`, is_action_comment_parent=true（プロジェクトのメンバーでないので、チケットの保存が「担当者が無効」で失敗する）
+- ルール2: trigger_type=expired, trigger_subject_pattern=チケット1・チケット2 の両方に当たる形, action_user=author, action_status=終了
+- チケット1: 期限切れ、親チケットあり（ルール1・ルール2 の両方に当たる）
+- チケット2: 期限切れ（ルール2 だけに当たる）
+
+**手順:**
+1. `check_expired` を実行する
+
+**期待結果:**
+- チケット1 はルール1 では変わらず、親チケットにも「ルール1」のコメントが付かない
+- チケット1 はルール2 で終了になる（ルール1 で失敗したチケットは「処理済み」にならない）
+- チケット2 は終了になる
+- サマリーは processed: 2, failed: 1（`processed: #<チケット1>, #<チケット2>`・`failed: #<チケット1>`。チケット1 はルール1 の失敗とルール2 の処理の両方に数える）
+- Redmine のログ（`log/<環境>.log`）に `[redmine_studio_plugin:auto_close] Error: Failed to process issue #<チケット1>: ` と、保存できなかった理由が出力される
 
 ---
 

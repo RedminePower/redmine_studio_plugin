@@ -36,32 +36,37 @@ redmine_studio_plugin の Status Background 機能のテスト仕様。
 
 ## テスト実行フロー
 
-### フェーズ 0: Puma 停止
+### フェーズ 0: Runner テストの流し方
+
+Puma は止めずに、動かしたまま Runner テストを流す。公式 Docker イメージでは Puma がコンテナの PID 1 なので、止めるとコンテナごと止まり、`docker exec` が使えなくなる。
+
+各バッチの Ruby スクリプトはファイルにしてコンテナにコピーし、`redmine` 利用者で実行する。`bash -c "... rails runner '...'"` の形でコードを直接渡すと、`!` や引用符の扱いで壊れやすい。
 
 ```bash
-docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
+docker cp batch1.rb {Container}:/tmp/status_background_batch1.rb
+docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/status_background_batch1.rb
 ```
+
+- `bash` のブロックは bash で流す（Windows では Git Bash で、`MSYS_NO_PATHCONV=1` を付ける。付けないと `/usr/src/redmine` や `/tmp/...` が Windows のパスに書き換わる）
+- `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine から書けなくなることがある。root が要る手順だけ `-u` を付けずに行う
+- `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
 ### フェーズ 1: Runner テスト
 
 - [1-1] 〜 [1-9] を1つのスクリプトにまとめて実行する。DB は書き換えない（設定はハッシュで渡す）
 
-### フェーズ 2: コンテナ再起動
+### フェーズ 2: ブラウザテスト（初期状態と有効化）
 
-```bash
-docker restart {Container}
-```
-
-### フェーズ 3: ブラウザテスト（初期状態と有効化）
+コンテナの再起動は要らない（Runner テストは DB を書き換えない）。
 
 - [3-1] をブラウザで確認する。終了扱いのステータスのチケットと、そうでないチケットを1件ずつ使う（無ければ作る）
 - テストの前の「背景色を変える」の状態を控えておく
 
-### フェーズ 4: HTTP テスト
+### フェーズ 3: HTTP テスト
 
 - [3-1] で有効にした状態で、[2-1] 〜 [2-3] を実行する
 
-### フェーズ 5: ブラウザテスト（色の選択・無効化・再オープン）
+### フェーズ 4: ブラウザテスト（色の選択・無効化・再オープン）
 
 - [3-2] 〜 [3-4] をブラウザで確認する
 - 終わったら、「背景色を変える」と色の選択をテストの前の状態に戻す

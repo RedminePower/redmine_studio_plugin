@@ -33,20 +33,26 @@ redmine_studio_plugin の Date Independent 機能のテスト仕様。
 
 ## テスト実行フロー
 
-### フェーズ 0: Puma 停止
+### フェーズ 0: Runner テストの流し方
 
-SQLite ロック競合を回避するため、Runner テスト実行前に Puma を停止する。
-詳細は CLAUDE.md の「SQLite ロック競合の回避」を参照。
+Puma は止めずに、動かしたまま Runner テストを流す。公式 Docker イメージでは Puma がコンテナの PID 1 なので、止めるとコンテナごと止まり、`docker exec` が使えなくなる。
+
+各バッチの Ruby スクリプトはファイルにしてコンテナにコピーし、`redmine` 利用者で実行する。`bash -c "... rails runner '...'"` の形でコードを直接渡すと、`!` や引用符の扱いで壊れやすい。
 
 ```bash
-docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
+docker cp batch1.rb {Container}:/tmp/date_independent_batch1.rb
+docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/date_independent_batch1.rb
 ```
+
+- `bash` のブロックは bash で流す（Windows では Git Bash で、`MSYS_NO_PATHCONV=1` を付ける。付けないと `/usr/src/redmine` や `/tmp/...` が Windows のパスに書き換わる）
+- `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine から書けなくなることがある。root が要る手順だけ `-u` を付けずに行う
+- `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
 ### フェーズ 1: 登録確認テスト（バッチ 1）
 
 プラグインの登録状態を確認する。
 
-- バッチ 1: [1-1] 〜 [1-5] を1つのスクリプトにまとめて実行
+- バッチ 1: [1-1] 〜 [1-6] を1つのスクリプトにまとめて実行
 
 ### フェーズ 2: 機能テスト（バッチ 2〜3）
 
@@ -59,13 +65,9 @@ docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid
 **バッチ 3: エッジケーステスト（[2-C]）**
 - [2-C] エッジケーステスト
 
-### フェーズ 3: コンテナ再起動
+### フェーズ 3: HTTP テスト
 
-HTTP テスト・ブラウザテストに備え、コンテナを再起動して Puma を復帰させる。
-
-```bash
-docker restart {Container}
-```
+[3-1] の前に、date-independent-test-1 を対象にした有効なルールを 1 件作り、その id を `$id` に入れてから [3-1] を実行する。コンテナの再起動は要らない。Runner テストで変えるのは DB の中身（ルールと `Setting.parent_issue_dates`）だけで、Puma はリクエストのたびに DB を読む。
 
 ---
 
@@ -186,10 +188,23 @@ puts en_ok
 **トラッカー:**
 - 既存のトラッカーを使用
 
+**チケット:**（プロジェクトを消すと一緒に消える）
+- date-independent-test-1 に、子チケットを 1 つ持つ親チケットを 3 つ（ステータス「新規」「進行中」「終了」）と、子チケットのないチケットを 1 つ
+- date-independent-test-2 に、子チケットを 1 つ持つ親チケットを 1 つ（ステータス「新規」）
+- 親チケットは「新規」で作り、子チケットを付けてから、親のステータスを変える（終了扱いの親には、終了していない子を付けられない）
+- 各テストの「親チケットID」は、特に書いていなければ date-independent-test-1 の「新規」の親チケット
+
 **ステータス:**
-- 既存の「新規」「進行中」「終了」ステータスを使用
+- 既存のステータスを使う。英語で作った環境でも同じに流せるように、名前では探さず、並び順で選ぶ。この仕様書の「新規」「進行中」「終了」は、次の 3 つを指す（判定はステータスの ID だけを見るので、名前が違っても結果は同じ）
+
+```ruby
+status_new = IssueStatus.where(is_closed: false).sorted.first          # 「新規」: 終了扱いでないものの 1 番目
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second # 「進行中」: 終了扱いでないものの 2 番目
+status_closed = IssueStatus.where(is_closed: true).sorted.first        # 「終了」: 終了扱いのものの 1 番目
+```
 
 **前提条件:**
+- Redmine の初期データ（既定の設定）を読み込み済みであること（言語は問わない）
 - Redmine の設定「子チケットの値から算出」が有効であること
   - `Setting.parent_issue_dates = 'derived'`
 
@@ -340,7 +355,7 @@ puts issue2.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
+status_new = IssueStatus.where(is_closed: false).sorted.first
 rule = DateIndependent.create(
   title: 'Allow New Status',
   is_enabled: true,
@@ -363,8 +378,8 @@ puts issue.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
-status_in_progress = IssueStatus.find_by(name: '進行中')
+status_new = IssueStatus.where(is_closed: false).sorted.first
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second
 rule = DateIndependent.create(
   title: 'Allow New Status Only',
   is_enabled: true,
@@ -388,8 +403,8 @@ puts issue.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
-status_in_progress = IssueStatus.find_by(name: '進行中')
+status_new = IssueStatus.where(is_closed: false).sorted.first
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second
 
 rule1 = DateIndependent.create(
   title: 'Rule 1',
@@ -420,9 +435,9 @@ puts issue.send(:needs_derived)
 ```ruby
 Setting.parent_issue_dates = 'derived'
 project = Project.find_by(identifier: 'date-independent-test-1')
-status_new = IssueStatus.find_by(name: '新規')
-status_in_progress = IssueStatus.find_by(name: '進行中')
-status_closed = IssueStatus.find_by(name: '終了')
+status_new = IssueStatus.where(is_closed: false).sorted.first
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second
+status_closed = IssueStatus.where(is_closed: true).sorted.first
 
 rule = DateIndependent.create(
   title: 'Multiple Statuses',
@@ -576,15 +591,21 @@ Invoke-WebRequest -Uri "$base/date_independents/$id" -Method Post -WebSession $s
 
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
-1. フェーズ 0: Puma 停止（SQLite ロック回避）
+1. フェーズ 0: Runner テストの流し方を確かめる（Puma は止めない）
 2. フェーズ 1: 登録確認テスト実行（バッチ 1）
 3. フェーズ 2: 機能テスト実行（セットアップ → バッチ 2〜3）
-4. フェーズ 3: コンテナ再起動
-5. フェーズ 4: HTTP テスト実行（[3-1]）
+4. フェーズ 3: HTTP テスト実行（[3-1]）
 
-テストデータの管理は CLAUDE.md の「テストデータの管理」ルールに従う。
+### テストデータの管理
+
+- テストデータ（「2. 機能テスト」の「テストデータ」に挙げたプロジェクトとチケット）は、セットアップの最初に前回の残りを消してから作り、HTTP テストのあとに消す。何度流しても同じ結果になるようにするため
+- ルールは、[2-A-2] 以降の各テストの最初と、HTTP テストのあとに、すべて消す（`DateIndependent.destroy_all`）。前のテストのルールが残っていると、結果が変わる（たとえば [2-A-3] のルールが残ると [2-A-4] が `false` になる）
+- `Setting.parent_issue_dates` は、セットアップの前の値を控えておき、HTTP テストのあとに戻す（[2-A-1] で `independent` に、[2-A-2] 以降で `derived` に変える）
+- ルールをすべて消すので、もとからあるルールも消える。テスト用の環境で流す
+- 既存のトラッカー・ステータスは使うだけで、変えない
 
 ### Runner テスト実行時の注意事項
 
-- バッチ実行のガイドラインは CLAUDE.md の「Runner テストのバッチ実行」を参照
-- SQLite ロック回避は CLAUDE.md の「SQLite ロック競合の回避」を参照
+- バッチごとに 1 つのスクリプトにまとめ、各テストの結果を `[2-A-1] OK` / `[2-A-1] NG: <理由>` の形で出す。1 つのテストが例外で止まっても、後続のテストは流れるように、テストごとに `begin`〜`rescue` で囲む
+- スクリプトはファイルにして渡す（フェーズ 0）。bash の引数に Ruby のコードを直接書くと、`!` が履歴展開されたり引用符がずれたりする
+- SQLite のロックエラーが出たときは、少し待ってそのバッチを流し直す（フェーズ 0）

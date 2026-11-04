@@ -25,6 +25,7 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
   - **Cache Bundle API** - Completes the Redmine Studio cache update in a single request
   - **Issues Bulk Write API** - Creates/updates multiple issues in a single request
   - **Issues With Extras API** - Returns issue reads with extra fields used by Redmine Studio
+  - **Time Entry Summaries API** - Summarizes time entries per user x spent date x project so that changed groups can be detected
   - **Wiki Preview API** - Converts Wiki text to HTML
 
 ## Supported Redmine
@@ -243,6 +244,7 @@ APIs used internally by Redmine Studio. See the linked documents for details.
 | Cache Bundle API | Retrieves a cache bundle | [docs/cache_bundle_api-en.md](docs/cache_bundle_api-en.md) |
 | Issues Bulk Write API | Creates/updates multiple issues in a single request | [docs/issues_bulk_write_api-en.md](docs/issues_bulk_write_api-en.md) |
 | Issues With Extras API | Returns issue reads with extra fields used by Redmine Studio | [docs/issues_with_extras_api-en.md](docs/issues_with_extras_api-en.md) |
+| Time Entry Summaries API | Summarizes time entries per user x spent date x project | [docs/time_entry_summaries_api-en.md](docs/time_entry_summaries_api-en.md) |
 | Wiki Preview API | Converts Wiki text to HTML | [docs/wiki_preview_api-en.md](docs/wiki_preview_api-en.md) |
 
 ## Uninstall

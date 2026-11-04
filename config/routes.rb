@@ -22,6 +22,9 @@ Rails.application.routes.draw do
   # Issues With Extras (issues API with plugin-provided extra fields: reply_count / children_count)
   resources :issues_with_extras, only: [:index, :show]
 
+  # Time Entry Summaries (digest of time entries per user x spent_on x project)
+  resources :time_entry_summaries, only: [:index]
+
   # Teams Button
   get 'teams_button/user_email/:id', to: 'teams_button#user_email'
 

@@ -44,7 +44,9 @@ module RedmineStudioPlugin
           return if items.empty?
 
           # Apply the first matching rule
-          RedmineStudioPlugin::AutoClose::AutoCloseService.apply_rule(items.first, parent_issue)
+          unless RedmineStudioPlugin::AutoClose::AutoCloseService.apply_rule(items.first, parent_issue)
+            Rails.logger.error "[redmine_studio_plugin:auto_close] Error: Failed to process issue ##{parent_issue.id}: #{parent_issue.errors.full_messages.join(', ')}"
+          end
         end
       end
     end

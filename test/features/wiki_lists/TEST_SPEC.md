@@ -27,29 +27,28 @@ redmine_studio_plugin の Wiki Lists 機能のテスト仕様。
 
 ## テスト実行フロー
 
-### フェーズ 0: Puma 停止
+### フェーズ 0: Runner テストの流し方
 
-SQLite ロック競合を回避するため、Runner テスト実行前に Puma を停止する。
+Puma は止めずに、動かしたまま Runner テストを流す。公式 Docker イメージでは Puma がコンテナの PID 1 なので、止めるとコンテナごと止まり、`docker exec` が使えなくなる。
+
+各バッチの Ruby スクリプトはファイルにしてコンテナにコピーし、`redmine` 利用者で実行する。`bash -c "... rails runner '...'"` の形でコードを直接渡すと、`!` や引用符の扱いで壊れやすい。
 
 ```bash
-docker exec {Container} bash -c "kill $(cat /usr/src/redmine/tmp/pids/server.pid)"
+docker cp batch1.rb {Container}:/tmp/wiki_lists_batch1.rb
+docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner /tmp/wiki_lists_batch1.rb
 ```
+
+- `bash` のブロックは bash で流す（Windows では Git Bash で、`MSYS_NO_PATHCONV=1` を付ける。付けないと `/usr/src/redmine` や `/tmp/...` が Windows のパスに書き換わる）
+- `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine から書けなくなることがある。root が要る手順だけ `-u` を付けずに行う
+- `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
 ### フェーズ 1: Runner テスト
 
 バッチ 1: [1-1] 〜 [1-7] を1つのスクリプトにまとめて実行
 
-### フェーズ 2: コンテナ再起動
+### フェーズ 2: HTTP テスト
 
-HTTP テストに備え、コンテナを再起動して Puma を復帰させる。
-
-```bash
-docker restart {Container}
-```
-
-### フェーズ 3: HTTP テスト
-
-各マクロのオプション動作を確認する。
+各マクロのオプション動作を確認する。コンテナの再起動は要らない（Runner テストは DB を書き換えない）。
 
 ---
 
