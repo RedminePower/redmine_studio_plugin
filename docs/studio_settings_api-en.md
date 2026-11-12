@@ -52,7 +52,7 @@ Visibility is determined by `scope_type`. Login is required for all endpoints. `
 
 - `GET /studio_settings` (list) returns only visible settings (`project`-scoped settings are excluded for non-members). `user`-scoped settings are visible to all logged-in users, so everyone's can be read in bulk through the list. Do not put values in a `user`-scoped payload that others must not see (passwords, tokens, etc.).
 - Accessing an individual setting, its history, or its user assignments (show/create/update/delete/restore) that the user cannot read or write returns **403 Forbidden**.
-- `POST /studio_settings` with a `project` scope can only be created by a member of that project (or an admin). `global` settings can be created by any logged-in user. For the `user` scope, see "Personal settings (user scope)" below.
+- `POST /studio_settings` with a `project` scope can only be created by a member of that project (or an admin). `scope_id` must be the ID of an existing project (on create, a missing or unknown ID returns 422 for an admin and 403 for others; moving a setting to another project on update returns 422). `global` settings can be created by any logged-in user. For the `user` scope, see "Personal settings (user scope)" below.
 - `GET /users/:id/studio_settings` is allowed only when `:id` is the requester themselves or an admin (otherwise 403).
 
 ### Personal settings (user scope)
@@ -62,7 +62,7 @@ A setting each user owns one of per `schema_type`. `scope_id` is the owner's use
 | Operation | Behavior |
 |-----------|----------|
 | Create | If `scope_id` is omitted, the setting belongs to the requester. Only an admin can create one for another user (otherwise 403). The owner must be an existing user (otherwise 422). If a setting with the same owner and `schema_type` already exists, nothing is created and **409 Conflict** returns the existing setting |
-| Update | `expected_version` is required (see "Version" below). `scope_type` cannot be changed to or from `user` (422). `scope_id` and `schema_type` are ignored if sent |
+| Update | `expected_version` is required (see "Version" below). `scope_type` cannot be changed to or from `user` (422). `scope_id` and `schema_type` are ignored if sent (but a value of the wrong shape returns 422) |
 | Delete | Always a hard delete (regardless of `force`). The same `schema_type` can be created again afterwards |
 | History | Not recorded (the history list is always empty) |
 | User assignments | Not assignable. Replace/add return 422 |
@@ -680,7 +680,7 @@ The body is not `{ "errors": [...] }` but the current setting (same shape as `GE
 ### 422 Unprocessable Entity
 
 ```json
-{ "errors": ["Name can't be blank", "Schema type can't be blank", "Scope type can't be blank"] }
+{ "errors": ["Name cannot be blank", "Schema type cannot be blank", "Scope type cannot be blank"] }
 ```
 
 ```json
@@ -690,6 +690,24 @@ The body is not `{ "errors": [...] }` but the current setting (same shape as `GE
 ```json
 { "errors": ["user_ids must be an array"] }
 ```
+
+Related to the shape and length of the sent values (create, update, delete, restore). All shape errors are listed together. Length and the existence of the project or user are checked once the shape is correct:
+
+| Message | When |
+|---------|------|
+| `studio_setting is required` | `studio_setting` is missing or empty on create or update |
+| `studio_setting must be an object` | `studio_setting` is not an object (a JSON object, or an XML element with child elements), e.g. a string or an array |
+| `name must be a string` (same for `schema_type`, `scope_type`, `payload`) | The field is not a string. Send `payload` as a JSON string (an object is not accepted) |
+| `scope_id must be an integer` (same for `schema_version`) | The field cannot be read as an integer, or is outside -2147483648 to 2147483647 |
+| `version must be an integer` | `version` is missing or cannot be read as an integer on restore |
+| `comment must be a string` | `comment` is not a string (also checked on deletes that do not use it: `force=1` and the `user` scope) |
+| `comment is too long (maximum is 255 characters)` | `comment` is longer than 255 characters |
+| `Name is too long (maximum is 255 characters)` (same for `Schema type`) | `name` or `schema_type` is longer than 255 characters |
+| `Scope cannot be blank` | `scope_id` is missing when creating or moving a `project`-scoped setting (on create, non-admins get 403) |
+| `Scope must be an existing project` | The project of `scope_id` does not exist when creating or moving a `project`-scoped setting (on create, non-admins get 403) |
+| `Scope must be an existing user` | The user of `scope_id` does not exist for a `user`-scoped setting (groups and the anonymous user are not allowed) |
+
+Messages from model validation (those starting with a field name, such as `Name is too long …`) are returned in the user's language (e.g. in Japanese: 「名称 は255文字以内で入力してください」). The other messages are always in English.
 
 Related to personal settings and versions:
 

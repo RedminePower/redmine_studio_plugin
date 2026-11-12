@@ -15,6 +15,18 @@ class StudioSettingHistory < ActiveRecord::Base
 
   scope :ordered, -> { order(version: :desc) }
 
+  # comment 列（string 型）の長さの上限
+  MAX_COMMENT_LENGTH = 255
+
+  # comment として受けられない値なら、その理由を英語の文で返す（受けられる値・無いときは空）
+  def self.comment_errors(value)
+    return [] if value.nil?
+    return ['comment must be a string'] unless value.is_a?(String)
+    return ["comment is too long (maximum is #{MAX_COMMENT_LENGTH} characters)"] if value.length > MAX_COMMENT_LENGTH
+
+    []
+  end
+
   # Check if this history can be deleted
   def deletable?
     !is_current

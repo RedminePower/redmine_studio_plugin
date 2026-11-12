@@ -49,7 +49,17 @@ class StudioSettingHistoriesController < ApplicationController
 
   # POST /studio_settings/:id/restore
   def restore
-    version = params[:version].to_i
+    # version・comment の形と長さは、今の版か・版があるかを確かめるより前に断る
+    version = restore_version_param
+    comment = params[:comment]
+    messages = version.nil? ? ['version must be an integer'] : []
+    messages += StudioSettingHistory.comment_errors(comment)
+    if messages.any?
+      respond_to do |format|
+        format.api { render_api_errors(*messages) }
+      end
+      return
+    end
 
     # Check if trying to restore to current version
     if version == @studio_setting.current_history_version
@@ -64,8 +74,6 @@ class StudioSettingHistoriesController < ApplicationController
       render_404
       return
     end
-
-    comment = params[:comment]
 
     if @studio_setting.restore_from_version(version, User.current, comment: comment)
       respond_to do |format|
@@ -89,6 +97,15 @@ class StudioSettingHistoriesController < ApplicationController
     @studio_setting = StudioSetting.find(setting_id)
   rescue ActiveRecord::RecordNotFound
     render_404
+  end
+
+  # 戻す版。整数か整数の文字列でなければ nil
+  def restore_version_param
+    raw = params[:version]
+    return raw if raw.is_a?(Integer)
+    return nil unless raw.is_a?(String) && raw.strip.match?(/\A\d+\z/)
+
+    raw.strip.to_i
   end
 
   def find_history

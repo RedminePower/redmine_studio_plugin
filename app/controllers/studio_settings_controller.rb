@@ -7,6 +7,14 @@ class StudioSettingsController < ApplicationController
   before_action :find_studio_setting, only: [:show, :update, :destroy]
   before_action :authorize_studio_setting, only: [:show]
   before_action :authorize_edit_studio_setting, only: [:update, :destroy]
+  before_action :reject_invalid_studio_setting, only: [:create, :update]
+  before_action :reject_invalid_comment, only: [:destroy]
+
+  # 作成・更新で受ける項目（文字列で受ける項目／整数で受ける項目）。形の違う値は 422 で断る
+  STRING_FIELDS = %i[name schema_type scope_type payload].freeze
+  INTEGER_FIELDS = %i[scope_id schema_version].freeze
+  # 整数の列（integer 型）で持てる範囲
+  INTEGER_RANGE = (-2**31..2**31 - 1).freeze
 
   # GET /studio_settings
   def index
@@ -104,7 +112,7 @@ class StudioSettingsController < ApplicationController
       return render_403 unless @studio_setting.editable?(User.current)
     end
     # project スコープはメンバー（or admin）のみ作成可。global は誰でも作れる。決まった値でない範囲は検証（422）で断る
-    return render_403 if @studio_setting.scope_type == 'project' && !@studio_setting.visible?(User.current)
+    return render_403 if @studio_setting.project_scope? && !@studio_setting.visible?(User.current)
 
     @studio_setting.created_by = User.current
     @studio_setting.updated_by = User.current
@@ -189,7 +197,12 @@ class StudioSettingsController < ApplicationController
       @studio_setting.destroy
     else
       # Logical delete (creates history record)
-      @studio_setting.soft_delete(User.current, comment: params[:comment])
+      unless @studio_setting.soft_delete(User.current, comment: params[:comment])
+        respond_to do |format|
+          format.api { render_validation_errors(@studio_setting) }
+        end
+        return
+      end
     end
 
     respond_to do |format|
@@ -216,7 +229,50 @@ class StudioSettingsController < ApplicationController
   end
 
   def studio_setting_params
-    params.require(:studio_setting).permit(:name, :schema_type, :scope_type, :scope_id, :payload, :schema_version)
+    params.require(:studio_setting).permit(*STRING_FIELDS, *INTEGER_FIELDS)
+  end
+
+  def reject_invalid_studio_setting
+    render_input_errors(studio_setting_input_errors)
+  end
+
+  def reject_invalid_comment
+    render_input_errors(StudioSettingHistory.comment_errors(params[:comment]))
+  end
+
+  def render_input_errors(messages)
+    return if messages.empty?
+
+    # before_action の中では、respond_to で包まないと Redmine 5.1 で Content-Type が text/html になる
+    respond_to do |format|
+      format.api { render_api_errors(*messages) }
+    end
+  end
+
+  # 作成・更新で受けた studio_setting の形を確かめ、悪い所をすべて返す（問題が無ければ空）
+  def studio_setting_input_errors
+    raw = params[:studio_setting]
+    return ['studio_setting is required'] if raw.nil?
+    return ['studio_setting must be an object'] unless raw.is_a?(ActionController::Parameters)
+    return ['studio_setting is required'] if raw.empty?
+
+    messages = STRING_FIELDS.filter_map do |field|
+      "#{field} must be a string" if raw.key?(field) && !raw[field].nil? && !raw[field].is_a?(String)
+    end
+    messages += INTEGER_FIELDS.filter_map do |field|
+      "#{field} must be an integer" if raw.key?(field) && !integer_or_blank?(raw[field])
+    end
+    messages + StudioSettingHistory.comment_errors(raw[:comment])
+  end
+
+  # 無い・空、または整数の列に入る整数（整数の文字列も。XML では数も文字列で届く）なら true
+  def integer_or_blank?(value)
+    return true if value.nil?
+    return INTEGER_RANGE.cover?(value) if value.is_a?(Integer)
+    return false unless value.is_a?(String)
+
+    text = value.strip
+    text.empty? || (text.match?(/\A-?\d+\z/) && INTEGER_RANGE.cover?(text.to_i))
   end
 
   # 最後にそろえた版。studio_setting の中だけで受ける（読みの version と同じ要素の中に置く）。
