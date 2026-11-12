@@ -6,8 +6,10 @@ Redmine Studio の汎用設定を Redmine サーバー側に保存・取得す�
 
 **主な機能:**
 - 汎用設定の CRUD 操作
-- 論理削除 / 物理削除のサポート
+- 論理削除 / 物理削除のサポート（プロジェクトを削除すると、その範囲の設定も物理削除）
 - ユーザーへの設定割り当て管理
+- 本人の設定（`scope_type = user`。1 人に 1 種類 1 つ・本人と admin だけが書ける・履歴なし・削除は物理削除・利用者を削除すると一緒に消える）
+- 版（`version`）による書き込みの衝突検出と、版だけを返すエンドポイント（`versions`）
 
 ## 機能の内部実装
 
@@ -16,6 +18,7 @@ Redmine Studio の汎用設定を Redmine サーバー側に保存・取得す�
 | モデル | `StudioSetting`, `StudioSettingAssignment`, `StudioSettingHistory` |
 | DBテーブル | `studio_settings`, `studio_setting_assignments`, `studio_setting_histories` |
 | コントローラ | `StudioSettingsController`, `StudioSettingUsersController`, `UserStudioSettingsController`, `StudioSettingHistoriesController` |
+| パッチ | `User` に `RedmineStudioPlugin::StudioSettings::UserPatch`（利用者の削除のあとに本人の設定を消す）、`Project` に `RedmineStudioPlugin::StudioSettings::ProjectPatch`（プロジェクトの削除のあとにその範囲の設定を消す） |
 | 認証 | API キー必須（未認証で 401） |
 
 ### API エンドポイント
@@ -25,6 +28,7 @@ Redmine Studio の汎用設定を Redmine サーバー側に保存・取得す�
 | GET | `/studio_settings.json` | 設定一覧取得 |
 | GET | `/studio_settings/:id.json` | 設定詳細取得 |
 | POST | `/studio_settings.json` | 設定作成 |
+| POST | `/studio_settings/versions.json` | 本人の設定（`own`: schema_type の配列）と id で頼んだ設定（`ids`: id の配列）の版だけを返す |
 | PUT | `/studio_settings/:id.json` | 設定更新 |
 | DELETE | `/studio_settings/:id.json` | 設定削除（論理/物理） |
 | GET | `/studio_settings/:id/users.json` | ユーザー割り当て一覧 |
@@ -84,6 +88,7 @@ Redmine 標準の形式切り替え機構により両形式に対応している
     "scope_type": "global",
     "scope_id": null,
     "schema_version": 0,
+    "version": 1,
     "payload": "{...}",
     "created_on": "2026-02-19T...",
     "created_by": { "id": 1, "name": "Admin" },
@@ -96,6 +101,42 @@ Redmine 標準の形式切り替え機構により両形式に対応している
 
 **注意:** `created_by`, `updated_by`, `deleted_by` は nullable なネストオブジェクト。
 nil の場合はプロパティ自体が省略される（`"deleted_by": null` ではなく、プロパティが存在しない）。
+
+**version:** 作成時 1、書き込み（更新・論理削除・復元）が成功するたびに 1 進む（すべてのスコープ。中身が同じ PUT でも進む）。履歴の `version`（履歴の通し番号）とは別物。
+PUT の `studio_setting` の中に `expected_version` を添えると、今の版と違えば 409 で今の設定（payload 込み）を返す。`studio_setting` の外に置いたものは見ない。
+数として読めない `expected_version`（`"1.0"`・`"abc"`・`true` など）は、スコープを問わず 422（`expected_version must be an integer`）。
+user スコープでは `expected_version` が必須（無ければ 422 `expected_version is required`）。
+
+**scope_type:** `global`・`project`・`user` のどれか（それ以外は 422。大文字小文字も区別する）。
+
+**user スコープ（本人の設定）:**
+
+| 操作 | 振る舞い |
+|------|----------|
+| 作成 | `scope_id` を省くと自分。他人の分を作れるのは admin だけ（403）。持ち主は実在の利用者（いなければ 422）。同じ持ち主・同じ schema_type が既にあれば 409 で今ある設定を返す |
+| 取得 | ログインしていれば誰でも読める（一覧でもまとめて読める） |
+| 更新・削除・履歴の操作 | 本人と admin だけ（403） |
+| 割り当て | 一覧は誰でも読める。置換・追加は本人と admin 以外は 403、本人と admin でも 422（本人の設定は人に割り当てない）。削除は本人と admin 以外は 403 |
+| 更新 | `scope_type` の user への／からの付け替えは 422（`scope_type cannot be changed to or from user`）。`scope_id` と `schema_type` は送っても無視する |
+| 削除 | 常に物理削除（以後 404）。同じ schema_type で作り直せる |
+| 履歴 | 残さない |
+
+**版だけの取得（POST /studio_settings/versions）:**
+```json
+// リクエスト
+{ "own": ["work_settings"], "ids": [12, 34] }
+// レスポンス
+{
+  "studio_setting_versions": {
+    "own":  [ { "id": 5, "schema_type": "work_settings", "version": 3 } ],
+    "team": [ { "id": 12, "version": 7, "updated_on": "2026-..." } ]
+  }
+}
+```
+- `own` は自分の本人の設定（削除済みでないもの）だけ。`team` は `ids` で頼んだうち、見える・削除済みでない設定（スコープは問わない。user スコープも返す）
+- 求めたのに返らないものは「無い」。payload は返さない
+- `own`・`ids` は配列で送る。どちらも無いとき・配列でないとき・`ids` に整数でない値があるときは 422（読めない依頼を 200 の空で返さない）。明示の空配列は 200
+- リクエストは `studio_setting_versions` で包んでもよい（XML は一番外側の要素が 1 つ要るので、包んで送る。JSON はどちらでも可）。XML の配列には `type="array"` が要る（無いと 422）
 
 **ユーザー割り当て一覧:**
 ```json
@@ -208,13 +249,14 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 - `-u redmine` を付けずに root で動かすと、ログや `files` の中に root の持ち物のファイルができ、あとで Redmine から書けなくなることがある。root が要る手順だけ `-u` を付けずに行う
 - `SQLite3::BusyException`（database is locked）が出たときは、少し待ってそのバッチを流し直す
 
-### フェーズ 1: Runner テスト（バッチ 1-3）
+### フェーズ 1: Runner テスト（バッチ 1-4）
 
 プラグインの登録状態と、設定・履歴・可視性の動きを確認する。
 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
-- バッチ 3: [1-30] ～ [1-34] を1つのスクリプトにまとめて実行（可視性）
+- バッチ 3: [1-30] ～ [1-35] を1つのスクリプトにまとめて実行（可視性・属性名の翻訳）
+- バッチ 4: [1-36] ～ [1-48] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け）
 
 ### フェーズ 2: HTTP テスト
 
@@ -361,6 +403,13 @@ rs.updated_by = User.current
 puts rs.valid? == false
 puts rs.errors[:scope_type].any?
 
+# scope_type は global / project / user のどれか（大文字小文字も区別する）
+rs = StudioSetting.new(name: 'Test', schema_type: 'review', scope_type: 'USER', scope_id: 1, schema_version: 0)
+rs.created_by = User.current
+rs.updated_by = User.current
+puts rs.valid? == false
+puts rs.errors[:scope_type].any?
+
 # schema_version >= 0
 rs = StudioSetting.new(name: 'Test', schema_type: 'review', scope_type: 'global', schema_version: -1)
 rs.created_by = User.current
@@ -375,7 +424,7 @@ puts rs.valid? == false
 ```
 
 **期待結果:**
-- 全て `true` が出力される（8回）
+- 全て `true` が出力される（10回）
 
 **備考:**
 - バリデーションエラーメッセージはロケールにより異なる（"can't be blank" / "cannot be blank"）
@@ -780,7 +829,7 @@ setting.destroy
 **期待結果:**
 - `true` が出力される（2回）
 
-### [1-26] current_version メソッド確認
+### [1-26] current_history_version メソッド確認（履歴の最新の通し番号）
 
 **確認方法:**
 ```ruby
@@ -789,16 +838,16 @@ User.current = admin
 setting = StudioSetting.create(name: 'CurrentVersionTest', schema_type: 'review', scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin)
 
 # 履歴なしの場合は 0
-puts setting.current_version == 0
+puts setting.current_history_version == 0
 
 # 履歴作成後
 setting.create_history('create', admin)
-puts setting.current_version == 1
+puts setting.current_history_version == 1
 
 setting.payload = '{"v2": true}'
 setting.save
 setting.create_history('update', admin)
-puts setting.current_version == 2
+puts setting.current_history_version == 2
 
 # クリーンアップ
 setting.destroy
@@ -895,7 +944,7 @@ puts fk&.on_delete == :cascade
 
 ## 1B. 可視性（Runner テスト）
 
-`StudioSetting.visible` scope / `visible?` を検証する。global は全ログインユーザーに可視、project スコープは当該プロジェクトのメンバーのみ、admin は全件。**バッチ 3**（[1-30]〜[1-34]）としてまとめて実行し、[1-30] が前提データを作る。
+`StudioSetting.visible` scope / `visible?` を検証する。global は全ログインユーザーに可視、project スコープは当該プロジェクトのメンバーのみ、admin は全件。**バッチ 3**（[1-30]〜[1-35]）としてまとめて実行し、[1-30] が前提データを作る。
 
 ### [1-30] 可視性テストデータ整備（前提）
 
@@ -1039,6 +1088,372 @@ puts en_ok
 ```
 
 **期待結果:** `true` が 2 回出力される
+
+---
+
+## 1C. 本人の設定と版（Runner テスト）
+
+user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付けを、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-48]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
+
+### [1-36] studio_settings の version / owner_id 列
+
+**確認方法:**
+```ruby
+cols = ActiveRecord::Base.connection.columns(:studio_settings).index_by(&:name)
+puts cols['version'].present?
+puts cols['version']&.null == false
+puts cols['version']&.default.to_s == '1'
+puts cols['owner_id'].present?
+puts cols['owner_id']&.null == true
+```
+
+**期待結果:**
+- `true` が 5 回（version は NOT NULL・既定値 1、owner_id は NULL 可）
+
+### [1-37] (schema_type, owner_id) の一意インデックス
+
+**確認方法:**
+```ruby
+idx = ActiveRecord::Base.connection.indexes(:studio_settings).find { |i| i.columns == %w[schema_type owner_id] }
+puts idx.present?
+puts idx&.unique == true
+# 持ち主のある行だけに効く条件付きの索引（MySQL は条件を持てないので条件なし。MySQL は NULL どうしを重ならないとみなすので同じ働き）
+if ActiveRecord::Base.connection.adapter_name =~ /mysql/i
+  puts idx&.where.blank?
+else
+  puts idx&.where.to_s.include?('owner_id IS NOT NULL')
+end
+```
+
+**期待結果:**
+- `true` が 3 回
+
+### [1-38] user スコープのバリデーションと持ち主
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+member = User.find_by_login('vis_member')
+User.current = admin
+t = "rt_user_#{SecureRandom.hex(4)}"
+attrs = { name: 'p', schema_type: t, scope_type: 'user', schema_version: 0, created_by: admin, updated_by: admin }
+
+# scope_id（持ち主）必須
+s = StudioSetting.new(attrs)
+puts s.valid? == false
+puts s.errors[:scope_id].any?
+
+# 保存すると owner_id = scope_id、版は 1
+s.scope_id = admin.id
+puts s.save
+puts s.owner_id == admin.id
+puts s.version == 1
+
+# 同じ持ち主・同じ schema_type は 2 つ目を作れない
+dup = StudioSetting.new(attrs.merge(scope_id: admin.id))
+puts dup.valid? == false
+puts dup.errors[:schema_type].any?
+
+# 持ち主が違えば同じ schema_type でも作れる
+other = StudioSetting.new(attrs.merge(scope_id: member.id))
+puts other.save
+
+# user 以外は owner_id を持たず、同じ schema_type をいくつでも作れる
+g1 = StudioSetting.create(attrs.merge(scope_type: 'global'))
+g2 = StudioSetting.create(attrs.merge(scope_type: 'global'))
+puts g1.persisted? && g2.persisted?
+puts g1.owner_id.nil? && g2.owner_id.nil?
+
+[s, other, g1, g2].each { |x| x.destroy if x.persisted? }
+```
+
+**期待結果:**
+- `true` が 10 回
+
+### [1-39] 版は書き込みのたびに進む（全スコープ）
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_ver_#{SecureRandom.hex(4)}"
+u = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: admin.id, schema_version: 0, created_by: admin, updated_by: admin)
+g = StudioSetting.create!(name: 'g', schema_type: t, scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin)
+puts u.version == 1 && g.version == 1
+
+u.update!(payload: '{"a":1}')
+g.update!(payload: '{"a":1}')
+puts u.reload.version == 2
+puts g.reload.version == 2
+
+u.update!(payload: '{"a":2}')
+puts u.reload.version == 3
+
+[u, g].each(&:destroy)
+```
+
+**期待結果:**
+- `true` が 4 回
+
+### [1-40] user スコープの visible? / editable?
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+member = User.find_by_login('vis_member')
+nonmember = User.find_by_login('vis_nonmember')
+User.current = admin
+t = "rt_perm_#{SecureRandom.hex(4)}"
+s = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: member.id, schema_version: 0, created_by: member, updated_by: member)
+
+# 読むのはログインしていれば誰でも
+puts s.visible?(member)
+puts s.visible?(nonmember)
+puts s.visible?(User.anonymous) == false
+puts StudioSetting.visible(nonmember).where(id: s.id).exists?
+
+# 書けるのは本人と admin だけ
+puts s.editable?(member)
+puts s.editable?(admin)
+puts s.editable?(nonmember) == false
+puts s.editable?(User.anonymous) == false
+
+s.destroy
+```
+
+**期待結果:**
+- `true` が 8 回
+
+### [1-41] user スコープは履歴を残さない
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_hist_#{SecureRandom.hex(4)}"
+u = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: admin.id, schema_version: 0, created_by: admin, updated_by: admin)
+u.create_history('create', admin)
+puts u.histories.count == 0
+
+g = StudioSetting.create!(name: 'g', schema_type: t, scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin)
+g.create_history('create', admin)
+puts g.histories.count == 1
+
+[u, g].each(&:destroy)
+```
+
+**期待結果:**
+- `true` が 2 回（user は 0 件、global は従来どおり 1 件）
+
+### [1-42] DB の一意インデックスはバリデーションを通さなくても重複を断る
+
+2 台の端末が同時に初回保存したとき、検証をすり抜けても DB が止めることを確かめる。
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_uniq_#{SecureRandom.hex(4)}"
+attrs = { name: 'p', schema_type: t, scope_type: 'user', scope_id: admin.id, schema_version: 0, created_by: admin, updated_by: admin }
+first = StudioSetting.create!(attrs)
+
+raised = false
+begin
+  # 検証を飛ばす（validate: false は before_validation も飛ばすので、owner_id は自分で入れる。
+  # 2 台がどちらも検証を通った後に保存する状況にそろえる）
+  dup = StudioSetting.new(attrs)
+  dup.owner_id = admin.id
+  dup.save(validate: false)
+rescue ActiveRecord::RecordNotUnique
+  raised = true
+end
+puts raised
+puts StudioSetting.where(schema_type: t).count == 1
+
+StudioSetting.where(schema_type: t).destroy_all
+```
+
+**期待結果:**
+- `true` が 2 回
+
+### [1-43] versions のルーティング
+
+**確認方法:**
+```ruby
+r = Rails.application.routes.recognize_path('/studio_settings/versions', method: :post)
+puts r[:controller] == 'studio_settings' && r[:action] == 'versions'
+# versions は POST だけ。GET は versions に向かない（show の :id = 'versions' として扱われ、404 になる）
+r2 = Rails.application.routes.recognize_path('/studio_settings/versions', method: :get) rescue nil
+puts r2.nil? || r2[:action] != 'versions'
+```
+
+**期待結果:**
+- `true` が 2 回
+
+### [1-44] 本人の設定は範囲・持ち主・種類を変えられない（モデル）
+
+コントローラーを通らない書き込み（runner・復元など）でも守られることを確かめる。
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+member = User.find_by_login('vis_member')
+User.current = admin
+t = "rt_immut_#{SecureRandom.hex(4)}"
+u = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: admin.id, schema_version: 0, created_by: admin, updated_by: admin)
+g = StudioSetting.create!(name: 'g', schema_type: t, scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin)
+
+# user → global、global → user は断る
+u.scope_type = 'global'
+puts u.save == false
+u.reload
+g.scope_type = 'user'
+g.scope_id = admin.id
+puts g.save == false
+g.reload
+
+# 本人の設定の持ち主・種類は変えられない
+u.scope_id = member.id
+puts u.save == false
+u.reload
+u.schema_type = "#{t}_x"
+puts u.save == false
+u.reload
+
+# ほかの範囲どうしの付け替えは従来どおりできる
+g.scope_type = 'project'
+g.scope_id = Project.first.id
+puts g.save
+puts u.reload.version == 1
+
+[u, g].each(&:destroy)
+```
+
+**期待結果:**
+- `true` が 6 回
+
+### [1-45] 本人の設定の持ち主は実在の利用者
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_owner_#{SecureRandom.hex(4)}"
+attrs = { name: 'p', schema_type: t, scope_type: 'user', schema_version: 0, created_by: admin, updated_by: admin }
+
+# いない ID・匿名・グループは持ち主にできない
+puts StudioSetting.new(attrs.merge(scope_id: 999_999)).valid? == false
+puts StudioSetting.new(attrs.merge(scope_id: User.anonymous.id)).valid? == false
+group = Group.first
+puts group.nil? || StudioSetting.new(attrs.merge(scope_id: group.id)).valid? == false
+
+# 実在の利用者なら作れる
+s = StudioSetting.new(attrs.merge(scope_id: admin.id))
+puts s.save
+s.destroy
+```
+
+**期待結果:**
+- `true` が 4 回（グループが無い環境では 3 つ目は確かめずに `true`）
+
+### [1-46] 論理削除・復元も版を進め、履歴を同じ取引の中で作る
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_lock_#{SecureRandom.hex(4)}"
+g = StudioSetting.create!(name: 'g', schema_type: t, scope_type: 'global', schema_version: 0, payload: '{"a":1}', created_by: admin, updated_by: admin)
+g.create_history('create', admin)
+puts g.version == 1
+
+# 論理削除：版が 2、履歴が 2 件（delete）
+puts g.soft_delete(admin)
+puts g.reload.version == 2
+puts g.histories.count == 2 && g.histories.find_by(is_current: true).change_type == 'delete'
+
+# 復元：版が 3、履歴が 3 件（undelete）、削除の印が消える
+puts g.restore_from_version(1, admin)
+puts g.reload.version == 3
+puts g.deleted_on.nil?
+puts g.histories.count == 3 && g.histories.find_by(is_current: true).change_type == 'undelete'
+puts g.current_history_version == 3
+
+g.destroy
+```
+
+**期待結果:**
+- `true` が 9 回
+
+### [1-47] 利用者を削除すると、その人の本人の設定も消える
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_userdel_#{SecureRandom.hex(4)}"
+mk = ->(login) {
+  u = User.new(firstname: 'Del', lastname: login, mail: "#{login}@example.invalid")
+  u.login = login
+  u.password = u.password_confirmation = 'Passw0rd!Passw0rd!'
+  u.save!
+  u
+}
+gone = mk.call("#{t}_a")
+stay = mk.call("#{t}_b")
+attrs = { name: 'p', schema_type: t, schema_version: 0 }
+mine  = StudioSetting.create!(attrs.merge(scope_type: 'user', scope_id: gone.id, created_by: gone, updated_by: gone))
+other = StudioSetting.create!(attrs.merge(scope_type: 'user', scope_id: stay.id, created_by: stay, updated_by: stay))
+team  = StudioSetting.create!(attrs.merge(scope_type: 'global', created_by: gone, updated_by: gone))
+team.assignments.create!(user_id: stay.id, assigned_by: admin)
+
+gone.destroy
+
+# 消した人の本人の設定だけが消え、ほかの人の本人の設定・チームの設定とその割り当ては残る
+puts !StudioSetting.exists?(mine.id)
+puts StudioSetting.exists?(other.id)
+puts StudioSetting.exists?(team.id) && team.reload.deleted_on.nil?
+puts team.assignments.count == 1
+
+StudioSetting.where(schema_type: t).destroy_all
+stay.destroy
+```
+
+**期待結果:**
+- `true` が 4 回
+
+### [1-48] プロジェクトを削除すると、そのプロジェクトの範囲の設定も消える
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_projdel_#{SecureRandom.hex(4)}"
+parent = Project.create!(name: "#{t}_p", identifier: "#{t}-p".tr('_', '-'))
+child  = Project.create!(name: "#{t}_c", identifier: "#{t}-c".tr('_', '-'), parent_id: parent.id)
+keep   = Project.create!(name: "#{t}_k", identifier: "#{t}-k".tr('_', '-'))
+attrs = { name: 'p', schema_type: t, schema_version: 0, scope_type: 'project', created_by: admin, updated_by: admin }
+on_parent = StudioSetting.create!(attrs.merge(scope_id: parent.id))
+on_parent.assignments.create!(user_id: admin.id, assigned_by: admin)
+on_child  = StudioSetting.create!(attrs.merge(scope_id: child.id))
+on_child.soft_delete(admin)
+on_keep   = StudioSetting.create!(attrs.merge(scope_id: keep.id))
+team      = StudioSetting.create!(attrs.merge(scope_type: 'global', scope_id: nil))
+
+parent.destroy
+
+# 消したプロジェクト（子プロジェクトと、論理削除したものを含む）の設定と割り当てが消え、ほかのプロジェクト・チームの設定は残る
+puts !StudioSetting.exists?(on_parent.id) && !StudioSettingAssignment.exists?(setting_id: on_parent.id)
+puts !Project.exists?(child.id) && !StudioSetting.exists?(on_child.id)
+puts StudioSetting.exists?(on_keep.id)
+puts StudioSetting.exists?(team.id)
+
+StudioSetting.where(schema_type: t).destroy_all
+keep.destroy
+```
+
+**期待結果:**
+- `true` が 4 回
 
 ---
 
@@ -1273,7 +1688,7 @@ $body = @{
     }
 } | ConvertTo-Json -Depth 3
 $created = Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$ApiKey" -Method POST -Body $body -ContentType "application/json"
-$deleteId = $created.id
+$deleteId = $created.studio_setting.id
 
 # 物理削除
 $response = Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$deleteId.json?key=$ApiKey&force=1" -Method DELETE
@@ -1916,14 +2331,17 @@ $response.Content.StartsWith("<?xml")
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/21.xml?key=$ApiKey" -Method GET
+# [2-2-1] で作成した ID を使用
+$response = Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$SettingId.xml?key=$ApiKey" -Method GET
 $response.StatusCode
 $response.Content -match "<studio_setting>"
+$response.Content -match "<version>"
 ```
 
 **期待結果:**
 - ステータスコード 200
 - `<studio_setting>` 要素が含まれる
+- `<version>` 要素が含まれる
 
 #### [2-7-3] 存在しない ID（XML 形式）→ 404
 
@@ -2553,8 +2971,9 @@ $ProjA = <proj_a（[1-30] 出力）>
 $MemberId = <member_id（[1-30] 出力）>
 
 # ProjA スコープ設定の ID を admin で取得
-$projA = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$AdminKey&scope_type=project&scope_id=$ProjA" -Method GET).studio_settings | Where-Object { $_.name -eq 'Vis_ProjA' }
-$projASettingId = $projA.id
+# （PowerShell の変数名は大文字小文字を区別しないので、$ProjA と重ならない名前にする）
+$projASetting = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$AdminKey&scope_type=project&scope_id=$ProjA" -Method GET).studio_settings | Where-Object { $_.name -eq 'Vis_ProjA' }
+$projASettingId = $projASetting.id
 ```
 
 ### [2-14] 一覧：非メンバーは global のみ（project 設定は除外）
@@ -2688,6 +3107,455 @@ $body = @{ version = 1 } | ConvertTo-Json
 
 ---
 
+## 2C. 本人の設定と版（HTTP テスト）
+
+本人の設定（user スコープ）の作成・更新・削除、版による衝突検出、`versions` エンドポイント、`ids` フィルタを確かめる。2B と同じ API キー（admin / vis_member / vis_nonmember）を使う。番号順に流す（前のテストで作った ID・版を後で使う）。
+
+2B の変数（`$AdminKey`・`$MemberKey`・`$NonMemberKey`・`$MemberId`・`$projASettingId`）をそのまま使う。2C だけを新しいシェルで流すときは、先に 2B の事前準備を流す。
+
+2C は、ほかの HTTP テストと違い、最後（[2-40]）に作った設定を消す（同じ schema_type での作り直しを何度でも確かめられるように）。
+
+### 事前準備
+
+```powershell
+# 2B の変数が無ければ止める（空のまま流すと、見えない設定の項目が素通りする）
+foreach ($n in 'AdminKey', 'MemberKey', 'NonMemberKey', 'MemberId', 'projASettingId') {
+    if (-not (Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue)) { throw "2B の事前準備を先に流す（$n が空）" }
+}
+$AdminId = (Invoke-RestMethod -Uri "{BaseUrl}/users/current.json?key=$AdminKey").user.id
+$T = "test_personal_" + (Get-Random)   # 本人の設定の schema_type（実行ごとに変える）
+
+# $args は PowerShell の自動変数なので使わない
+function Send-Json($key, $method, $path, $body) {
+    $req = @{ Uri = "{BaseUrl}$path"; Method = $method; Headers = @{ 'X-Redmine-API-Key' = $key }; ContentType = 'application/json'; SkipHttpErrorCheck = $true }
+    if ($null -ne $body) { $req.Body = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 5 -Compress)) }
+    $r = Invoke-WebRequest @req
+    [pscustomobject]@{ Status = [int]$r.StatusCode; Json = $(if ($r.Content) { $r.Content | ConvertFrom-Json } else { $null }); Raw = $r.Content }
+}
+```
+
+### [2-24] 本人の設定の作成（持ち主を省く）→ 201
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'p'; schema_type = $T; scope_type = 'user'; payload = '{"a":1}'; schema_version = 1 } }
+$PersonalId = $r.Json.studio_setting.id
+$r.Status; $r.Json.studio_setting.scope_id; $r.Json.studio_setting.version
+```
+
+**期待結果:**
+- 201／`scope_id` が `$AdminId`（省くと自分）／`version` が 1
+
+### [2-25] 同じ種類をもう 1 つ作る → 409（今ある設定を返す）
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'p2'; schema_type = $T; scope_type = 'user'; payload = '{"a":2}'; schema_version = 1 } }
+$r.Status; $r.Json.studio_setting.id; $r.Json.studio_setting.version; $r.Json.studio_setting.payload
+```
+
+**期待結果:**
+- 409／`id` が `$PersonalId`／`version` が 1／`payload` が `{"a":1}`（後から送った中身で上書きしない）
+
+### [2-26] 更新：expected_version が無い・読めない → 422
+
+**確認方法:**
+```powershell
+# 無い
+$r = Send-Json $AdminKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = '{"a":3}' } }
+$r.Status; $r.Json.errors
+# studio_setting の外に置いたものは見ない（無いのと同じ）
+$r = Send-Json $AdminKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = '{"a":3}' }; expected_version = 1 }
+$r.Status; $r.Json.errors
+# 数として読めない
+foreach ($bad in @('1.0', 'abc', $true)) {
+    $r = Send-Json $AdminKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = '{"a":3}'; expected_version = $bad } }
+    "$bad -> $($r.Status) $($r.Json.errors)"
+}
+(Send-Json $AdminKey GET "/studio_settings/$PersonalId.json" $null).Json.studio_setting.version
+```
+
+**期待結果:**
+- 無い: 422・`expected_version is required`
+- 外に置いた: 422・`expected_version is required`
+- 読めない（`1.0`・`abc`・`True`）: いずれも 422・`expected_version must be an integer`
+- 取り直した `version` は 1 のまま
+
+### [2-27] 更新：今の版を添える → 200・版が進む
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = '{"a":4}'; expected_version = 1 } }
+$r.Status; $r.Json.studio_setting.version; $r.Json.studio_setting.payload
+```
+
+**期待結果:**
+- 200／`version` が 2／`payload` が `{"a":4}`
+
+### [2-28] 更新：古い版 → 409（今の設定を返し、書き込まない）
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = '{"a":5}'; expected_version = 1 } }
+$g = Send-Json $AdminKey GET "/studio_settings/$PersonalId.json" $null
+$r.Status; $r.Json.studio_setting.version; $r.Json.studio_setting.payload; $g.Json.studio_setting.payload
+```
+
+**期待結果:**
+- 409／返った `version` が 2・`payload` が `{"a":4}`（重ね直すための今の中身）／取り直しても `{"a":4}` のまま
+
+### [2-29] 更新：持ち主・種類は送っても変わらない
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = '{"a":6}'; scope_id = $MemberId; schema_type = "$T`_moved"; expected_version = 2 } }
+$r.Status; $r.Json.studio_setting.version; $r.Json.studio_setting.scope_id; $r.Json.studio_setting.schema_type; $r.Json.studio_setting.payload
+```
+
+**期待結果:**
+- 200／`version` が 3／`scope_id` は `$AdminId` のまま／`schema_type` は `$T` のまま／`payload` は `{"a":6}`（中身だけ書き換わる）
+
+### [2-30] 本人の設定は履歴を残さない
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey GET "/studio_settings/$PersonalId/histories.json" $null
+$r.Status; $r.Json.total_count
+```
+
+**期待結果:**
+- 200／`total_count` が 0
+
+### [2-31] 他の利用者は読めるが書けない
+
+**確認方法:**
+```powershell
+(Send-Json $MemberKey GET "/studio_settings/$PersonalId.json" $null).Status
+(Send-Json $MemberKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = 'x'; expected_version = 3 } }).Status
+(Send-Json $MemberKey DELETE "/studio_settings/$PersonalId.json" $null).Status
+(Send-Json $MemberKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'x'; schema_type = "$T`_b"; scope_type = 'user'; scope_id = $AdminId; payload = '{}'; schema_version = 1 } }).Status
+(Send-Json $AdminKey GET "/studio_settings/$PersonalId.json" $null).Json.studio_setting.version
+```
+
+**期待結果:**
+- 取得: 200／更新: 403／削除: 403／他人（admin）の分の作成: 403
+- admin で取り直した `version` は 3 のまま（書き込まれていない）
+
+### [2-31b] 本人の設定の履歴・割り当ての操作
+
+本人の設定に履歴は無く、割り当ても付けない。操作できない人は 403、操作できる人（本人・admin）でも中身が無いので 404／422 になることを両側から確かめる。
+
+**確認方法:**
+```powershell
+$ops = [ordered]@{
+    'restore'      = @('POST',   "/studio_settings/$PersonalId/restore.json?version=1", $null)
+    'history_del'  = @('DELETE', "/studio_settings/$PersonalId/histories/1.json", $null)
+    'users_list'   = @('GET',    "/studio_settings/$PersonalId/users.json", $null)
+    'users_put'    = @('PUT',    "/studio_settings/$PersonalId/users.json", @{ user_ids = @($MemberId) })
+    'users_add'    = @('POST',   "/studio_settings/$PersonalId/users/$MemberId.json", $null)
+    'users_remove' = @('DELETE', "/studio_settings/$PersonalId/users/$MemberId.json", $null)
+}
+foreach ($k in $ops.Keys) {
+    $o = $ops[$k]
+    $m = Send-Json $MemberKey $o[0] $o[1] $o[2]
+    $a = Send-Json $AdminKey $o[0] $o[1] $o[2]
+    "$k member=$($m.Status) admin=$($a.Status) $($a.Json.errors)"
+}
+(Send-Json $AdminKey GET "/studio_settings/$PersonalId/users.json" $null).Json.total_count
+(Send-Json $AdminKey GET "/studio_settings/$PersonalId.json" $null).Json.studio_setting.version
+```
+
+**期待結果:**
+
+| 操作 | member（持ち主でない） | admin |
+|------|------|------|
+| `restore` | 403 | 404（履歴が無い） |
+| `history_del` | 403 | 404（履歴が無い） |
+| `users_list` | 200 | 200 |
+| `users_put` | 403 | 422・`A user setting cannot be assigned to users` |
+| `users_add` | 403 | 422・`A user setting cannot be assigned to users` |
+| `users_remove` | 403 | 404（割り当てが無い） |
+
+- 割り当ての件数は 0／`version` は 3 のまま
+
+### [2-32] 持ち主が違えば同じ種類を作れる・admin は他人の分も書ける
+
+**確認方法:**
+```powershell
+$r = Send-Json $MemberKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'mine'; schema_type = $T; scope_type = 'user'; payload = '{"u":1}'; schema_version = 1 } }
+$MemberPersonalId = $r.Json.studio_setting.id
+$r.Status; $r.Json.studio_setting.scope_id
+(Send-Json $AdminKey PUT "/studio_settings/$MemberPersonalId.json" @{ studio_setting = @{ payload = '{"u":"admin"}'; expected_version = 1 } }).Status
+```
+
+**期待結果:**
+- 作成: 201・`scope_id` が `$MemberId`
+- admin の更新: 200
+
+### [2-32b] admin は他人の分を作れる・持ち主は実在の利用者
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'for member'; schema_type = "$T`_formember"; scope_type = 'user'; scope_id = $MemberId; payload = '{}'; schema_version = 1 } }
+$ForMemberId = $r.Json.studio_setting.id
+$r.Status; $r.Json.studio_setting.scope_id
+# 作ってもらった本人は書ける
+(Send-Json $MemberKey PUT "/studio_settings/$ForMemberId.json" @{ studio_setting = @{ payload = '{"m":1}'; expected_version = 1 } }).Status
+# いない利用者の分は作れない
+$r = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'ghost'; schema_type = "$T`_ghost"; scope_type = 'user'; scope_id = 999999; payload = '{}'; schema_version = 1 } }
+$r.Status; @($r.Json.errors).Count
+```
+
+**期待結果:**
+- admin が member の分を作る: 201・`scope_id` が `$MemberId`
+- member の更新: 200
+- いない利用者（999999）: 422・errors が 1 件以上（文言はロケールで変わるので件数で見る）
+
+### [2-33] user 以外の設定の版（expected_version は任意）
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'team'; schema_type = "test_team_$(Get-Random)"; scope_type = 'global'; payload = '{}'; schema_version = 1 } }
+$TeamId = $r.Json.studio_setting.id
+$r.Status; $r.Json.studio_setting.version
+$r = Send-Json $AdminKey PUT "/studio_settings/$TeamId.json" @{ studio_setting = @{ payload = '{"t":1}' } }
+$r.Status; $r.Json.studio_setting.version
+(Send-Json $AdminKey PUT "/studio_settings/$TeamId.json" @{ studio_setting = @{ payload = '{"t":2}'; expected_version = 1 } }).Status
+$r = Send-Json $AdminKey PUT "/studio_settings/$TeamId.json" @{ studio_setting = @{ payload = '{"t":3}'; expected_version = 'abc' } }
+$r.Status; $r.Json.errors
+(Send-Json $AdminKey GET "/studio_settings/$TeamId/histories.json" $null).Json.total_count
+```
+
+**期待結果:**
+- 作成: 201・`version` 1
+- 版なしの更新: 200・`version` 2（従来どおり版なしで書ける）
+- 古い版を添えた更新: 409（添えたときは確かめる）
+- 読めない版を添えた更新: 422・`expected_version must be an integer`（user 以外でも黙って上書きしない）
+- 履歴の件数: 2（作成＋更新。409・422 の分は増えない）
+
+### [2-34] スコープの付け替え：user への／からは 422、決まった値以外も 422
+
+**確認方法:**
+```powershell
+# global → user（scope_id も付けて、持ち主の必須の検証ではなく付け替えの禁止で断られることを見る）
+$r = Send-Json $AdminKey PUT "/studio_settings/$TeamId.json" @{ studio_setting = @{ scope_type = 'user'; scope_id = $AdminId } }
+$r.Status; $r.Json.errors
+# user → global
+$r = Send-Json $AdminKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ scope_type = 'global'; expected_version = 3 } }
+$r.Status; $r.Json.errors
+# 大文字の USER は決まった値でない
+$r = Send-Json $AdminKey PUT "/studio_settings/$TeamId.json" @{ studio_setting = @{ scope_type = 'USER'; scope_id = $AdminId } }
+$r.Status; @($r.Json.errors).Count
+$tg = (Send-Json $AdminKey GET "/studio_settings/$TeamId.json" $null).Json.studio_setting
+$pg = (Send-Json $AdminKey GET "/studio_settings/$PersonalId.json" $null).Json.studio_setting
+$tg.scope_type; $tg.version; $pg.scope_type; $pg.version
+```
+
+**期待結果:**
+- global → user: 422・`scope_type cannot be changed to or from user`
+- user → global: 422・`scope_type cannot be changed to or from user`
+- `USER`: 422・errors が 1 件以上（文言はロケールで変わるので件数で見る）
+- 取り直すと、チームの設定は `global`・`version` 2 のまま、本人の設定は `user`・`version` 3 のまま
+
+### [2-35] versions：本人の設定と、id で頼んだ設定の版だけを返す
+
+**確認方法:**
+```powershell
+# 論理削除した設定（ids に入れても返らないことを見る）
+$d = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'deleted'; schema_type = "test_team_$(Get-Random)"; scope_type = 'global'; payload = '{}'; schema_version = 1 } }
+$DeletedTeamId = $d.Json.studio_setting.id
+(Send-Json $AdminKey DELETE "/studio_settings/$DeletedTeamId.json" $null).Status
+
+$r = Send-Json $AdminKey POST '/studio_settings/versions.json' @{ own = @($T, 'no_such_type'); ids = @($TeamId, 999999, $MemberPersonalId, $DeletedTeamId) }
+$own = @($r.Json.studio_setting_versions.own); $team = @($r.Json.studio_setting_versions.team)
+$r.Status
+$own.Count; $own[0].id; $own[0].schema_type; $own[0].version
+$team.Count; ($team.id | Sort-Object) -join ','
+($team | Where-Object id -eq $TeamId).version; ($team | Where-Object id -eq $MemberPersonalId).version
+# updated_on は単体取得と同じ文字列（ConvertFrom-Json は日時に変えるので、生の本文で比べる）
+$g = Send-Json $AdminKey GET "/studio_settings/$TeamId.json" $null
+$vu = [regex]::Match($r.Raw, "`"id`":$TeamId,`"version`":\d+,`"updated_on`":`"([^`"]+)`"").Groups[1].Value
+$gu = [regex]::Match($g.Raw, "`"updated_on`":`"([^`"]+)`"").Groups[1].Value
+($vu -ne '') -and ($vu -eq $gu)
+$r.Raw -match 'payload'
+```
+
+**期待結果:**
+- 論理削除: 204
+- versions: 200
+- `own` は 1 件（`$PersonalId`・`$T`・版 3）。無い種類・他人（member）の同じ種類は返らない
+- `team` は 2 件（`$MemberPersonalId` と `$TeamId`。小さい順）。無い id・論理削除した id は返らない。本人の設定でも `ids` で頼めば返る
+- `team` の版は `$TeamId` が 2、`$MemberPersonalId` が 2
+- `updated_on` が単体取得と同じ（True）
+- `payload` を含まない（False）
+
+### [2-35b] versions：読めない依頼は 422、明示の空は 200、包んでもよい
+
+**確認方法:**
+```powershell
+$cases = [ordered]@{
+    'empty_object'  = @{}
+    'empty_arrays'  = @{ own = @(); ids = @() }
+    'ids_string'    = @{ ids = "$TeamId,$MemberPersonalId" }
+    'ids_not_int'   = @{ ids = @('abc') }
+    'own_hash'      = @{ own = @{ schema_type = $T } }
+}
+foreach ($k in $cases.Keys) {
+    $c = Send-Json $AdminKey POST '/studio_settings/versions.json' $cases[$k]
+    "$k -> $($c.Status) own=$(@($c.Json.studio_setting_versions.own).Count) team=$(@($c.Json.studio_setting_versions.team).Count) $($c.Json.errors)"
+}
+# Content-Type を付けない（JSON として読まれない）
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/versions.json" -Method POST -Headers @{ 'X-Redmine-API-Key' = $AdminKey } -Body "{`"own`":[`"$T`"]}" -SkipHttpErrorCheck).StatusCode
+# studio_setting_versions で包んだ JSON
+$w = Send-Json $AdminKey POST '/studio_settings/versions.json' @{ studio_setting_versions = @{ own = @($T); ids = @($TeamId) } }
+$w.Status; @($w.Json.studio_setting_versions.own).id; @($w.Json.studio_setting_versions.team).id
+```
+
+**期待結果:**
+- `empty_object`: 422・`own or ids is required`
+- `empty_arrays`: 200・`own` 0 件・`team` 0 件
+- `ids_string`: 422・`ids must be an array of integers`
+- `ids_not_int`: 422・`ids must be an array of integers`
+- `own_hash`: 422・`own must be an array of schema_type`
+- Content-Type なし: 422
+- 包んだ JSON: 200・`own` が `$PersonalId`・`team` が `$TeamId`
+
+### [2-36] versions：見えない設定は返さない・ログインが要る
+
+**確認方法:**
+```powershell
+# 2B の ProjA 設定（$projASettingId）は非メンバーには見えない。本人の設定（$PersonalId）はログインしていれば誰でも見える
+$r = Send-Json $NonMemberKey POST '/studio_settings/versions.json' @{ ids = @($projASettingId, $TeamId, $PersonalId) }
+$r.Status; (@($r.Json.studio_setting_versions.team).id | Sort-Object) -join ','
+(Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/versions.json" -Method POST -ContentType 'application/json' -Body '{"own":["x"]}' -SkipHttpErrorCheck).StatusCode
+```
+
+**期待結果:**
+- 非メンバー: 200・`team` は `$PersonalId` と `$TeamId` の 2 件（小さい順。`$projASettingId` は返らない）
+- API キーなし: 401
+
+### [2-37] 一覧の ids フィルタ
+
+**確認方法:**
+```powershell
+$r = Send-Json $AdminKey GET "/studio_settings.json?ids=$PersonalId,$TeamId&include=payload" $null
+$r.Json.total_count
+@($r.Json.studio_settings | Where-Object { $null -ne $_.payload }).Count
+@($r.Json.studio_settings | Where-Object { $_.version -gt 0 }).Count
+```
+
+**期待結果:**
+- `total_count` が 2／payload ありが 2 件／`version` ありが 2 件
+
+### [2-38] XML：レスポンスとリクエストボディ
+
+**確認方法:**
+```powershell
+$h = @{ 'X-Redmine-API-Key' = $AdminKey }
+$TX = "test_personal_xml_" + (Get-Random)
+$TX2 = "$TX`_2"
+function Send-Xml($method, $path, $body) {
+    Invoke-WebRequest -Uri "{BaseUrl}$path" -Method $method -Headers $h -ContentType 'application/xml' -SkipHttpErrorCheck -Body $body
+}
+
+# 作成（XML 本文）。2 件作る
+$c = Send-Xml POST '/studio_settings.xml' "<studio_setting><name>p</name><schema_type>$TX</schema_type><scope_type>user</scope_type><schema_version>1</schema_version><payload>{}</payload></studio_setting>"
+$cx = [xml]$c.Content
+$c.StatusCode; $cx.studio_setting.version
+$xid = $cx.studio_setting.id
+$c2 = Send-Xml POST '/studio_settings.xml' "<studio_setting><name>p2</name><schema_type>$TX2</schema_type><scope_type>user</scope_type><schema_version>1</schema_version><payload>{}</payload></studio_setting>"
+$xid2 = ([xml]$c2.Content).studio_setting.id
+$c2.StatusCode
+
+# 更新（XML 本文・expected_version は studio_setting の中）
+$u = Send-Xml PUT "/studio_settings/$xid.xml" "<studio_setting><payload>{`"x`":1}</payload><expected_version>1</expected_version></studio_setting>"
+$u.StatusCode; ([xml]$u.Content).studio_setting.version
+
+# 古い版（XML）→ 409・XML で今の設定
+$u2 = Send-Xml PUT "/studio_settings/$xid.xml" "<studio_setting><payload>{`"x`":2}</payload><expected_version>1</expected_version></studio_setting>"
+$u2.StatusCode; ([xml]$u2.Content).studio_setting.version
+
+# versions（XML 本文。一番外側を studio_setting_versions で包む）。2 件ずつ
+$v = Send-Xml POST '/studio_settings/versions.xml' ("<studio_setting_versions>" +
+  "<own type=`"array`"><schema_type>$TX</schema_type><schema_type>$TX2</schema_type></own>" +
+  "<ids type=`"array`"><id>$TeamId</id><id>$MemberPersonalId</id></ids></studio_setting_versions>")
+$vx = [xml]$v.Content
+$v.StatusCode
+$vo = @($vx.studio_setting_versions.own.studio_setting); $vt = @($vx.studio_setting_versions.team.studio_setting)
+$vo.Count; ($vo | Where-Object id -eq $xid).version
+$vt.Count; ($vt.id | Sort-Object) -join ','
+
+# type="array" なしは配列として読めないので 422
+(Send-Xml POST '/studio_settings/versions.xml' "<studio_setting_versions><own><schema_type>$TX</schema_type><schema_type>$TX2</schema_type></own></studio_setting_versions>").StatusCode
+(Send-Xml POST '/studio_settings/versions.xml' "<studio_setting_versions><ids><id>$TeamId</id></ids></studio_setting_versions>").StatusCode
+
+"cleanup: " + ((Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$xid.xml" -Method DELETE -Headers $h -SkipHttpErrorCheck).StatusCode, (Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$xid2.xml" -Method DELETE -Headers $h -SkipHttpErrorCheck).StatusCode -join ',')
+```
+
+**期待結果:**
+- 作成: 201・`<version>` が 1、2 件目も 201
+- 更新: 200・`<version>` が 2
+- 古い版: 409・`<version>` が 2
+- versions: 200・ルート要素 `studio_setting_versions`、`own` の要素名 `studio_setting` が 2 件（`$xid` は版 2）、`team` の要素名 `studio_setting` が 2 件（`$MemberPersonalId` と `$TeamId`。小さい順）
+- `type="array"` なしの `own`・`ids`: どちらも 422
+- 後片付け: `204,204`
+
+### [2-39] 端末が同時に初回保存 → 1 つだけ作られ、ほかは 409
+
+6 本を同時に送り、3 回くり返す。
+
+**確認方法:**
+```powershell
+foreach ($round in 1..3) {
+    $TR = "test_personal_race_" + (Get-Random)
+    $body = @{ studio_setting = @{ name = 'p'; schema_type = $TR; scope_type = 'user'; payload = '{}'; schema_version = 1 } } | ConvertTo-Json -Depth 3
+    $codes = 1..6 | ForEach-Object -Parallel {
+        (Invoke-WebRequest -Uri "{BaseUrl}/studio_settings.json" -Method POST -Headers @{ 'X-Redmine-API-Key' = $using:AdminKey } -ContentType 'application/json' -Body $using:body -SkipHttpErrorCheck).StatusCode
+    } -ThrottleLimit 6
+    $list = (Send-Json $AdminKey GET "/studio_settings.json?schema_type=$TR&scope_type=user" $null).Json
+    $n201 = @($codes | Where-Object { $_ -eq 201 }).Count
+    $n409 = @($codes | Where-Object { $_ -eq 409 }).Count
+    $n500 = @($codes | Where-Object { $_ -ge 500 }).Count
+    "round $round : 201=$n201 409=$n409 5xx=$n500 rows=$($list.total_count)"
+    foreach ($s in $list.studio_settings) { Send-Json $AdminKey DELETE "/studio_settings/$($s.id).json" $null | Out-Null }
+}
+```
+
+**期待結果:**
+- 3 回とも `201=1 409=5 5xx=0 rows=1`
+
+**備考:**
+- 同時に送っても、後の要求はたいてい作成前の確認で 409 になる。データベースの重複禁止で断られたときの救済の分岐（`RecordNotUnique` を 409 にする）を通ったかは、この項目では分からない。データベースが重複を断ることは [1-42] が受け持つ
+- SQLite は書き込みを 1 本ずつしか通さないので、待ちきれずに 500（`SQLite3::BusyException`）になることがある。そのときは少し待って流し直す（MySQL・PostgreSQL では起きない見込み）
+
+### [2-40] 本人の設定の削除は物理削除・作り直せる
+
+**確認方法:**
+```powershell
+(Send-Json $AdminKey DELETE "/studio_settings/$PersonalId.json" $null).Status
+# 単体取得は論理削除した設定も返す（200）ので、404 なら物理削除と分かる
+(Send-Json $AdminKey GET "/studio_settings/$PersonalId.json" $null).Status
+@((Send-Json $AdminKey POST '/studio_settings/versions.json' @{ own = @($T) }).Json.studio_setting_versions.own).Count
+$r = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'p'; schema_type = $T; scope_type = 'user'; payload = '{}'; schema_version = 1 } }
+$r.Status; $r.Json.studio_setting.version
+
+# 後片付け（2C で作った分を消す）
+"cleanup: " + (@(
+    (Send-Json $AdminKey DELETE "/studio_settings/$($r.Json.studio_setting.id).json" $null).Status
+    (Send-Json $MemberKey DELETE "/studio_settings/$MemberPersonalId.json" $null).Status
+    (Send-Json $MemberKey DELETE "/studio_settings/$ForMemberId.json" $null).Status
+    (Send-Json $AdminKey DELETE "/studio_settings/$TeamId.json?force=1" $null).Status
+    (Send-Json $AdminKey DELETE "/studio_settings/$DeletedTeamId.json?force=1" $null).Status
+) -join ',')
+```
+
+**期待結果:**
+- 削除: 204／取得: 404／versions の `own`: 0 件
+- 作り直し: 201・`version` 1
+- 後片付け: `204,204,204,204,204`（本人の設定は持ち主の member が自分で消す）
+
+---
+
 ## 3. ブラウザテスト
 
 なし（API のみの機能のため）
@@ -2702,11 +3570,13 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 2. フェーズ 1: Runner テスト実行
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
-   - バッチ 3: [1-30]～[1-34] 可視性（Runner）。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id を出力する
+   - バッチ 3: [1-30]～[1-35] 可視性（Runner）・属性名の翻訳。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id を出力する
+   - バッチ 4: [1-36]～[1-48] 本人の設定と版、削除の後片付け（Runner）。バッチ 3 の後に流す
 3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
    - [2-14]～[2-23]: 可視性（HTTP）。[2-1] の前の事前準備で設定をすべて消すため、[1-30] で作った設定も消えている。[2-14] の前にバッチ 3 をもう一度流し、その出力キー / ID を事前準備に設定してから実行する
+   - [2-24]～[2-40]: 本人の設定と版（HTTP）。2B の変数（`$projASettingId` を含む）をそのまま使うので、2B の続きで流す（2C の事前準備は、2B の変数が空なら止まる）
 
 ### Runner テスト実行時の注意事項
 
@@ -2719,7 +3589,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 
 - API キーは事前に取得しておく
 - テストの順序依存性に注意（作成 → 取得 → 更新 → 削除）
-- テストデータは削除せず残す（後から確認可能）
+- テストデータは削除せず残す（後から確認可能）。ただし 2C は [2-40] で作った分を消す（2C の冒頭を参照）
 - ユーザー ID はテスト環境に存在するものを使用する（ID 2 が存在しない場合がある）
 - PowerShell での型チェック: JSON の数値は `Int64` として解釈されるため、`-is [int]` は False になる。数値チェックには `-gt 0` や `-is [int64]` を使用する
 

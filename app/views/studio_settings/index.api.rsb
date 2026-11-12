@@ -7,6 +7,7 @@ api.array :studio_settings, api_meta(:total_count => @total_count, :offset => @o
       api.scope_type setting.scope_type
       api.scope_id setting.scope_id
       api.schema_version setting.schema_version
+      api.version setting.version
       api.created_on setting.created_on
       api.updated_on setting.updated_on
       api.deleted_on setting.deleted_on

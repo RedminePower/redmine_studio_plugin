@@ -5,6 +5,7 @@ api.studio_setting do
   api.scope_type @studio_setting.scope_type
   api.scope_id @studio_setting.scope_id
   api.schema_version @studio_setting.schema_version
+  api.version @studio_setting.version
   api.payload @studio_setting.payload
   api.created_on @studio_setting.created_on
   api.updated_on @studio_setting.updated_on
