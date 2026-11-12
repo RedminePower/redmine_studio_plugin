@@ -66,6 +66,7 @@ A setting each user owns one of per `schema_type`. `scope_id` is the owner's use
 | Delete | Always a hard delete (regardless of `force`). The same `schema_type` can be created again afterwards |
 | History | Not recorded (the history list is always empty) |
 | User assignments | Not assignable. Replace/add return 422 |
+| Owner deletion | When the user is deleted in Redmine, that user's personal settings are hard-deleted too |
 
 ### Version
 

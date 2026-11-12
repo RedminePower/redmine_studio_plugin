@@ -8,7 +8,7 @@ Redmine Studio の汎用設定を Redmine サーバー側に保存・取得す�
 - 汎用設定の CRUD 操作
 - 論理削除 / 物理削除のサポート
 - ユーザーへの設定割り当て管理
-- 本人の設定（`scope_type = user`。1 人に 1 種類 1 つ・本人と admin だけが書ける・履歴なし・削除は物理削除）
+- 本人の設定（`scope_type = user`。1 人に 1 種類 1 つ・本人と admin だけが書ける・履歴なし・削除は物理削除・利用者を削除すると一緒に消える）
 - 版（`version`）による書き込みの衝突検出と、版だけを返すエンドポイント（`versions`）
 
 ## 機能の内部実装
@@ -18,6 +18,7 @@ Redmine Studio の汎用設定を Redmine サーバー側に保存・取得す�
 | モデル | `StudioSetting`, `StudioSettingAssignment`, `StudioSettingHistory` |
 | DBテーブル | `studio_settings`, `studio_setting_assignments`, `studio_setting_histories` |
 | コントローラ | `StudioSettingsController`, `StudioSettingUsersController`, `UserStudioSettingsController`, `StudioSettingHistoriesController` |
+| パッチ | `User` に `RedmineStudioPlugin::StudioSettings::UserPatch`（利用者の削除のあとに本人の設定を消す） |
 | 認証 | API キー必須（未認証で 401） |
 
 ### API エンドポイント
@@ -255,7 +256,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
 - バッチ 3: [1-30] ～ [1-35] を1つのスクリプトにまとめて実行（可視性・属性名の翻訳）
-- バッチ 4: [1-36] ～ [1-46] を1つのスクリプトにまとめて実行（本人の設定と版）
+- バッチ 4: [1-36] ～ [1-47] を1つのスクリプトにまとめて実行（本人の設定と版）
 
 ### フェーズ 2: HTTP テスト
 
@@ -1092,7 +1093,7 @@ puts en_ok
 
 ## 1C. 本人の設定と版（Runner テスト）
 
-user スコープ（本人の設定）と版（`version`）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-46]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
+user スコープ（本人の設定）と版（`version`）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-47]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
 
 ### [1-36] studio_settings の version / owner_id 列
 
@@ -1383,6 +1384,43 @@ g.destroy
 
 **期待結果:**
 - `true` が 9 回
+
+### [1-47] 利用者を削除すると、その人の本人の設定も消える
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_userdel_#{SecureRandom.hex(4)}"
+mk = ->(login) {
+  u = User.new(firstname: 'Del', lastname: login, mail: "#{login}@example.invalid")
+  u.login = login
+  u.password = u.password_confirmation = 'Passw0rd!Passw0rd!'
+  u.save!
+  u
+}
+gone = mk.call("#{t}_a")
+stay = mk.call("#{t}_b")
+attrs = { name: 'p', schema_type: t, schema_version: 0 }
+mine  = StudioSetting.create!(attrs.merge(scope_type: 'user', scope_id: gone.id, created_by: gone, updated_by: gone))
+other = StudioSetting.create!(attrs.merge(scope_type: 'user', scope_id: stay.id, created_by: stay, updated_by: stay))
+team  = StudioSetting.create!(attrs.merge(scope_type: 'global', created_by: gone, updated_by: gone))
+team.assignments.create!(user_id: stay.id, assigned_by: admin)
+
+gone.destroy
+
+# 消した人の本人の設定だけが消え、ほかの人の本人の設定・チームの設定とその割り当ては残る
+puts !StudioSetting.exists?(mine.id)
+puts StudioSetting.exists?(other.id)
+puts StudioSetting.exists?(team.id) && team.reload.deleted_on.nil?
+puts team.assignments.count == 1
+
+StudioSetting.where(schema_type: t).destroy_all
+stay.destroy
+```
+
+**期待結果:**
+- `true` が 4 回
 
 ---
 
@@ -3500,7 +3538,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
    - バッチ 3: [1-30]～[1-35] 可視性（Runner）・属性名の翻訳。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id を出力する
-   - バッチ 4: [1-36]～[1-46] 本人の設定と版（Runner）。バッチ 3 の後に流す
+   - バッチ 4: [1-36]～[1-47] 本人の設定と版（Runner）。バッチ 3 の後に流す
 3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
