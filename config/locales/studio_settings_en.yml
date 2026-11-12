@@ -1,5 +1,12 @@
 en:
   activerecord:
+    errors:
+      models:
+        studio_setting:
+          attributes:
+            scope_id:
+              user_not_found: "must be an existing user"
+              project_not_found: "must be an existing project"
     attributes:
       studio_setting:
         name: "Name"

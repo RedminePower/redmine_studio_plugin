@@ -13,7 +13,7 @@ module RedmineStudioPlugin
 
       def destroy_studio_project_settings
         # 論理削除したものも含めて物理削除で消す（割り当て・履歴も dependent で一緒に消える）
-        ::StudioSetting.where(scope_type: 'project', scope_id: id).destroy_all
+        ::StudioSetting.where(scope_type: ::StudioSetting::SCOPE_PROJECT, scope_id: id).destroy_all
       end
     end
   end

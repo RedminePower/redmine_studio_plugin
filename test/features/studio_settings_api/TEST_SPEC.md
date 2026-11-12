@@ -10,6 +10,7 @@ Redmine Studio の汎用設定を Redmine サーバー側に保存・取得す�
 - ユーザーへの設定割り当て管理
 - 本人の設定（`scope_type = user`。1 人に 1 種類 1 つ・本人と admin だけが書ける・履歴なし・削除は物理削除・利用者を削除すると一緒に消える）
 - 版（`version`）による書き込みの衝突検出と、版だけを返すエンドポイント（`versions`）
+- 送った値の形と長さの検証（形の違う値・長すぎる値・実在しないプロジェクトを、何が悪いかの分かる 422 で断る）
 
 ## 機能の内部実装
 
@@ -256,7 +257,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
 - バッチ 3: [1-30] ～ [1-35] を1つのスクリプトにまとめて実行（可視性・属性名の翻訳）
-- バッチ 4: [1-36] ～ [1-48] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け）
+- バッチ 4: [1-36] ～ [1-49] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証）
 
 ### フェーズ 2: HTTP テスト
 
@@ -1091,9 +1092,9 @@ puts en_ok
 
 ---
 
-## 1C. 本人の設定と版（Runner テスト）
+## 1C. 本人の設定と版・入力の検証（Runner テスト）
 
-user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付けを、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-48]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
+user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-49]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
 
 ### [1-36] studio_settings の version / owner_id 列
 
@@ -1454,6 +1455,69 @@ keep.destroy
 
 **期待結果:**
 - `true` が 4 回
+
+### [1-49] 入力の検証（長さ・プロジェクトの実在・comment）と、何が悪いかのメッセージ
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+t = "rt_valid_#{SecureRandom.hex(4)}"
+attrs = { name: 'n', schema_type: t, scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin }
+msgs = ->(s, locale) { I18n.with_locale(locale) { s.valid?; s.errors.full_messages } }
+
+# name・schema_type は 255 文字まで（どの DB でも検証で断る）
+long = StudioSetting.new(attrs.merge(name: 'x' * 256, schema_type: 'x' * 256))
+puts msgs.call(long, :en) == ['Name is too long (maximum is 255 characters)', 'Schema type is too long (maximum is 255 characters)']
+t255 = t + 'z' * (255 - t.length)
+puts StudioSetting.new(attrs.merge(name: 'y' * 255, schema_type: t255)).valid?
+
+# project スコープは実在するプロジェクトに付ける
+no_id = StudioSetting.new(attrs.merge(scope_type: 'project'))
+ghost = StudioSetting.new(attrs.merge(scope_type: 'project', scope_id: 999_999))
+puts msgs.call(no_id, :en) == ['Scope cannot be blank']
+puts msgs.call(ghost, :en) == ['Scope must be an existing project']
+puts msgs.call(ghost, :ja) == ['スコープ には実在するプロジェクトを指定してください']
+
+# user スコープの持ち主がいないときも、何が悪いかが分かる
+ghost_user = StudioSetting.new(attrs.merge(scope_type: 'user', scope_id: 999_999))
+puts msgs.call(ghost_user, :en) == ['Scope must be an existing user']
+
+# 付け替えでは確かめるが、プロジェクトを変えない更新は、前からある行もそのまま通す
+proj = Project.first
+s = StudioSetting.create!(attrs.merge(scope_type: 'project', scope_id: proj.id))
+s.scope_id = 999_999
+puts I18n.with_locale(:en) { s.save == false && s.errors.full_messages == ['Scope must be an existing project'] }
+s.reload
+s.update_column(:scope_id, 999_998)   # 前からある「プロジェクトの無い行」を作る
+s.reload
+s.name = 'renamed'
+puts s.save
+
+# 範囲を project へ変えるときも確かめる
+g = StudioSetting.create!(attrs)
+g.update_column(:scope_id, 999_998)
+g.reload
+g.scope_type = 'project'
+puts I18n.with_locale(:en) { g.save == false && g.errors.full_messages == ['Scope must be an existing project'] }
+
+# 前からある行（scope_id の無い project の行・256 文字の名前の行）も、論理削除できる
+old_blank = StudioSetting.create!(attrs)
+old_blank.update_columns(scope_type: 'project', scope_id: nil)
+old_long = StudioSetting.create!(attrs)
+old_long.update_columns(name: 'x' * 256)
+puts old_blank.reload.soft_delete(admin) && old_long.reload.soft_delete(admin)
+
+# コメントの形と長さ
+puts StudioSettingHistory.comment_errors(nil) == [] && StudioSettingHistory.comment_errors('c' * 255) == []
+puts StudioSettingHistory.comment_errors({ 'a' => 1 }) == ['comment must be a string']
+puts StudioSettingHistory.comment_errors('c' * 256) == ['comment is too long (maximum is 255 characters)']
+
+StudioSetting.where(schema_type: [t, t255]).destroy_all
+```
+
+**期待結果:**
+- `true` が 13 回
 
 ---
 
@@ -3556,6 +3620,188 @@ $r.Status; $r.Json.studio_setting.version
 
 ---
 
+## 2D. 送った値の形と長さ（HTTP テスト）
+
+形の違う値・長すぎる値を、500 や黙った取りこぼしにせず、何が悪いかの分かる 422 で断ることを確かめる。admin の API キーだけを使う。2D だけで流せる（ほかの節の変数を使わない）。作った設定は最後（[2-47]）に消す。
+
+コントローラーが返すメッセージ（`... must be a string` など）は常に英語なので、文言まで確かめる。モデルの検証のメッセージ（`Name is too long ...` など）は利用者の言語で返るので、ここでは 422 と件数だけを確かめ、文言は Runner の [1-49] で確かめる。
+
+### 事前準備
+
+```powershell
+$AdminKey = '{ApiKey}'
+$T = "test_input_" + (Get-Random)   # この節で作る設定の schema_type（実行ごとに変える）
+$ProjectId = (Invoke-RestMethod -Uri "{BaseUrl}/projects.json?key=$AdminKey&limit=1").projects[0].id
+
+# 本文をそのまま送る（形の違う JSON・XML を送るため）。$args は PowerShell の自動変数なので使わない
+function Send-Raw($method, $path, $body, $ct = 'application/json') {
+    $req = @{ Uri = "{BaseUrl}$path"; Method = $method; Headers = @{ 'X-Redmine-API-Key' = $AdminKey }; ContentType = $ct; SkipHttpErrorCheck = $true }
+    if ($null -ne $body) { $req.Body = [Text.Encoding]::UTF8.GetBytes($body) }
+    $r = Invoke-WebRequest @req
+    $json = $null
+    if ($ct -eq 'application/json' -and $r.Content) { $json = $r.Content | ConvertFrom-Json }
+    [pscustomobject]@{ Status = [int]$r.StatusCode; Json = $json; Raw = [string]$r.Content }
+}
+function Send-Json($method, $path, $obj) { Send-Raw $method $path ($obj | ConvertTo-Json -Depth 5 -Compress) }
+function Errs($r) { ($r.Json.errors) -join ' | ' }
+
+# 更新・削除・復元に使う設定（版を 2 にして、履歴の 1 へ戻せるようにする）
+$base = Send-Json POST '/studio_settings.json' @{ studio_setting = @{ name = 'n'; schema_type = $T; scope_type = 'global'; payload = '{}'; schema_version = 0 } }
+$InputId = $base.Json.studio_setting.id
+$Created = [Collections.Generic.List[int]]::new()   # この節で作った設定の id（[2-47] で消す）
+$Created.Add($InputId)
+(Send-Json PUT "/studio_settings/$InputId.json" @{ studio_setting = @{ name = 'n2' } }).Status
+```
+
+**期待結果:** `200`（`$InputId` が入っている）
+
+### [2-41] studio_setting が無い・空・項目をまとめたものでない → 422
+
+**確認方法:**
+```powershell
+Errs (Send-Raw POST '/studio_settings.json' '{"x":1}')
+Errs (Send-Raw POST '/studio_settings.json' '{"studio_setting":{}}')
+Errs (Send-Raw POST '/studio_settings.json' '{"studio_setting":"abc"}')
+Errs (Send-Raw POST '/studio_settings.json' '{"studio_setting":[1,2]}')
+Errs (Send-Raw PUT "/studio_settings/$InputId.json" '{"studio_setting":"abc"}')
+(Send-Raw POST '/studio_settings.json' '{"studio_setting":"abc"}').Status
+```
+
+**期待結果:**
+- `studio_setting is required` が 2 回
+- `studio_setting must be an object` が 3 回
+- `422`
+
+### [2-42] 文字列で受ける項目が文字列でない → 422（悪い所をすべて返し、何も作らない）
+
+**確認方法:**
+```powershell
+$r = Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":{"a":1},"schema_type":"' + $T + '_s","scope_type":"global","schema_version":0,"payload":{"a":1}}}')
+$r.Status; Errs $r
+Errs (Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":"n","schema_type":"' + $T + '_s","scope_type":"global","schema_version":0,"payload":5}}'))
+Errs (Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":"n","schema_type":["' + $T + '"],"scope_type":true,"schema_version":0}}'))
+@((Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$AdminKey&schema_type=${T}_s").studio_settings).Count
+```
+
+**期待結果:**
+- `422` と `name must be a string | payload must be a string`
+- `payload must be a string`
+- `schema_type must be a string | scope_type must be a string`
+- `0`（どれも作られていない。`payload` がオブジェクトでも、中身を捨てて作ることはしない）
+
+### [2-43] 整数で受ける項目が整数として読めない・範囲の外 → 422
+
+**確認方法:**
+```powershell
+Errs (Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":"n","schema_type":"' + $T + '_i","scope_type":"project","scope_id":"abc","schema_version":0}}'))
+Errs (Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":"n","schema_type":"' + $T + '_i","scope_type":"global","schema_version":1.5}}'))
+Errs (Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":"n","schema_type":"' + $T + '_i","scope_type":"global","schema_version":{"a":1}}}'))
+Errs (Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":"n","schema_type":"' + $T + '_i","scope_type":"global","schema_version":99999999999}}'))
+# 数の文字列・空は受ける（XML では数も文字列で届く）
+$ok = Send-Raw POST '/studio_settings.json' ('{"studio_setting":{"name":"n","schema_type":"' + $T + '_i","scope_type":"global","scope_id":"","schema_version":"2"}}')
+$ok.Status; $ok.Json.studio_setting.schema_version
+$Created.Add($ok.Json.studio_setting.id)
+```
+
+**期待結果:**
+- `scope_id must be an integer`
+- `schema_version must be an integer` が 3 回（小数・オブジェクト・整数の列に入らない数）
+- `201`・`2`
+
+### [2-44] name・schema_type が 255 文字を超える → 422（255 文字までは作れる）
+
+SQLite は列の長さを見ないので、DB に任せず検証で 422 にしていることを、どの DB でも確かめる。
+
+**確認方法:**
+```powershell
+$long = 'x' * 256
+$r = Send-Json POST '/studio_settings.json' @{ studio_setting = @{ name = $long; schema_type = $long; scope_type = 'global'; schema_version = 0 } }
+$r.Status; @($r.Json.errors).Count
+$r = Send-Json POST '/studio_settings.json' @{ studio_setting = @{ name = ('y' * 255); schema_type = "${T}_l".PadRight(255, 'z'); scope_type = 'global'; schema_version = 0 } }
+$r.Status; "$($r.Json.studio_setting.name.Length) $($r.Json.studio_setting.schema_type.Length)"
+$Created.Add($r.Json.studio_setting.id)
+```
+
+**期待結果:**
+- `422`・`2`（name と schema_type の 2 件）
+- `201`・`255 255`
+
+### [2-45] comment・version の形と長さ（更新・削除・復元）→ 422
+
+**確認方法:**
+```powershell
+Errs (Send-Json PUT "/studio_settings/$InputId.json" @{ studio_setting = @{ name = 'n3'; comment = @{ a = 1 } } })
+Errs (Send-Json PUT "/studio_settings/$InputId.json" @{ studio_setting = @{ name = 'n3'; comment = ('c' * 256) } })
+(Send-Json PUT "/studio_settings/$InputId.json" @{ studio_setting = @{ name = 'n3'; comment = ('c' * 255) } }).Status
+Errs (Send-Raw DELETE "/studio_settings/$InputId.json?comment=$('c' * 256)" $null)
+Errs (Send-Raw DELETE "/studio_settings/$InputId.json?comment[a]=1" $null)
+Errs (Send-Raw POST "/studio_settings/$InputId/restore.json?version=3&comment[a]=1" $null)
+Errs (Send-Raw POST "/studio_settings/$InputId/restore.json?version=1&comment=$('c' * 256)" $null)
+Errs (Send-Raw POST "/studio_settings/$InputId/restore.json?version[a]=1" $null)
+# 断ったときは何も変わらない（消えていない・版は 3 のまま）
+$s = (Send-Raw GET "/studio_settings/$InputId.json" $null).Json.studio_setting
+"$($null -eq $s.deleted_on) v$($s.version)"
+```
+
+**期待結果:**
+- `comment must be a string`
+- `comment is too long (maximum is 255 characters)`
+- `200`
+- `comment is too long (maximum is 255 characters)`
+- `comment must be a string`
+- `comment must be a string`（版 3 は今の版だが、今の版と同じかを確かめるより先に返す）
+- `comment is too long (maximum is 255 characters)`
+- `version must be an integer`
+- `True v3`
+
+### [2-46] project スコープは実在するプロジェクトに付ける → 422
+
+**確認方法:**
+```powershell
+$p = @{ name = 'n'; scope_type = 'project'; schema_version = 0 }
+$r1 = Send-Json POST '/studio_settings.json' @{ studio_setting = $p + @{ schema_type = "${T}_p1" } }
+$r2 = Send-Json POST '/studio_settings.json' @{ studio_setting = $p + @{ schema_type = "${T}_p2"; scope_id = 0 } }
+$r3 = Send-Json POST '/studio_settings.json' @{ studio_setting = $p + @{ schema_type = "${T}_p3"; scope_id = 999999 } }
+"$($r1.Status)/$(@($r1.Json.errors).Count) $($r2.Status)/$(@($r2.Json.errors).Count) $($r3.Status)/$(@($r3.Json.errors).Count)"
+$ok = Send-Json POST '/studio_settings.json' @{ studio_setting = $p + @{ schema_type = "${T}_p4"; scope_id = $ProjectId } }
+$ok.Status
+$ProjSettingId = $ok.Json.studio_setting.id
+$Created.Add($ProjSettingId)
+# いないプロジェクトへの付け替えも断る
+$u = Send-Json PUT "/studio_settings/$ProjSettingId.json" @{ studio_setting = @{ scope_id = 999999 } }
+"$($u.Status)/$(@($u.Json.errors).Count)"
+# 範囲を project へ変えるときも、scope_id のプロジェクトを確かめる
+$g = Send-Json POST '/studio_settings.json' @{ studio_setting = @{ name = 'n'; schema_type = "${T}_g"; scope_type = 'global'; scope_id = 999999; schema_version = 0 } }
+$g.Status
+$Created.Add($g.Json.studio_setting.id)
+$u = Send-Json PUT "/studio_settings/$($g.Json.studio_setting.id).json" @{ studio_setting = @{ scope_type = 'project' } }
+"$($u.Status)/$(@($u.Json.errors).Count)"
+```
+
+**期待結果:**
+- `422/1 422/1 422/1`（`scope_id` が無い・0・いない ID）
+- `201`
+- `422/1`
+- `201`
+- `422/1`
+
+### [2-47] XML でも同じに断る・後片付け
+
+**確認方法:**
+```powershell
+$x = Send-Raw POST '/studio_settings.xml' "<studio_setting><name>n</name><schema_type>${T}_x</schema_type><scope_type>global</scope_type><schema_version>0</schema_version><payload><a>1</a></payload></studio_setting>" 'application/xml'
+$x.Status; "$($x.Raw -match '<error>payload must be a string</error>') $([regex]::Matches($x.Raw, '<error>').Count)"
+
+# 後片付け（この節で作った分を消す）
+"cleanup: " + (@($Created | ForEach-Object { (Send-Raw DELETE "/studio_settings/$_.json?force=1" $null).Status }) -join ',')
+```
+
+**期待結果:**
+- `422`・`True 1`
+- 後片付け: `204` が 5 回（`$T`・`${T}_i`・`${T}_l`…・`${T}_p4`・`${T}_g`）
+
+---
+
 ## 3. ブラウザテスト
 
 なし（API のみの機能のため）
@@ -3571,12 +3817,13 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
    - バッチ 3: [1-30]～[1-35] 可視性（Runner）・属性名の翻訳。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id を出力する
-   - バッチ 4: [1-36]～[1-48] 本人の設定と版、削除の後片付け（Runner）。バッチ 3 の後に流す
+   - バッチ 4: [1-36]～[1-49] 本人の設定と版、削除の後片付け、入力の検証（Runner）。バッチ 3 の後に流す
 3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
    - [2-14]～[2-23]: 可視性（HTTP）。[2-1] の前の事前準備で設定をすべて消すため、[1-30] で作った設定も消えている。[2-14] の前にバッチ 3 をもう一度流し、その出力キー / ID を事前準備に設定してから実行する
    - [2-24]～[2-40]: 本人の設定と版（HTTP）。2B の変数（`$projASettingId` を含む）をそのまま使うので、2B の続きで流す（2C の事前準備は、2B の変数が空なら止まる）
+   - [2-41]～[2-47]: 送った値の形と長さ（HTTP）。admin の API キーだけで、単独で流せる
 
 ### Runner テスト実行時の注意事項
 
@@ -3589,7 +3836,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 
 - API キーは事前に取得しておく
 - テストの順序依存性に注意（作成 → 取得 → 更新 → 削除）
-- テストデータは削除せず残す（後から確認可能）。ただし 2C は [2-40] で作った分を消す（2C の冒頭を参照）
+- テストデータは削除せず残す（後から確認可能）。ただし 2C は [2-40]、2D は [2-47] で作った分を消す（各節の冒頭を参照）
 - ユーザー ID はテスト環境に存在するものを使用する（ID 2 が存在しない場合がある）
 - PowerShell での型チェック: JSON の数値は `Int64` として解釈されるため、`-is [int]` は False になる。数値チェックには `-gt 0` や `-is [int64]` を使用する
 

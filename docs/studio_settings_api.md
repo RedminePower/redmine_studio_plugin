@@ -52,7 +52,7 @@ GET /studio_settings.xml    → XML 形式で返却
 
 - `GET /studio_settings`（一覧）は可視な設定のみを返す（`project` スコープで非メンバーのものは含まれない）。`user` スコープの設定は全ログインユーザーに見えるので、一覧で全員分をまとめて読める。`user` スコープの payload には、他の人に見られて困る値（パスワード・トークンなど）を入れないこと。
 - 個別の設定・履歴・ユーザー割り当てへの操作（取得・作成・更新・削除・復元）で、読めない・書けない設定にアクセスした場合は **403 Forbidden** を返す。
-- `POST /studio_settings` で `project` スコープを指定して作成できるのは、そのプロジェクトのメンバー（または管理者）のみ。`global` は全ログインユーザーが作成できる。`user` スコープは下記「本人の設定（user スコープ）」を参照。
+- `POST /studio_settings` で `project` スコープを指定して作成できるのは、そのプロジェクトのメンバー（または管理者）のみ。`scope_id` は実在するプロジェクトの ID が必須（作成では、無い・いない ID は管理者なら 422、管理者でなければ 403。更新でプロジェクトを付け替えるときは 422）。`global` は全ログインユーザーが作成できる。`user` スコープは下記「本人の設定（user スコープ）」を参照。
 - `GET /users/:id/studio_settings` は、`:id` が自分自身か管理者の場合のみ許可（それ以外は 403）。
 
 ### 本人の設定（user スコープ）
@@ -62,7 +62,7 @@ GET /studio_settings.xml    → XML 形式で返却
 | 操作 | 振る舞い |
 |------|----------|
 | 作成 | `scope_id` を省くと自分の設定になる。他のユーザーの分を作れるのは管理者だけ（それ以外は 403）。持ち主は実在するユーザーであること（いなければ 422）。同じ持ち主・同じ `schema_type` の設定が既にあれば、作らずに **409 Conflict** で今ある設定を返す |
-| 更新 | `expected_version` が必須（下記「版」）。`scope_type` を `user` から／へ変えることはできない（422）。`scope_id` と `schema_type` は送っても無視する |
+| 更新 | `expected_version` が必須（下記「版」）。`scope_type` を `user` から／へ変えることはできない（422）。`scope_id` と `schema_type` は送っても無視する（ただし形が違えば 422） |
 | 削除 | 常に物理削除（`force` を問わない）。削除後は同じ `schema_type` で作り直せる |
 | 履歴 | 残さない（履歴一覧は常に 0 件） |
 | ユーザー割り当て | 割り当てない。置換・追加は 422 |
@@ -680,7 +680,7 @@ GET /studio_settings.xml    → XML 形式で返却
 ### 422 Unprocessable Entity
 
 ```json
-{ "errors": ["Name can't be blank", "Schema type can't be blank", "Scope type can't be blank"] }
+{ "errors": ["Name cannot be blank", "Schema type cannot be blank", "Scope type cannot be blank"] }
 ```
 
 ```json
@@ -690,6 +690,24 @@ GET /studio_settings.xml    → XML 形式で返却
 ```json
 { "errors": ["user_ids must be an array"] }
 ```
+
+送った値の形と長さに関するもの（作成・更新・削除・復元）。形の誤りは、あればすべて並べて返す。長さと、プロジェクト・ユーザーの実在は、形が正しいときに確かめて返す:
+
+| メッセージ | 発生する場合 |
+|-----------|-------------|
+| `studio_setting is required` | 作成・更新で `studio_setting` が無い・空 |
+| `studio_setting must be an object` | `studio_setting` が項目をまとめたもの（JSON のオブジェクト、子要素を持つ XML の要素）でない（文字列・配列など） |
+| `name must be a string`（`schema_type`・`scope_type`・`payload` も同じ） | その項目が文字列でない。`payload` は JSON を文字列にして送る（オブジェクトのままは不可） |
+| `scope_id must be an integer`（`schema_version` も同じ） | その項目が整数として読めない、または -2147483648〜2147483647 の外 |
+| `version must be an integer` | 復元で `version` が無い・整数として読めない |
+| `comment must be a string` | `comment` が文字列でない（`comment` を使わない削除〔`force=1`・`user` スコープ〕でも確かめる） |
+| `comment is too long (maximum is 255 characters)` | `comment` が 255 文字を超える |
+| `Name is too long (maximum is 255 characters)`（`Schema type` も同じ） | `name`・`schema_type` が 255 文字を超える |
+| `Scope cannot be blank` | `project` スコープの作成・付け替えで `scope_id` が無い（作成で管理者でなければ 403） |
+| `Scope must be an existing project` | `project` スコープの作成・付け替えで、`scope_id` のプロジェクトが無い（作成で管理者でなければ 403） |
+| `Scope must be an existing user` | `user` スコープで、`scope_id` のユーザーが無い（グループ・匿名も不可） |
+
+`Name is too long …` など、モデルの検証で出るメッセージ（項目名で始まるもの）は、利用者の言語で返る（例: 日本語なら「名称 は255文字以内で入力してください」）。ほかのメッセージは英語のまま。
 
 本人の設定と版に関するもの:
 

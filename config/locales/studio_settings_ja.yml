@@ -1,5 +1,12 @@
 ja:
   activerecord:
+    errors:
+      models:
+        studio_setting:
+          attributes:
+            scope_id:
+              user_not_found: "には実在するユーザーを指定してください"
+              project_not_found: "には実在するプロジェクトを指定してください"
     attributes:
       studio_setting:
         name: "名称"

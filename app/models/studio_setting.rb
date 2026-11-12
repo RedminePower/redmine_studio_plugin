@@ -9,20 +9,30 @@ class StudioSetting < ActiveRecord::Base
   has_many :histories, class_name: 'StudioSettingHistory', dependent: :destroy
 
   # 本人の設定（1 人に 1 種類 1 つ・持ち主は scope_id の利用者）
+  SCOPE_GLOBAL = 'global'
   SCOPE_USER = 'user'
-  SCOPE_TYPES = ['global', 'project', SCOPE_USER].freeze
+  SCOPE_PROJECT = 'project'
+  SCOPE_TYPES = [SCOPE_GLOBAL, SCOPE_PROJECT, SCOPE_USER].freeze
 
+  # 文字列の列（string 型）の長さの上限。超えた値は、データベースによっては保存の時点で 500 になるので、検証で 422 にする
+  MAX_STRING_LENGTH = 255
+
+  # 長さ・プロジェクトの実在は、その値を書くときだけ確かめる（前からある行は、ほかの項目の更新や論理削除をそのまま通す）
   validates :name, presence: true
+  validates :name, length: { maximum: MAX_STRING_LENGTH }, if: :will_save_change_to_name?
   validates :schema_type, presence: true
+  validates :schema_type, length: { maximum: MAX_STRING_LENGTH }, if: :will_save_change_to_schema_type?
   validates :scope_type, presence: true
   # 大文字小文字の違う値（'USER' など）を通すと、本人の設定の守りが効かないレコードになるので、決まった値だけを受ける
   validates :scope_type, inclusion: { in: SCOPE_TYPES }, allow_blank: true
   validates :schema_version, presence: true, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :scope_id, presence: true, if: :user_scope?
+  validates :scope_id, presence: true, if: :project_reference_changed?
   # 検証の前に重複を見つける（作成の API ではコントローラーが今ある設定を 409 で返す）。
   # 確かめた直後に別の端末が作った場合は、データベースの重複禁止の索引（schema_type, owner_id）で止まる
   validates :schema_type, uniqueness: { scope: :owner_id }, if: :user_scope?
   validate :owner_must_be_user, on: :create, if: :user_scope?
+  validate :project_must_exist, if: :project_reference_changed?
   validate :user_scope_immutable, on: :update
 
   scope :not_deleted, -> { where(deleted_on: nil) }
@@ -35,7 +45,7 @@ class StudioSetting < ActiveRecord::Base
     project_ids = user ? user.projects.pluck(:id) : []
     # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）
     where("scope_type IN (?) OR (scope_type = ? AND scope_id IN (?))",
-          ['global', SCOPE_USER], 'project', project_ids.presence || [-1])
+          [SCOPE_GLOBAL, SCOPE_USER], SCOPE_PROJECT, project_ids.presence || [-1])
   }
 
   before_validation :sync_owner_id
@@ -51,12 +61,21 @@ class StudioSetting < ActiveRecord::Base
     scope_type == SCOPE_USER
   end
 
+  def project_scope?
+    scope_type == SCOPE_PROJECT
+  end
+
+  # project の範囲で、プロジェクトを付ける・付け替える保存か（作成、または scope_id・scope_type を変える）
+  def project_reference_changed?
+    project_scope? && (new_record? || will_save_change_to_scope_id? || will_save_change_to_scope_type?)
+  end
+
   def visible?(user = User.current)
     return true if user&.admin?
-    return true if scope_type == 'global'
+    return true if scope_type == SCOPE_GLOBAL
     return user.present? && user.logged? if user_scope?
 
-    scope_type == 'project' && scope_id.present? && user&.member_of?(Project.find_by(id: scope_id))
+    project_scope? && scope_id.present? && user&.member_of?(Project.find_by(id: scope_id))
   end
 
   # 書き換え（更新・削除・割り当て・履歴の操作）ができるか。
@@ -205,7 +224,14 @@ class StudioSetting < ActiveRecord::Base
   def owner_must_be_user
     return if scope_id.blank?
 
-    errors.add(:scope_id, :invalid) unless User.where(id: scope_id, type: 'User').exists?
+    errors.add(:scope_id, :user_not_found) unless User.where(id: scope_id, type: 'User').exists?
+  end
+
+  # project の範囲は、実在するプロジェクトに付ける（無いと、どのプロジェクトにも属さない設定が残る）
+  def project_must_exist
+    return if scope_id.blank?
+
+    errors.add(:scope_id, :project_not_found) unless Project.where(id: scope_id).exists?
   end
 
   # 本人の設定は、範囲・持ち主・種類を変えない。ほかの範囲を本人の設定に変えることもしない
