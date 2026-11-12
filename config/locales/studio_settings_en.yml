@@ -7,6 +7,11 @@ en:
             scope_id:
               user_not_found: "must be an existing user"
               project_not_found: "must be an existing project"
+        studio_setting_assignment:
+          attributes:
+            user_id:
+              user_not_found: "does not exist: %{id}"
+              not_project_member: "is not a member of the project: %{id}"
     attributes:
       studio_setting:
         name: "Name"

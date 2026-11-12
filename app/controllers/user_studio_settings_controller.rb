@@ -2,6 +2,7 @@
 
 class UserStudioSettingsController < ApplicationController
   accept_api_auth :index
+  helper :studio_setting_assignments
 
   before_action :require_login
   before_action :find_user
@@ -9,9 +10,11 @@ class UserStudioSettingsController < ApplicationController
 
   # GET /users/:id/studio_settings
   def index
+    # その人が開けない設定（割り当てた後にプロジェクトから外れた・範囲が変わったなど）は返さない
     scope = StudioSettingAssignment.where(user_id: @user.id)
                                    .joins(:setting)
                                    .where(studio_settings: { deleted_on: nil })
+                                   .merge(StudioSetting.visible(@user))
 
     # Pagination
     @offset, @limit = api_offset_and_limit

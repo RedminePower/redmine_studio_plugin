@@ -26,7 +26,7 @@ api.array :studio_settings, api_meta(:total_count => @total_count, :offset => @o
               api.id assignment.id
               api.setting_id assignment.setting_id
               api.assigned_on assignment.assigned_on
-              api.user(:id => assignment.user.id, :name => assignment.user.name) unless assignment.user.nil?
+              api_assignment_user(api, assignment)
               api.assigned_by(:id => assignment.assigned_by.id, :name => assignment.assigned_by.name) unless assignment.assigned_by.nil?
             end
           end

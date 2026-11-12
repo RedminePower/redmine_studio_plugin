@@ -54,6 +54,8 @@ Visibility is determined by `scope_type`. Login is required for all endpoints. `
 - Accessing an individual setting, its history, or its user assignments (show/create/update/delete/restore) that the user cannot read or write returns **403 Forbidden**.
 - A `project`-scoped setting can only be created by a member of that project (or an admin). Only an admin can change the scope of a setting on update (`scope_type`, and `scope_id` for a `project`-scoped setting); others get 403, because the contents of earlier versions would become visible to the new scope. To change the scope, create the setting again in the new scope. `scope_id` must be the ID of an existing project (a missing or unknown ID returns 422 for an admin and 403 for others). `global` settings can be created by any logged-in user. For the `user` scope, see "Personal settings (user scope)" below.
 - `GET /users/:id/studio_settings` is allowed only when `:id` is the requester themselves or an admin (otherwise 403).
+- Only active users that the assigner can see (following the "Users visibility" of Redmine roles) can be assigned; groups, the anonymous user, locked users and registered (not yet activated) users cannot. An admin can assign any active user. A user the assigner cannot see is refused with the same 422 as a user that does not exist. A `project`-scoped setting can only be assigned to members of that project (otherwise 422; admins can open any setting, so they can be assigned even if they are not members).
+- In assignment responses and lists (`GET /studio_settings/:id/users`, `include=assignments`, `GET /users/:id/studio_settings`, etc.), the `user` of a user the viewer cannot see contains only `id`; `name` is omitted.
 
 ### Personal settings (user scope)
 
@@ -376,7 +378,7 @@ Response:
 
 ### PUT /studio_settings/:id/users
 
-Replace user assignments (deletes all existing assignments and creates new ones). `user`-scoped settings cannot be assigned (422).
+Replace user assignments (deletes the assignments of users not in `user_ids` and creates assignments for new users). Users in `user_ids` who are already assigned are kept as they are, without checking again whether they can be assigned, so the current list (including users who have since been locked, for example) can be sent back as is. The `id`, `assigned_on` and `assigned_by` of kept assignments do not change. If any new user cannot be assigned, nothing changes and 422 is returned (only the reason for the first refused user is returned). `user`-scoped settings cannot be assigned (422).
 
 Request:
 
@@ -413,7 +415,7 @@ Response:
 
 ### POST /studio_settings/:id/users/:user_id
 
-Add a user to the assignment. Returns existing assignment if already exists. `user`-scoped settings cannot be assigned (422).
+Add a user to the assignment. Returns existing assignment if already exists. A user who cannot be assigned (not visible, not existing, not active, or not a member for a `project`-scoped setting) returns 422. `user`-scoped settings cannot be assigned (422).
 
 Response (201 Created):
 
@@ -443,7 +445,7 @@ Response: 204 No Content
 
 ### GET /users/:id/studio_settings
 
-Get a list of settings assigned to the specified user. Soft-deleted settings are excluded.
+Get a list of settings assigned to the specified user. Soft-deleted settings and settings the user cannot read (for example, after leaving the project or after the setting's scope changed) are excluded.
 
 Query parameters:
 
@@ -710,6 +712,15 @@ Related to the shape and length of the sent values (create, update, delete, rest
 | `Scope must be an existing user` | The user of `scope_id` does not exist for a `user`-scoped setting (groups and the anonymous user are not allowed) |
 
 Messages from model validation (those starting with a field name, such as `Name is too long …`) are returned in the user's language (e.g. in Japanese: 「名称 は255文字以内で入力してください」). The other messages are always in English.
+
+Related to user assignments (`User …` messages come from model validation, so they are returned in the user's language; e.g. in Japanese: 「ユーザー には実在するユーザーを指定してください: 5」):
+
+| Message | When |
+|---------|------|
+| `user_ids must be an array` | `user_ids` is not an array when replacing |
+| `User does not exist: <ID>` | The user to assign does not exist, cannot be seen by the assigner, or is not active (groups, the anonymous user, locked users, registered users) |
+| `User is not a member of the project: <ID>` | Assigning a `project`-scoped setting to someone who is not a member of that project |
+| `User has already been taken` | The same user is sent twice when replacing |
 
 Related to personal settings and versions:
 

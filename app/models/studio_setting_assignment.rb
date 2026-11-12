@@ -8,7 +8,8 @@ class StudioSettingAssignment < ActiveRecord::Base
   validates :setting_id, presence: true
   validates :user_id, presence: true, uniqueness: { scope: :setting_id }
   validates :assigned_by_id, presence: true
-  validate :user_must_exist
+  # 割り当てるときだけ確かめる（前からある割り当ては、相手がロックされた・プロジェクトから外れた後も残す）
+  validate :user_must_be_assignable, on: :create
 
   before_create :set_assigned_on
 
@@ -30,11 +31,18 @@ class StudioSettingAssignment < ActiveRecord::Base
     self.assigned_on = Time.current
   end
 
-  def user_must_exist
-    return if user_id.blank?
+  # 割り当てられるのは、割り当てる人から見える、有効な利用者（グループ・匿名は除く）。
+  # 見えない相手は、いない相手と同じ文で断る（だれがいるかを知らせない）。
+  # project の設定は、そのプロジェクトのメンバーにだけ割り当てる（メンバーでない人は開けない。管理者はどれでも開ける）
+  def user_must_be_assignable
+    return if user_id.blank? || assigned_by.nil?
 
-    unless User.exists?(user_id)
-      errors.add(:user_id, "does not exist: #{user_id}")
+    # 管理者の場合 User.visible はロック中も含むので、有効で絞る
+    target = User.visible(assigned_by).active.where(type: 'User').find_by(id: user_id)
+    if target.nil?
+      errors.add(:user_id, :user_not_found, id: user_id)
+    elsif setting&.project_scope? && !setting.visible?(target)
+      errors.add(:user_id, :not_project_member, id: user_id)
     end
   end
 end
