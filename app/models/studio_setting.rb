@@ -43,8 +43,9 @@ class StudioSetting < ActiveRecord::Base
     next all if user&.admin?
 
     project_ids = user ? user.projects.pluck(:id) : []
-    # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）
-    where("scope_type IN (?) OR (scope_type = ? AND scope_id IN (?))",
+    # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）。
+    # ほかの表と結合しても列がぶつからないよう、表の名前を付ける
+    where("#{table_name}.scope_type IN (?) OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (?))",
           [SCOPE_GLOBAL, SCOPE_USER], SCOPE_PROJECT, project_ids.presence || [-1])
   }
 

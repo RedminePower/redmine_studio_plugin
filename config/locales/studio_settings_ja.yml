@@ -7,6 +7,11 @@ ja:
             scope_id:
               user_not_found: "には実在するユーザーを指定してください"
               project_not_found: "には実在するプロジェクトを指定してください"
+        studio_setting_assignment:
+          attributes:
+            user_id:
+              user_not_found: "には実在するユーザーを指定してください: %{id}"
+              not_project_member: "にはプロジェクトのメンバーを指定してください: %{id}"
     attributes:
       studio_setting:
         name: "名称"

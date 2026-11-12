@@ -257,7 +257,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
 - バッチ 3: [1-30] ～ [1-35] を1つのスクリプトにまとめて実行（可視性・属性名の翻訳）
-- バッチ 4: [1-36] ～ [1-49] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証）
+- バッチ 4: [1-36] ～ [1-50] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証、割り当ての相手）
 
 ### フェーズ 2: HTTP テスト
 
@@ -966,6 +966,20 @@ nonmember.password, nonmember.password_confirmation = 'password123', 'password12
 nonmember.status = User::STATUS_ACTIVE
 nonmember.save
 
+# 割り当ての相手の確かめ用（[1-50]・[2-22b]）
+# vis_limited：「表示できるユーザー」を絞ったロールだけを持つ人。vis_hidden：どのプロジェクトにも入っていない（vis_limited からは見えない）。vis_locked：ロック中
+limited_role = Role.find_by(name: 'Vis Limited') || Role.create(name: 'Vis Limited', users_visibility: 'members_of_visible_projects', permissions: [:view_issues])
+def upsert_user(login, status)
+  u = User.find_by_login(login) || User.new(login: login, firstname: 'Vis', lastname: login, mail: "#{login}@example.com")
+  u.password, u.password_confirmation = 'password123', 'password123' if u.new_record?
+  u.status = status
+  u.save
+  u
+end
+limited = upsert_user('vis_limited', User::STATUS_ACTIVE)
+hidden = upsert_user('vis_hidden', User::STATUS_ACTIVE)
+locked = upsert_user('vis_locked', User::STATUS_LOCKED)
+
 # プロジェクト（冪等）
 proj_a = Project.find_by_identifier('vis-proj-a') || Project.create(name: 'Vis Proj A', identifier: 'vis-proj-a')
 proj_b = Project.find_by_identifier('vis-proj-b') || Project.create(name: 'Vis Proj B', identifier: 'vis-proj-b')
@@ -974,6 +988,12 @@ proj_b = Project.find_by_identifier('vis-proj-b') || Project.create(name: 'Vis P
 unless member.member_of?(proj_a)
   m = Member.new(user_id: member.id, project_id: proj_a.id)
   m.roles = [role]
+  m.save
+end
+# vis_limited を proj_a に、絞ったロールだけで入れる
+unless limited.member_of?(proj_a)
+  m = Member.new(user_id: limited.id, project_id: proj_a.id)
+  m.roles = [limited_role]
   m.save
 end
 
@@ -996,11 +1016,13 @@ puts [g, sa, sb].all?(&:persisted?)
 puts "member_key=#{member.api_key}"
 puts "nonmember_key=#{nonmember.api_key}"
 puts "proj_a=#{proj_a.id} proj_b=#{proj_b.id} member_id=#{member.id}"
+puts (User.visible(limited.reload).where(id: hidden.id).exists? == false && locked.reload.locked?)
+puts "limited_key=#{limited.api_key} hidden_id=#{hidden.id} nonmember_user_id=#{nonmember.id}"
 ```
 
 **期待結果:**
-- `true` が 3 回出力される（member は proj_a 所属／nonmember は非所属／設定 3 件が永続化）
-- `member_key` / `nonmember_key` / `proj_a` / `proj_b` / `member_id` が出力される（HTTP テストで使用）
+- `true` が 4 回出力される（member は proj_a 所属／nonmember は非所属／設定 3 件が永続化／vis_limited から vis_hidden は見えず、vis_locked はロック中）
+- `member_key` / `nonmember_key` / `proj_a` / `proj_b` / `member_id` / `limited_key` / `hidden_id` / `nonmember_user_id` が出力される（HTTP テストで使用）
 
 ### [1-31] visible scope: admin は全件
 
@@ -1094,7 +1116,7 @@ puts en_ok
 
 ## 1C. 本人の設定と版・入力の検証（Runner テスト）
 
-user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-49]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
+user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-50]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
 
 ### [1-36] studio_settings の version / owner_id 列
 
@@ -1518,6 +1540,52 @@ StudioSetting.where(schema_type: [t, t255]).destroy_all
 
 **期待結果:**
 - `true` が 13 回
+
+### [1-50] 割り当てられる相手（割り当てる人から見える・有効な利用者、project の設定はメンバーだけ）
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+member = User.find_by_login('vis_member')
+nonmember = User.find_by_login('vis_nonmember')
+limited = User.find_by_login('vis_limited')
+hidden = User.find_by_login('vis_hidden')
+locked = User.find_by_login('vis_locked')
+t = "rt_assign_#{SecureRandom.hex(4)}"
+g = StudioSetting.create!(name: 'g', schema_type: t, scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin)
+pa = StudioSetting.create!(name: 'pa', schema_type: t, scope_type: 'project', scope_id: Project.find_by_identifier('vis-proj-a').id, schema_version: 0, created_by: admin, updated_by: admin)
+check = ->(setting, user_id, by) {
+  a = StudioSettingAssignment.new(setting: setting, user_id: user_id, assigned_by: by)
+  I18n.with_locale(:en) { a.valid? ? 'ok' : a.errors.full_messages.join }
+}
+
+# 見えない人は、いない人と同じ文で断る
+puts check.(g, hidden.id, limited) == "User does not exist: #{hidden.id}"
+puts check.(g, 999_999, limited) == 'User does not exist: 999999'
+# 見える人（同じプロジェクトのメンバー）には割り当てられる。管理者はだれにでも
+puts check.(g, member.id, limited) == 'ok' && check.(g, hidden.id, admin) == 'ok'
+# ロック中・匿名は、管理者でも割り当てられない
+puts check.(g, locked.id, admin) == "User does not exist: #{locked.id}"
+puts check.(g, User.anonymous.id, admin) == "User does not exist: #{User.anonymous.id}"
+# project の設定は、そのプロジェクトのメンバーにだけ（管理者はメンバーでなくても開けるので割り当てられる）
+puts check.(pa, nonmember.id, admin) == "User is not a member of the project: #{nonmember.id}"
+puts admin.member_of?(Project.find(pa.scope_id)) == false && check.(pa, member.id, admin) == 'ok' && check.(pa, admin.id, admin) == 'ok'
+# 見えず、しかもメンバーでない人も、いない人と同じ文（メンバーかどうかで、いることを知らせない）
+puts check.(pa, hidden.id, limited) == "User does not exist: #{hidden.id}"
+# 文は利用者の言語で返る
+puts I18n.with_locale(:ja) { a = StudioSettingAssignment.new(setting: g, user_id: 999_999, assigned_by: limited); a.valid?; a.errors.full_messages } == ['ユーザー には実在するユーザーを指定してください: 999999']
+
+# 前からある割り当ては、相手がロックされた後も、ほかの保存で断られない
+old = StudioSettingAssignment.new(setting: g, user_id: locked.id, assigned_by: admin)
+old.save(validate: false)
+puts old.reload.valid?
+
+StudioSetting.where(schema_type: t).destroy_all
+```
+
+**期待結果:**
+- `true` が 10 回
 
 ---
 
@@ -2148,7 +2216,7 @@ $response.studio_setting_assignments.Count
 
 **期待結果:**
 - `studio_setting_assignments` に指定したユーザーのみが割り当てられている
-- 以前の割り当ては削除されている
+- `user_ids` に無い人の割り当ては削除されている
 
 #### [2-4-8] ユーザー置換（空配列で全削除）
 
@@ -2178,7 +2246,7 @@ $setting = Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$ApiKey" -
 $settingId = $setting.studio_setting.id
 
 # 複数ユーザーを一括設定
-# ※ 環境に存在するユーザー ID を使用（例: admin=1, 他ユーザー=5 など）
+# ※ 環境にいる有効なユーザーの ID を使用（例: admin=1, 他ユーザー=5 など。ロック中・グループ・匿名は割り当てられない）
 # ※ ID 2 が存在しない環境もあるため、事前に確認が必要
 $body = @{ user_ids = @(1, 5) } | ConvertTo-Json -Depth 2
 
@@ -2248,7 +2316,7 @@ $body = @{ studio_setting = @{ name = "AssignmentPaginationTest"; schema_type = 
 $setting = Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$ApiKey" -Method POST -Body $body -ContentType "application/json"
 $settingId = $setting.studio_setting.id
 
-# 複数ユーザーを割り当て（環境に存在するユーザー ID を使用）
+# 複数ユーザーを割り当て（環境にいる有効なユーザーの ID を使用）
 $body = @{ user_ids = @(1, 5) } | ConvertTo-Json -Depth 2
 Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$settingId/users.json?key=$ApiKey" -Method PUT -Body $body -ContentType "application/json"
 
@@ -3023,7 +3091,7 @@ $response.Content -match "<studio_setting_history>"
 
 ## 2B. 可視性（HTTP テスト）
 
-コントローラの認可を、メンバー / 非メンバー / admin の各 API キーで検証する。前提データは Runner [1-30] が作成し、`member_key` / `nonmember_key` / `proj_a` / `proj_b` / `member_id` を出力する。実行前にそれらと admin の api_key を変数へ入れる。
+コントローラの認可を、メンバー / 非メンバー / admin の各 API キーで検証する。前提データは Runner [1-30] が作成し、`member_key` / `nonmember_key` / `proj_a` / `proj_b` / `member_id` / `limited_key` / `hidden_id` / `nonmember_user_id` を出力する。実行前にそれらと admin の api_key を変数へ入れる。
 
 ### 事前準備
 
@@ -3034,6 +3102,9 @@ $NonMemberKey = "<vis_nonmember の api_key（[1-30] 出力）>"
 $ProjA = <proj_a（[1-30] 出力）>
 $ProjB = <proj_b（[1-30] 出力）>
 $MemberId = <member_id（[1-30] 出力）>
+$LimitedKey = "<vis_limited の api_key（[1-30] 出力の limited_key）>"
+$HiddenId = <hidden_id（[1-30] 出力）>
+$NonMemberUserId = <nonmember_user_id（[1-30] 出力）>
 
 # ProjA スコープ設定の ID を admin で取得
 # （PowerShell の変数名は大文字小文字を区別しないので、$ProjA と重ならない名前にする）
@@ -3154,6 +3225,85 @@ $body = @{ version = 1 } | ConvertTo-Json
 
 **期待結果:**
 - 割り当て一覧: 403／割り当て追加: 403
+
+### [2-22b] 割り当ての相手：見えない人は断り、使えなくなった割り当ては残すが本人の一覧に出さない
+
+割り当てられるのは、割り当てる人から見える・有効な利用者だけ。見えない人は、いない人と同じ返事で断る。project の設定は、そのプロジェクトのメンバーにだけ割り当てる。割り当ての一覧では、見る人から見えない人の名前を出さない。範囲が変わるなどで使えなくなった割り当ては消さないが、本人の設定一覧には出さない。置き換えでは、今いる人は確かめ直さずに残し、断ったときは何も変えない。
+
+**確認方法:**
+```powershell
+foreach ($n in 'AdminKey', 'MemberKey', 'NonMemberKey', 'LimitedKey', 'MemberId', 'HiddenId', 'NonMemberUserId', 'ProjA', 'projASettingId') {
+    if (-not (Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue)) { throw "事前準備の `$$n が入っていない" }
+}
+function New-SettingId($key, $s) { $b = @{ studio_setting = $s } | ConvertTo-Json -Depth 3; (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$key" -Method POST -Body $b -ContentType "application/json").studio_setting.id }
+function Send-Users($key, $method, $path, $body) {
+    $req = @{ Uri = "{BaseUrl}$path.json?key=$key&limit=100"; Method = $method; ContentType = 'application/json'; SkipHttpErrorCheck = $true }
+    if ($null -ne $body) { $req.Body = $body | ConvertTo-Json -Depth 3 }
+    $r = Invoke-WebRequest @req
+    [pscustomobject]@{ Status = [int]$r.StatusCode; Json = $(if ($r.Content) { $r.Content | ConvertFrom-Json } else { $null }) }
+}
+# 文の終わりの ID を外す（見えない人といない人の文を比べるため）
+function Get-ErrorText($r) { "$($r.Json.errors)" -replace ': \d+$', '' }
+
+# 1. 見えない人は、いない人と同じ返事で断る
+$g = New-SettingId $LimitedKey @{ name = 'Vis_Assign_Global'; schema_type = 'work'; scope_type = 'global'; schema_version = 0 }
+$r1 = Send-Users $LimitedKey POST "/studio_settings/$g/users/$HiddenId"
+$missing = Get-ErrorText (Send-Users $LimitedKey POST "/studio_settings/$g/users/999999")
+"$($r1.Status) $((Get-ErrorText $r1) -eq $missing -and $missing -ne '')"
+
+# 2. 見える人には割り当てられる
+$r = Send-Users $LimitedKey POST "/studio_settings/$g/users/$MemberId"
+$ma = $r.Json.studio_setting_assignment.id
+$r.Status
+
+# 3. 置き換えで足せない人がいると断り、外すはずだった人も元のまま残す。文は追加と同じ形（前置きが付かない）
+$r = Send-Users $LimitedKey PUT "/studio_settings/$g/users" @{ user_ids = @($HiddenId) }
+$list = Send-Users $LimitedKey GET "/studio_settings/$g/users"
+"$($r.Status) $((Get-ErrorText $r) -eq $missing) $($list.Json.total_count) $($list.Json.studio_setting_assignments[0].id -eq $ma)"
+
+# 4. project の設定は、そのプロジェクトのメンバーにだけ（いない人とは違う文で断る）
+$r = Send-Users $MemberKey POST "/studio_settings/$projASettingId/users/$NonMemberUserId"
+$memberMissing = Get-ErrorText (Send-Users $MemberKey POST "/studio_settings/$projASettingId/users/999999")
+"$($r.Status) $((Get-ErrorText $r) -ne $memberMissing -and "$($r.Json.errors)" -ne '')"
+
+# 5. 割り当ての一覧では、見る人から見えない人の名前を出さない（admin には出る）
+$add = (Send-Users $AdminKey POST "/studio_settings/$g/users/$HiddenId").Status
+$rows = @((Send-Users $LimitedKey GET "/studio_settings/$g/users").Json.studio_setting_assignments)
+$shown = @((Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$g.json?key=$LimitedKey&include=assignments").studio_setting.assignments)
+$byAdmin = @((Send-Users $AdminKey GET "/studio_settings/$g/users").Json.studio_setting_assignments)
+$hiddenName = { param($a) [bool](($a | Where-Object { $_.user.id -eq $HiddenId }).user.name) }
+"$add $(& $hiddenName $rows) $([bool](($rows | Where-Object { $_.user.id -eq $MemberId }).user.name)) $(& $hiddenName $shown) $(& $hiddenName $byAdmin)"
+
+# 6. 範囲が変わって使えなくなった割り当ては残すが、本人の一覧（本人・admin のどちらが見ても）には出さない。変える前は出ている
+$s = New-SettingId $AdminKey @{ name = 'Vis_Assign_Moved'; schema_type = 'work'; scope_type = 'global'; schema_version = 0 }
+$old = (Send-Users $AdminKey POST "/studio_settings/$s/users/$NonMemberUserId").Json.studio_setting_assignment.id
+if (-not $old) { throw '割り当てができていない' }
+$before = Send-Users $NonMemberKey GET "/users/$NonMemberUserId/studio_settings"
+$ver = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$s.json?key=$AdminKey").studio_setting.version
+$b = @{ studio_setting = @{ scope_type = 'project'; scope_id = $ProjA }; expected_version = $ver } | ConvertTo-Json -Depth 3
+Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$s.json?key=$AdminKey" -Method PUT -Body $b -ContentType "application/json" | Out-Null
+$own = Send-Users $NonMemberKey GET "/users/$NonMemberUserId/studio_settings"
+$adminView = Send-Users $AdminKey GET "/users/$NonMemberUserId/studio_settings"
+"$($before.Status) $(@($before.Json.studio_setting_assignments.setting_id) -contains $s) $($own.Status) $(-not (@($own.Json.studio_setting_assignments.setting_id) -contains $s)) $(-not (@($adminView.Json.studio_setting_assignments.setting_id) -contains $s))"
+
+# 7. 置き換えでは、今いる人（メンバーでなくなった人）は確かめ直さずに残し、新しい人だけを足す
+$r = Send-Users $AdminKey PUT "/studio_settings/$s/users" @{ user_ids = @($NonMemberUserId, $MemberId) }
+$a = @($r.Json.studio_setting_assignments)
+"$($r.Status) $(($a | Where-Object { $_.user.id -eq $NonMemberUserId }).id -eq $old) $($a.Count)"
+
+# 後片付け
+"cleanup: " + (@($g, $s | ForEach-Object { (Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$_.json?key=$AdminKey&force=1" -Method DELETE -SkipHttpErrorCheck).StatusCode }) -join ',')
+```
+
+**期待結果:**
+- `422 True`（見えない人の返事は、いない人と同じ）
+- `201`
+- `422 True 1 True`（置き換えは断り、文に前置きが無く、元の割り当ては同じもので 1 件のまま）
+- `422 True`（メンバーでない人は、いない人とは違う文で断る）
+- `201 False True False True`（見えない人の名前は、一覧にも `include=assignments` にも出ない。見える人と admin には出る）
+- `200 True 200 True True`（変える前は本人の一覧に出ていて、変えた後は本人にも admin にも出ない）
+- `200 True 2`（今いる人の割り当ては同じもの・新しい人が足され 2 件）
+- `cleanup: 204,204`
 
 ### [2-23] /users/:id/studio_settings：自分 or admin のみ
 
@@ -3860,8 +4010,8 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 2. フェーズ 1: Runner テスト実行
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
-   - バッチ 3: [1-30]～[1-35] 可視性（Runner）・属性名の翻訳。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id を出力する
-   - バッチ 4: [1-36]～[1-49] 本人の設定と版、削除の後片付け、入力の検証（Runner）。バッチ 3 の後に流す
+   - バッチ 3: [1-30]～[1-35] 可視性（Runner）・属性名の翻訳。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id / limited_key / hidden_id / nonmember_user_id を出力する
+   - バッチ 4: [1-36]～[1-50] 本人の設定と版、削除の後片付け、入力の検証、割り当ての相手（Runner）。バッチ 3 の後に流す
 3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
@@ -3881,7 +4031,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 - API キーは事前に取得しておく
 - テストの順序依存性に注意（作成 → 取得 → 更新 → 削除）
 - テストデータは削除せず残す（後から確認可能）。ただし 2C は [2-40]、2D は [2-47] で作った分を消す（各節の冒頭を参照）
-- ユーザー ID はテスト環境に存在するものを使用する（ID 2 が存在しない場合がある）
+- ユーザー ID はテスト環境にいる有効なユーザーのものを使用する（ID 2 が存在しない場合がある。ロック中・グループ・匿名は割り当てられない）
 - PowerShell での型チェック: JSON の数値は `Int64` として解釈されるため、`-is [int]` は False になる。数値チェックには `-gt 0` や `-is [int64]` を使用する
 
 ### 履歴 API テスト実行時の注意事項
