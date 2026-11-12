@@ -52,7 +52,7 @@ GET /studio_settings.xml    → XML 形式で返却
 
 - `GET /studio_settings`（一覧）は可視な設定のみを返す（`project` スコープで非メンバーのものは含まれない）。`user` スコープの設定は全ログインユーザーに見えるので、一覧で全員分をまとめて読める。`user` スコープの payload には、他の人に見られて困る値（パスワード・トークンなど）を入れないこと。
 - 個別の設定・履歴・ユーザー割り当てへの操作（取得・作成・更新・削除・復元）で、読めない・書けない設定にアクセスした場合は **403 Forbidden** を返す。
-- `POST /studio_settings` で `project` スコープを指定して作成できるのは、そのプロジェクトのメンバー（または管理者）のみ。`scope_id` は実在するプロジェクトの ID が必須（作成では、無い・いない ID は管理者なら 422、管理者でなければ 403。更新でプロジェクトを付け替えるときは 422）。`global` は全ログインユーザーが作成できる。`user` スコープは下記「本人の設定（user スコープ）」を参照。
+- `project` スコープの設定を作成できるのは、そのプロジェクトのメンバー（または管理者）のみ。範囲（`scope_type`、`project` ならその `scope_id`）を更新で変えられるのは管理者だけ（それ以外は 403。変えると、前の範囲の版の中身が新しい範囲の人に見えるため）。範囲を変えたいときは、新しい範囲で作り直す。`scope_id` は実在するプロジェクトの ID が必須（無い・いない ID は、管理者なら 422、管理者でなければ 403）。`global` は全ログインユーザーが作成できる。`user` スコープは下記「本人の設定（user スコープ）」を参照。
 - `GET /users/:id/studio_settings` は、`:id` が自分自身か管理者の場合のみ許可（それ以外は 403）。
 
 ### 本人の設定（user スコープ）
@@ -244,6 +244,7 @@ GET /studio_settings.xml    → XML 形式で返却
 |-----------|------|------|
 | `expected_version` | `user` スコープでは ○ | 最後に読んだ `version`。`studio_setting` の中に置く（外に置いたものは見ない）。整数でない値は 422 |
 
+- 範囲（`scope_type`、`project` ならその `scope_id`）を変えられるのは管理者だけ（それ以外は 403）。今と同じ値を送るのは、変えたことにならない（読んだ設定を丸ごと送り返してよい）
 - `expected_version` が今の `version` と違う場合は 409 Conflict。本文は今の設定（`GET /studio_settings/:id` と同じ形・payload 込み）。受け取った側は、その内容に変更を重ね直して、その `version` を添えて送り直す
 - 409 の本文は他のエラー（`{ "errors": [...] }`）と形が違う。途中の中継サーバーなどで本文が読めない形に差し替わった場合は、`GET /studio_settings/:id` で取り直す
 
@@ -657,6 +658,7 @@ GET /studio_settings.xml    → XML 形式で返却
 権限のないスコープの設定にアクセスした場合に返す。以下の場合に 403 が返される:
 
 - `project` スコープの設定を、そのプロジェクトの非メンバーが取得・作成・更新・削除・復元・ユーザー割り当て操作した
+- 管理者でない人が、更新で設定の範囲を変えようとした（`scope_type` を変える、`project` の設定をほかのプロジェクトへ付け替える）
 - `user` スコープの設定を、持ち主以外かつ非管理者が更新・削除・復元・ユーザー割り当て操作した、または他のユーザーの分を作成しようとした
 - `GET /users/:id/studio_settings` を、自分以外かつ非管理者が要求した
 
@@ -703,8 +705,8 @@ GET /studio_settings.xml    → XML 形式で返却
 | `comment must be a string` | `comment` が文字列でない（`comment` を使わない削除〔`force=1`・`user` スコープ〕でも確かめる） |
 | `comment is too long (maximum is 255 characters)` | `comment` が 255 文字を超える |
 | `Name is too long (maximum is 255 characters)`（`Schema type` も同じ） | `name`・`schema_type` が 255 文字を超える |
-| `Scope cannot be blank` | `project` スコープの作成・付け替えで `scope_id` が無い（作成で管理者でなければ 403） |
-| `Scope must be an existing project` | `project` スコープの作成・付け替えで、`scope_id` のプロジェクトが無い（作成で管理者でなければ 403） |
+| `Scope cannot be blank` | `project` スコープの作成・管理者の付け替えで `scope_id` が無い（作成で管理者でなければ 403） |
+| `Scope must be an existing project` | `project` スコープの作成・管理者の付け替えで、`scope_id` のプロジェクトが無い（作成で管理者でなければ 403） |
 | `Scope must be an existing user` | `user` スコープで、`scope_id` のユーザーが無い（グループ・匿名も不可） |
 
 `Name is too long …` など、モデルの検証で出るメッセージ（項目名で始まるもの）は、利用者の言語で返る（例: 日本語なら「名称 は255文字以内で入力してください」）。ほかのメッセージは英語のまま。
