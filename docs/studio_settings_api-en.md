@@ -283,6 +283,11 @@ Query parameters:
 
 `user`-scoped settings are always hard-deleted, regardless of `force`.
 
+Settings are also hard-deleted (including soft-deleted ones) without calling this API in the following cases:
+
+- When a user is deleted in Redmine: that user's `user`-scoped settings
+- When a project is deleted in Redmine: that project's `project`-scoped settings (including those of subprojects deleted along with it)
+
 Response: 204 No Content
 
 ---

@@ -129,8 +129,9 @@ else
   # Load Spent Hours By User (API 専用。HTML 一覧カラムではないため query_column 等は無し)
   require_relative 'lib/redmine_studio_plugin/spent_hours_by_user/issue_patch'
 
-  # Load Studio Settings (利用者を消したときの本人の設定の後片付け)
+  # Load Studio Settings (利用者・プロジェクトを消したときの設定の後片付け)
   require_relative 'lib/redmine_studio_plugin/studio_settings/user_patch'
+  require_relative 'lib/redmine_studio_plugin/studio_settings/project_patch'
 
   # Load OAuth Client (サインイン用アプリの自己修復登録・スコープ定義)
   require_relative 'lib/redmine_studio_plugin/oauth_client/scope_provider'
@@ -170,8 +171,9 @@ else
   # Spent Hours By User patch
   Issue.include RedmineStudioPlugin::SpentHoursByUser::IssuePatch
 
-  # Studio Settings patch
+  # Studio Settings patches
   User.include RedmineStudioPlugin::StudioSettings::UserPatch
+  Project.include RedmineStudioPlugin::StudioSettings::ProjectPatch
 
   # Register columns (QueryColumn が利用可能になった後にロード)
   require_relative 'lib/redmine_studio_plugin/journals_list/query_column'
