@@ -70,6 +70,12 @@ class StudioSetting < ActiveRecord::Base
     project_scope? && (new_record? || will_save_change_to_scope_id? || will_save_change_to_scope_type?)
   end
 
+  # 範囲を変える保存か（scope_type を変える、または project のままほかのプロジェクトへ付け替える）。
+  # global・user の scope_id は範囲に関わらないので見ない
+  def scope_reference_changed?
+    will_save_change_to_scope_type? || (project_scope? && will_save_change_to_scope_id?)
+  end
+
   def visible?(user = User.current)
     return true if user&.admin?
     return true if scope_type == SCOPE_GLOBAL

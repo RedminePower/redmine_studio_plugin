@@ -140,7 +140,7 @@ class StudioSettingsController < ApplicationController
   # PUT /studio_settings/:id
   def update
     attrs = studio_setting_params
-    # 範囲は付け替えさせない（本人の設定を他人の物にしたり、本人の設定に変えたりしない）
+    # user への・user からの範囲の変更は、管理者でも断る（本人の設定を他人の物にしたり、本人の設定に変えたりしない）
     if attrs.key?(:scope_type) && attrs[:scope_type].to_s != @studio_setting.scope_type &&
        (@studio_setting.user_scope? || attrs[:scope_type].to_s == StudioSetting::SCOPE_USER)
       return render_api_errors('scope_type cannot be changed to or from user')
@@ -159,6 +159,7 @@ class StudioSettingsController < ApplicationController
 
     saved = false
     conflict = false
+    forbidden = false
     StudioSetting.transaction do
       # 版の確認と保存の間に別の書き込みが入らないよう、行を押さえてから比べる
       @studio_setting.lock!
@@ -168,6 +169,11 @@ class StudioSettingsController < ApplicationController
       end
 
       @studio_setting.attributes = attrs
+      # 範囲を変えられるのは管理者だけ（変えると、前の範囲の版の中身が新しい範囲の人に見えるため）
+      if @studio_setting.scope_reference_changed? && !User.current.admin?
+        forbidden = true
+        raise ActiveRecord::Rollback
+      end
       @studio_setting.updated_by = User.current
       saved = @studio_setting.save
       # 履歴も同じ取引の中で作る（行を押さえている間に番号を決める）。
@@ -175,6 +181,7 @@ class StudioSettingsController < ApplicationController
       @studio_setting.create_history('update', User.current, comment: params[:studio_setting][:comment]) if saved
     end
     return render_version_conflict if conflict
+    return render_403 if forbidden
 
     if saved
       respond_to do |format|

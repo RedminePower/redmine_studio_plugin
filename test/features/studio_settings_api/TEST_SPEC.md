@@ -3032,6 +3032,7 @@ $AdminKey = "<{Username} の api_key>"
 $MemberKey = "<vis_member の api_key（[1-30] 出力）>"
 $NonMemberKey = "<vis_nonmember の api_key（[1-30] 出力）>"
 $ProjA = <proj_a（[1-30] 出力）>
+$ProjB = <proj_b（[1-30] 出力）>
 $MemberId = <member_id（[1-30] 出力）>
 
 # ProjA スコープ設定の ID を admin で取得
@@ -3168,6 +3169,49 @@ $body = @{ version = 1 } | ConvertTo-Json
 
 **期待結果:**
 - 非メンバー（他人分）: 403／本人: 200／admin: 200
+
+### [2-23b] 更新：範囲を変えられるのは admin だけ → それ以外は 403
+
+範囲（`scope_type`、project ならその `scope_id`）を変えると、前の範囲の版の中身が新しい範囲の人に見えるので、admin 以外は断る。今と同じ値を送るのは、変えたことにならない。
+
+**確認方法:**
+```powershell
+if (-not $ProjB -or $ProjB -eq $ProjA) { throw '事前準備の $ProjB（[1-30] の proj_b）が入っていない' }
+function New-SettingId($key, $s) { $b = @{ studio_setting = $s } | ConvertTo-Json -Depth 3; (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings.json?key=$key" -Method POST -Body $b -ContentType "application/json").studio_setting.id }
+function Put-Status($key, $id, $s) { $b = @{ studio_setting = $s } | ConvertTo-Json -Depth 3; (Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$id.json?key=$key" -Method PUT -Body $b -ContentType "application/json" -SkipHttpErrorCheck).StatusCode }
+$rp = New-SettingId $MemberKey @{ name = 'Vis_Scope_Proj'; schema_type = 'work'; scope_type = 'project'; scope_id = $ProjA; schema_version = 0 }
+$rg = New-SettingId $MemberKey @{ name = 'Vis_Scope_Global'; schema_type = 'work'; scope_type = 'global'; schema_version = 0 }
+
+# メンバーが範囲を変える → 403（所属しないプロジェクト・いないプロジェクト・global へ・global から所属するプロジェクトへ・scope_id 無しで project へ）
+Put-Status $MemberKey $rp @{ scope_id = $ProjB }
+Put-Status $MemberKey $rp @{ scope_id = 999999 }
+Put-Status $MemberKey $rp @{ scope_type = 'global' }
+Put-Status $MemberKey $rg @{ scope_type = 'project'; scope_id = $ProjA }
+Put-Status $MemberKey $rg @{ scope_type = 'project' }
+
+# 断ったときは何も変わらない
+$s1 = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$rp.json?key=$AdminKey").studio_setting
+$s2 = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$rg.json?key=$AdminKey").studio_setting
+"$($s1.scope_type)/$($s1.scope_id -eq $ProjA) v$($s1.version) $($s2.scope_type) v$($s2.version)"
+
+# 今と同じ範囲を送る更新は通る。admin は範囲を変えられる
+Put-Status $MemberKey $rp @{ scope_type = 'project'; scope_id = $ProjA; payload = '{"x":1}' }
+Put-Status $AdminKey $rp @{ scope_id = $ProjB }
+Put-Status $AdminKey $rg @{ scope_type = 'project'; scope_id = $ProjA }
+$s1 = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$rp.json?key=$AdminKey").studio_setting
+$s2 = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$rg.json?key=$AdminKey").studio_setting
+"$($s1.scope_type)/$($s1.scope_id -eq $ProjB) $($s2.scope_type)/$($s2.scope_id -eq $ProjA)"
+
+# 後片付け
+"cleanup: " + (@($rp, $rg | ForEach-Object { (Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/$_.json?key=$AdminKey&force=1" -Method DELETE -SkipHttpErrorCheck).StatusCode }) -join ',')
+```
+
+**期待結果:**
+- `403` が 5 回
+- `project/True v1 global v1`（範囲は変わっていない・版も進んでいない）
+- `200` が 3 回
+- `project/True project/True`（admin の付け替えは効いている）
+- `cleanup: 204,204`
 
 ---
 
@@ -3821,7 +3865,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
-   - [2-14]～[2-23]: 可視性（HTTP）。[2-1] の前の事前準備で設定をすべて消すため、[1-30] で作った設定も消えている。[2-14] の前にバッチ 3 をもう一度流し、その出力キー / ID を事前準備に設定してから実行する
+   - [2-14]～[2-23b]: 可視性（HTTP）。[2-1] の前の事前準備で設定をすべて消すため、[1-30] で作った設定も消えている。[2-14] の前にバッチ 3 をもう一度流し、その出力キー / ID を事前準備に設定してから実行する
    - [2-24]～[2-40]: 本人の設定と版（HTTP）。2B の変数（`$projASettingId` を含む）をそのまま使うので、2B の続きで流す（2C の事前準備は、2B の変数が空なら止まる）
    - [2-41]～[2-47]: 送った値の形と長さ（HTTP）。admin の API キーだけで、単独で流せる
 

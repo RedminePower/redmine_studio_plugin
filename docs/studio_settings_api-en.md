@@ -52,7 +52,7 @@ Visibility is determined by `scope_type`. Login is required for all endpoints. `
 
 - `GET /studio_settings` (list) returns only visible settings (`project`-scoped settings are excluded for non-members). `user`-scoped settings are visible to all logged-in users, so everyone's can be read in bulk through the list. Do not put values in a `user`-scoped payload that others must not see (passwords, tokens, etc.).
 - Accessing an individual setting, its history, or its user assignments (show/create/update/delete/restore) that the user cannot read or write returns **403 Forbidden**.
-- `POST /studio_settings` with a `project` scope can only be created by a member of that project (or an admin). `scope_id` must be the ID of an existing project (on create, a missing or unknown ID returns 422 for an admin and 403 for others; moving a setting to another project on update returns 422). `global` settings can be created by any logged-in user. For the `user` scope, see "Personal settings (user scope)" below.
+- A `project`-scoped setting can only be created by a member of that project (or an admin). Only an admin can change the scope of a setting on update (`scope_type`, and `scope_id` for a `project`-scoped setting); others get 403, because the contents of earlier versions would become visible to the new scope. To change the scope, create the setting again in the new scope. `scope_id` must be the ID of an existing project (a missing or unknown ID returns 422 for an admin and 403 for others). `global` settings can be created by any logged-in user. For the `user` scope, see "Personal settings (user scope)" below.
 - `GET /users/:id/studio_settings` is allowed only when `:id` is the requester themselves or an admin (otherwise 403).
 
 ### Personal settings (user scope)
@@ -244,6 +244,7 @@ Request:
 |-----------|----------|-------------|
 | `expected_version` | Yes for the `user` scope | The `version` last read. Put it inside `studio_setting` (a value outside it is ignored). A non-integer value returns 422 |
 
+- Only an admin can change the scope (`scope_type`, and `scope_id` for a `project`-scoped setting); others get 403. Sending the current values does not count as a change (a client may send back the whole setting it read)
 - If `expected_version` differs from the current `version`, 409 Conflict is returned. The body is the current setting (same shape as `GET /studio_settings/:id`, including payload). The client should reapply its change on top of that content and resend with that `version`
 - The 409 body has a different shape from other errors (`{ "errors": [...] }`). If an intermediate server (such as a proxy) replaces the body with something unreadable, read the setting again with `GET /studio_settings/:id`
 
@@ -657,6 +658,7 @@ Error response (when trying to restore to current version):
 Returned when accessing a setting in a scope the user is not allowed to access. A 403 is returned when:
 
 - A non-member of the project accesses (show/create/update/delete/restore/user-assignment) a `project`-scoped setting
+- A non-admin tries to change the scope of a setting on update (changing `scope_type`, or moving a `project`-scoped setting to another project)
 - Someone other than the owner who is not an admin updates/deletes/restores/assigns users to a `user`-scoped setting, or tries to create one for another user
 - `GET /users/:id/studio_settings` is requested by someone other than the user themselves and who is not an admin
 
@@ -703,8 +705,8 @@ Related to the shape and length of the sent values (create, update, delete, rest
 | `comment must be a string` | `comment` is not a string (also checked on deletes that do not use it: `force=1` and the `user` scope) |
 | `comment is too long (maximum is 255 characters)` | `comment` is longer than 255 characters |
 | `Name is too long (maximum is 255 characters)` (same for `Schema type`) | `name` or `schema_type` is longer than 255 characters |
-| `Scope cannot be blank` | `scope_id` is missing when creating or moving a `project`-scoped setting (on create, non-admins get 403) |
-| `Scope must be an existing project` | The project of `scope_id` does not exist when creating or moving a `project`-scoped setting (on create, non-admins get 403) |
+| `Scope cannot be blank` | `scope_id` is missing when creating a `project`-scoped setting or when an admin moves one (on create, non-admins get 403) |
+| `Scope must be an existing project` | The project of `scope_id` does not exist when creating a `project`-scoped setting or when an admin moves one (on create, non-admins get 403) |
 | `Scope must be an existing user` | The user of `scope_id` does not exist for a `user`-scoped setting (groups and the anonymous user are not allowed) |
 
 Messages from model validation (those starting with a field name, such as `Name is too long …`) are returned in the user's language (e.g. in Japanese: 「名称 は255文字以内で入力してください」). The other messages are always in English.
