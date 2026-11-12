@@ -36,6 +36,10 @@ Rails.application.routes.draw do
 
   # Studio Settings
   resources :studio_settings, only: [:index, :show, :create, :update, :destroy] do
+    collection do
+      # 版だけを返す軽い問い合わせ（中身は返さない）
+      post 'versions', to: 'studio_settings#versions'
+    end
     member do
       get 'users', to: 'studio_setting_users#index'
       put 'users', to: 'studio_setting_users#replace'

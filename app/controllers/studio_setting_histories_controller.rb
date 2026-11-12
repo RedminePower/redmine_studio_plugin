@@ -5,7 +5,8 @@ class StudioSettingHistoriesController < ApplicationController
 
   before_action :require_login
   before_action :find_studio_setting
-  before_action :authorize_studio_setting
+  before_action :authorize_studio_setting, only: [:index, :show]
+  before_action :authorize_edit_studio_setting, only: [:destroy, :restore]
   before_action :find_history, only: [:show, :destroy]
 
   # GET /studio_settings/:studio_setting_id/histories
@@ -51,7 +52,7 @@ class StudioSettingHistoriesController < ApplicationController
     version = params[:version].to_i
 
     # Check if trying to restore to current version
-    if version == @studio_setting.current_version
+    if version == @studio_setting.current_history_version
       respond_to do |format|
         format.api { render_api_errors('Cannot restore to the current version') }
       end
@@ -97,5 +98,10 @@ class StudioSettingHistoriesController < ApplicationController
 
   def authorize_studio_setting
     render_403 unless @studio_setting.visible?(User.current)
+  end
+
+  # 本人の設定は、本人と管理者だけが履歴を消したり戻したりできる
+  def authorize_edit_studio_setting
+    render_403 unless @studio_setting.editable?(User.current)
   end
 end

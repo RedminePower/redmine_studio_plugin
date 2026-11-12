@@ -5,7 +5,9 @@ class StudioSettingUsersController < ApplicationController
 
   before_action :require_login
   before_action :find_studio_setting
-  before_action :authorize_studio_setting
+  before_action :authorize_studio_setting, only: [:index]
+  before_action :authorize_edit_studio_setting, only: [:replace, :add, :remove]
+  before_action :reject_user_scope, only: [:replace, :add]
 
   # GET /studio_settings/:id/users
   def index
@@ -117,5 +119,20 @@ class StudioSettingUsersController < ApplicationController
 
   def authorize_studio_setting
     render_403 unless @studio_setting.visible?(User.current)
+  end
+
+  # 本人の設定の割り当ては、本人と管理者だけが変えられる
+  def authorize_edit_studio_setting
+    render_403 unless @studio_setting.editable?(User.current)
+  end
+
+  # 本人の設定は本人だけが使うので、人に割り当てない（割り当てると相手の一覧に出てしまう）
+  def reject_user_scope
+    return unless @studio_setting.user_scope?
+
+    # before_action の中では、respond_to で包まないと Redmine 5.1 で Content-Type が text/html になる
+    respond_to do |format|
+      format.api { render_api_errors('A user setting cannot be assigned to users') }
+    end
   end
 end
