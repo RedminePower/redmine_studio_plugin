@@ -945,7 +945,7 @@ puts fk&.on_delete == :cascade
 
 ## 1B. 可視性（Runner テスト）
 
-`StudioSetting.visible` scope / `visible?` を検証する。global は全ログインユーザーに可視、project スコープは当該プロジェクトのメンバーのみ、admin は全件。**バッチ 3**（[1-30]〜[1-35]）としてまとめて実行し、[1-30] が前提データを作る。
+`StudioSetting.visible` scope / `visible?` を検証する。global は全ログインユーザーに可視、project スコープは当該プロジェクトのメンバーのみ、user スコープは持ち主が見える（`User.visible`）人のみ、admin は全件。**バッチ 3**（[1-30]〜[1-35]）としてまとめて実行し、[1-30] が前提データを作る。
 
 ### [1-30] 可視性テストデータ整備（前提）
 
@@ -1229,11 +1229,23 @@ User.current = admin
 t = "rt_perm_#{SecureRandom.hex(4)}"
 s = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: member.id, schema_version: 0, created_by: member, updated_by: member)
 
-# 読むのはログインしていれば誰でも
+# 読めるのは持ち主が見える人（vis_member は公開の Vis_ProjA のメンバーなので vis_nonmember からも見える）
 puts s.visible?(member)
 puts s.visible?(nonmember)
 puts s.visible?(User.anonymous) == false
 puts StudioSetting.visible(nonmember).where(id: s.id).exists?
+
+# 持ち主が見えない人は読めない（vis_limited から vis_hidden は見えない。[1-30] の前提）
+limited = User.find_by_login('vis_limited')
+hidden = User.find_by_login('vis_hidden')
+h = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: hidden.id, schema_version: 0, created_by: hidden, updated_by: hidden)
+puts User.visible(nonmember).where(id: member.id).exists? && User.visible(limited).where(id: hidden.id).exists? == false
+puts h.visible?(limited) == false
+puts StudioSetting.visible(limited).where(id: h.id).exists? == false
+puts h.visible?(hidden)
+puts h.visible?(admin)
+puts StudioSetting.visible(admin).where(id: h.id).exists?
+h.destroy
 
 # 書けるのは本人と admin だけ
 puts s.editable?(member)
@@ -1245,7 +1257,7 @@ s.destroy
 ```
 
 **期待結果:**
-- `true` が 8 回
+- `true` が 14 回
 
 ### [1-41] user スコープは履歴を残さない
 
@@ -3499,6 +3511,36 @@ $r.Status; $r.Json.total_count
 - 取得: 200／更新: 403／削除: 403／他人（admin）の分の作成: 403
 - admin で取り直した `version` は 3 のまま（書き込まれていない）
 
+**備考:**
+- 取得が 200 になるのは、vis_member から admin が見えるため（同じ Vis_ProjA のメンバー）。見えない人の場合は [2-31c]
+
+### [2-31c] 持ち主が見えない人は、本人の設定を読めない
+
+**確認方法:**
+```powershell
+foreach ($n in 'LimitedKey', 'HiddenId') {
+    if (-not (Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue)) { throw "2B の事前準備を先に流す（$n が空）" }
+}
+# admin が vis_hidden の分を作る（vis_limited から vis_hidden は見えない。[1-30] の前提）
+$h = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = 'hidden_p'; schema_type = $T; scope_type = 'user'; scope_id = $HiddenId; payload = '{}'; schema_version = 1 } }
+$HiddenPersonalId = $h.Json.studio_setting.id
+$h.Status
+(Send-Json $LimitedKey GET "/studio_settings/$HiddenPersonalId.json" $null).Status
+(Send-Json $LimitedKey GET "/studio_settings.json?schema_type=$T&limit=100" $null).Json.studio_settings | Where-Object id -eq $HiddenPersonalId | Measure-Object | ForEach-Object Count
+(Send-Json $LimitedKey POST '/studio_settings/versions.json' @{ ids = @($HiddenPersonalId) }).Json.studio_setting_versions.team | Measure-Object | ForEach-Object Count
+(Send-Json $AdminKey GET "/studio_settings/$HiddenPersonalId.json" $null).Status
+# 後片付け（本人の設定は物理削除）
+(Send-Json $AdminKey DELETE "/studio_settings/$HiddenPersonalId.json" $null).Status
+```
+
+**期待結果:**
+- 作成: 201
+- vis_limited の取得: 403
+- vis_limited の一覧に出ない: 0
+- vis_limited の versions の `team` に出ない: 0
+- admin の取得: 200
+- 後片付け: 204
+
 ### [2-31b] 本人の設定の履歴・割り当ての操作
 
 本人の設定に履歴は無く、割り当ても付けない。操作できない人は 403、操作できる人（本人・admin）でも中身が無いので 404／422 になることを両側から確かめる。
@@ -3682,14 +3724,14 @@ $w.Status; @($w.Json.studio_setting_versions.own).id; @($w.Json.studio_setting_v
 
 **確認方法:**
 ```powershell
-# 2B の ProjA 設定（$projASettingId）は非メンバーには見えない。本人の設定（$PersonalId）はログインしていれば誰でも見える
-$r = Send-Json $NonMemberKey POST '/studio_settings/versions.json' @{ ids = @($projASettingId, $TeamId, $PersonalId) }
+# 2B の ProjA 設定（$projASettingId）は非メンバーには見えない。本人の設定が見える人に絞られることは [2-31c]
+$r = Send-Json $NonMemberKey POST '/studio_settings/versions.json' @{ ids = @($projASettingId, $TeamId) }
 $r.Status; (@($r.Json.studio_setting_versions.team).id | Sort-Object) -join ','
 (Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/versions.json" -Method POST -ContentType 'application/json' -Body '{"own":["x"]}' -SkipHttpErrorCheck).StatusCode
 ```
 
 **期待結果:**
-- 非メンバー: 200・`team` は `$PersonalId` と `$TeamId` の 2 件（小さい順。`$projASettingId` は返らない）
+- 非メンバー: 200・`team` は `$TeamId` の 1 件（`$projASettingId` は返らない）
 - API キーなし: 401
 
 ### [2-37] 一覧の ids フィルタ

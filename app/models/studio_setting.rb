@@ -38,15 +38,18 @@ class StudioSetting < ActiveRecord::Base
   scope :not_deleted, -> { where(deleted_on: nil) }
   scope :deleted, -> { where.not(deleted_on: nil) }
 
-  # global・user は全ログインユーザーに可視。project は当該プロジェクトのメンバーのみ。admin は全件。
+  # global は全ログインユーザーに可視。project は当該プロジェクトのメンバーのみ。
+  # user は、持ち主が Redmine で見える人（User.visible。本人を含む）だけ。admin は全件。
   scope :visible, ->(user = User.current) {
     next all if user&.admin?
 
     project_ids = user ? user.projects.pluck(:id) : []
     # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）。
     # ほかの表と結合しても列がぶつからないよう、表の名前を付ける
-    where("#{table_name}.scope_type IN (?) OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (?))",
-          [SCOPE_GLOBAL, SCOPE_USER], SCOPE_PROJECT, project_ids.presence || [-1])
+    owner_ids_sql = user&.logged? ? User.visible(user).where(type: 'User').select(:id).to_sql : 'SELECT -1'
+    where("#{table_name}.scope_type = ? OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (?))" \
+          " OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (#{owner_ids_sql}))",
+          SCOPE_GLOBAL, SCOPE_PROJECT, project_ids.presence || [-1], SCOPE_USER)
   }
 
   before_validation :sync_owner_id
@@ -80,7 +83,8 @@ class StudioSetting < ActiveRecord::Base
   def visible?(user = User.current)
     return true if user&.admin?
     return true if scope_type == SCOPE_GLOBAL
-    return user.present? && user.logged? if user_scope?
+    # 本人の設定は、持ち主が Redmine で見える人だけ（見えない人の名前と中身を出さない）
+    return user.present? && user.logged? && User.visible(user).where(type: 'User', id: scope_id).exists? if user_scope?
 
     project_scope? && scope_id.present? && user&.member_of?(Project.find_by(id: scope_id))
   end
