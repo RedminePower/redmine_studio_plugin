@@ -11,9 +11,9 @@ api.studio_setting do
   api.updated_on @studio_setting.updated_on
   api.deleted_on @studio_setting.deleted_on
 
-  api.created_by(:id => @studio_setting.created_by.id, :name => @studio_setting.created_by.name) unless @studio_setting.created_by.nil?
-  api.updated_by(:id => @studio_setting.updated_by.id, :name => @studio_setting.updated_by.name) unless @studio_setting.updated_by.nil?
-  api.deleted_by(:id => @studio_setting.deleted_by.id, :name => @studio_setting.deleted_by.name) unless @studio_setting.deleted_by.nil?
+  api_user_ref(api, :created_by, @studio_setting.created_by)
+  api_user_ref(api, :updated_by, @studio_setting.updated_by)
+  api_user_ref(api, :deleted_by, @studio_setting.deleted_by)
 
   if @include_options && @include_options[:include_assignments]
     api.array :assignments do
@@ -23,8 +23,8 @@ api.studio_setting do
           api.id assignment.id
           api.setting_id assignment.setting_id
           api.assigned_on assignment.assigned_on
-          api_assignment_user(api, assignment)
-          api.assigned_by(:id => assignment.assigned_by.id, :name => assignment.assigned_by.name) unless assignment.assigned_by.nil?
+          api_user_ref(api, :user, assignment.user)
+          api_user_ref(api, :assigned_by, assignment.assigned_by)
         end
       end
     end

@@ -41,18 +41,6 @@ class StudioSettingAssignment < ActiveRecord::Base
   end
   private_class_method :assign_locked
 
-  def as_json(options = {})
-    result = {
-      id: id,
-      setting_id: setting_id,
-      assigned_on: assigned_on
-    }
-    # 標準 Redmine API のパターンに合わせて、nil の場合はプロパティを省略
-    result[:user] = { id: user.id, name: user.name } if user
-    result[:assigned_by] = { id: assigned_by.id, name: assigned_by.name } if assigned_by
-    result
-  end
-
   private
 
   def set_assigned_on

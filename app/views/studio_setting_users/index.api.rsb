@@ -6,8 +6,8 @@ api.array :studio_setting_assignments, api_meta(:total_count => @total_count, :o
       api.id assignment.id
       api.setting_id assignment.setting_id
       api.assigned_on assignment.assigned_on
-      api_assignment_user(api, assignment)
-      api.assigned_by(:id => assignment.assigned_by.id, :name => assignment.assigned_by.name) if assignment.assigned_by
+      api_user_ref(api, :user, assignment.user)
+      api_user_ref(api, :assigned_by, assignment.assigned_by)
     end
   end
 end

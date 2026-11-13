@@ -966,7 +966,7 @@ nonmember.password, nonmember.password_confirmation = 'password123', 'password12
 nonmember.status = User::STATUS_ACTIVE
 nonmember.save
 
-# 割り当ての相手の確かめ用（[1-50]・[1-51]・[2-22b]）
+# 割り当ての相手の確かめ用（[1-50]・[1-51]・[2-22b]・[2-22c]）
 # vis_limited：「表示できるユーザー」を絞ったロールだけを持つ人。vis_hidden：どのプロジェクトにも入っていない（vis_limited からは見えない）。vis_locked：ロック中
 limited_role = Role.find_by(name: 'Vis Limited') || Role.create(name: 'Vis Limited', users_visibility: 'members_of_visible_projects', permissions: [:view_issues])
 def upsert_user(login, status)
@@ -3399,6 +3399,94 @@ $a = @($r.Json.studio_setting_assignments)
 - `200 True 200 True True`（変える前は本人の一覧に出ていて、変えた後は本人にも admin にも出ない）
 - `200 True 2`（今いる人の割り当ては同じもの・新しい人が足され 2 件）
 - `cleanup: 204,204`
+
+### [2-22c] 利用者の欄（作った人・更新した人・消した人・履歴の変えた人・割り当てた人・相手）の名前も、見る人から見えなければ出さない
+
+設定・履歴・割り当ての返事にある利用者の欄（`created_by`・`updated_by`・`deleted_by`・`changed_by`・`assigned_by`・`user`）は、どれも同じ扱いにする。
+見る人から Redmine で見えない人は `id` だけを返し、`name` を省く。管理者には全員の名前を出す。
+admin が作って更新し、割り当て、消した設定を、admin が見えない vis_limited と、admin が見える vis_member と、admin が読み比べる。
+ロック中の人は、管理者でない人からは見えない（Redmine で見えるのは有効な人だけ）。そこで、一時的な利用者に設定を作らせ、ロックする前と後で読み比べる。
+
+**確認方法:**
+```powershell
+foreach ($n in 'AdminKey', 'MemberKey', 'LimitedKey', 'MemberId') {
+    if (-not (Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue)) { throw "事前準備の `$$n が入っていない" }
+}
+function Send-As($key, $method, $path, $body = $null) {
+    $req = @{ Uri = "{BaseUrl}$path$(if ($path.Contains('?')) { '&' } else { '?' })key=$key"; Method = $method; ContentType = 'application/json'; SkipHttpErrorCheck = $true }
+    if ($null -ne $body) { $req.Body = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 5 -Compress)) }
+    $r = Invoke-WebRequest @req
+    [pscustomobject]@{ Status = [int]$r.StatusCode; Json = $(if ($r.Content) { $r.Content | ConvertFrom-Json } else { $null }) }
+}
+# 利用者の欄が、その人の id で、名前があるか（name）・id だけか（id）・欄が無いか違う人か（missing）
+function Get-Kind($ref, $uid) { if ($ref.id -ne $uid) { 'missing' } elseif ($ref.name) { 'name' } else { 'id' } }
+$AdminUserId = (Send-As $AdminKey GET '/users/current.json').Json.user.id
+$LimitedUserId = (Send-As $LimitedKey GET '/users/current.json').Json.user.id
+# 前提：vis_limited から admin は見えず、vis_member からは見える
+"pre $((Send-As $LimitedKey GET "/users/$AdminUserId.json").Status) $((Send-As $MemberKey GET "/users/$AdminUserId.json").Status)"
+
+# admin が作って更新し（履歴ができる）、vis_member と vis_limited を割り当てる。もう 1 つ作って論理削除する
+$st = "names_$(Get-Random)"
+$new = { param($key, $name) (Send-As $key POST '/studio_settings.json' @{ studio_setting = @{ name = $name; schema_type = $st; scope_type = 'global'; payload = '{}'; schema_version = 0 } }).Json.studio_setting }
+$g = & $new $AdminKey 'Names'
+Send-As $AdminKey PUT "/studio_settings/$($g.id).json" @{ studio_setting = @{ payload = '{"a":1}' }; expected_version = $g.version } | Out-Null
+foreach ($u in $MemberId, $LimitedUserId) { Send-As $AdminKey POST "/studio_settings/$($g.id)/users/$u.json" | Out-Null }
+$hver = @((Send-As $AdminKey GET "/studio_settings/$($g.id)/histories.json").Json.studio_setting_histories)[0].version
+$d = & $new $AdminKey 'Names_Deleted'
+Send-As $AdminKey DELETE "/studio_settings/$($d.id).json" | Out-Null
+
+# 返事の中の admin の欄を、見る人ごとに並べる（追加・置き換えは、今ある割り当てをそのまま返す依頼にする）
+function Get-AdminRefs($key) {
+    $show = (Send-As $key GET "/studio_settings/$($g.id).json?include=assignments").Json.studio_setting
+    $list = @((Send-As $key GET "/studio_settings.json?schema_type=$st&include=assignments").Json.studio_settings) | Where-Object id -eq $g.id
+    $del = (Send-As $key GET "/studio_settings/$($d.id).json").Json.studio_setting
+    $dlist = @((Send-As $key GET "/studio_settings.json?schema_type=$st&include_deleted=1").Json.studio_settings) | Where-Object id -eq $d.id
+    $hist = @((Send-As $key GET "/studio_settings/$($g.id)/histories.json").Json.studio_setting_histories)[0]
+    $hone = (Send-As $key GET "/studio_settings/$($g.id)/histories/$hver.json").Json.studio_setting_history
+    $users = @((Send-As $key GET "/studio_settings/$($g.id)/users.json").Json.studio_setting_assignments)
+    $add = (Send-As $key POST "/studio_settings/$($g.id)/users/$MemberId.json").Json.studio_setting_assignment
+    $rep = @((Send-As $key PUT "/studio_settings/$($g.id)/users.json" @{ user_ids = @($MemberId, $LimitedUserId) }).Json.studio_setting_assignments)
+    $refs = [ordered]@{
+        'show.created_by' = $show.created_by; 'show.updated_by' = $show.updated_by
+        'show.assigned_by' = $show.assignments[0].assigned_by
+        'list.created_by' = $list.created_by; 'list.updated_by' = $list.updated_by
+        'list.assigned_by' = $list.assignments[0].assigned_by
+        'deleted.deleted_by' = $del.deleted_by; 'deleted_list.deleted_by' = $dlist.deleted_by
+        'histories.changed_by' = $hist.changed_by; 'history.changed_by' = $hone.changed_by
+        'users.assigned_by' = $users[0].assigned_by
+        'add.assigned_by' = $add.assigned_by; 'replace.assigned_by' = $rep[0].assigned_by
+    }
+    ($refs.Keys | ForEach-Object { "$_=$(Get-Kind $refs[$_] $AdminUserId)" }) -join ' '
+}
+"limited: $(Get-AdminRefs $LimitedKey)"
+"member: $(Get-AdminRefs $MemberKey)"
+"admin: $(Get-AdminRefs $AdminKey)"
+# 本人の割り当て一覧の assigned_by と、見える相手（user）の名前
+$mine = @((Send-As $LimitedKey GET "/users/$LimitedUserId/studio_settings.json").Json.studio_setting_assignments) | Where-Object setting_id -eq $g.id
+"mine assigned_by=$(Get-Kind $mine.assigned_by $AdminUserId) user=$(Get-Kind $mine.user $LimitedUserId)"
+
+# ロック中の人：一時的な利用者に設定を作らせ、ロックする前と後で vis_member と admin が読む
+$tl = "names_tmp_$(Get-Random)"
+$tu = (Send-As $AdminKey POST '/users.json' @{ user = @{ login = $tl; firstname = 'Tmp'; lastname = 'Names'; mail = "$tl@example.com"; password = "Pw-$(Get-Random)-x9" } }).Json.user
+$tkey = (Send-As $AdminKey GET "/users/$($tu.id).json").Json.user.api_key
+$l = & $new $tkey 'Names_Locked'
+$before = Get-Kind (Send-As $MemberKey GET "/studio_settings/$($l.id).json").Json.studio_setting.created_by $tu.id
+Send-As $AdminKey PUT "/users/$($tu.id).json" @{ user = @{ status = 3 } } | Out-Null
+$after = Get-Kind (Send-As $MemberKey GET "/studio_settings/$($l.id).json").Json.studio_setting.created_by $tu.id
+$byAdmin = Get-Kind (Send-As $AdminKey GET "/studio_settings/$($l.id).json").Json.studio_setting.created_by $tu.id
+"locked before=$before after=$after admin=$byAdmin"
+
+# 後片付け（設定は物理削除、一時的な利用者は削除）
+"cleanup: " + ((@($g.id, $d.id, $l.id | ForEach-Object { (Send-As $AdminKey DELETE "/studio_settings/$_.json?force=1").Status }) + (Send-As $AdminKey DELETE "/users/$($tu.id).json").Status) -join ',')
+```
+
+**期待結果:**
+- `pre 404 200`（vis_limited から admin は見えず、vis_member からは見える）
+- `limited:` の 13 項目がすべて `id`（名前を出さない）
+- `member:`・`admin:` の 13 項目がすべて `name`
+- `mine assigned_by=id user=name`（割り当てた admin の名前は出さず、見える相手〔自分〕の名前は出す）
+- `locked before=name after=id admin=name`（ロックされると、管理者でない人には名前を出さない。管理者には出す）
+- `cleanup: 204,204,204,204`
 
 ### [2-23] /users/:id/studio_settings：自分 or admin のみ
 

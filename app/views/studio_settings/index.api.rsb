@@ -12,9 +12,9 @@ api.array :studio_settings, api_meta(:total_count => @total_count, :offset => @o
       api.updated_on setting.updated_on
       api.deleted_on setting.deleted_on
 
-      api.created_by(:id => setting.created_by.id, :name => setting.created_by.name) unless setting.created_by.nil?
-      api.updated_by(:id => setting.updated_by.id, :name => setting.updated_by.name) unless setting.updated_by.nil?
-      api.deleted_by(:id => setting.deleted_by.id, :name => setting.deleted_by.name) unless setting.deleted_by.nil?
+      api_user_ref(api, :created_by, setting.created_by)
+      api_user_ref(api, :updated_by, setting.updated_by)
+      api_user_ref(api, :deleted_by, setting.deleted_by)
 
       api.payload setting.payload if @include_options[:include_payload]
 
@@ -26,8 +26,8 @@ api.array :studio_settings, api_meta(:total_count => @total_count, :offset => @o
               api.id assignment.id
               api.setting_id assignment.setting_id
               api.assigned_on assignment.assigned_on
-              api_assignment_user(api, assignment)
-              api.assigned_by(:id => assignment.assigned_by.id, :name => assignment.assigned_by.name) unless assignment.assigned_by.nil?
+              api_user_ref(api, :user, assignment.user)
+              api_user_ref(api, :assigned_by, assignment.assigned_by)
             end
           end
         end
