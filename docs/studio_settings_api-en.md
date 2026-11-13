@@ -55,7 +55,7 @@ Visibility is determined by `scope_type`. Login is required for all endpoints. `
 - A `project`-scoped setting can only be created by a member of that project (or an admin). Only an admin can change the scope of a setting on update (`scope_type`, and `scope_id` for a `project`-scoped setting); others get 403, because the contents of earlier versions would become visible to the new scope. To change the scope, create the setting again in the new scope. `scope_id` must be the ID of an existing project (a missing or unknown ID returns 422 for an admin and 403 for others). `global` settings can be created by any logged-in user. For the `user` scope, see "Personal settings (user scope)" below.
 - `GET /users/:id/studio_settings` is allowed only when `:id` is the requester themselves or an admin (otherwise 403).
 - Only active users that the assigner can see (following the "Users visibility" of Redmine roles) can be assigned; groups, the anonymous user, locked users and registered (not yet activated) users cannot. An admin can assign any active user. A user the assigner cannot see is refused with the same 422 as a user that does not exist. A `project`-scoped setting can only be assigned to members of that project (otherwise 422; admins can open any setting, so they can be assigned even if they are not members).
-- In assignment responses and lists (`GET /studio_settings/:id/users`, `include=assignments`, `GET /users/:id/studio_settings`, etc.), the `user` of a user the viewer cannot see contains only `id`; `name` is omitted.
+- User fields in responses (`user` and `assigned_by` of assignments, `created_by`, `updated_by` and `deleted_by` of settings, and `changed_by` of histories) contain only `id` when the viewer cannot see that user; `name` is omitted. This applies to all setting, history and assignment responses and lists, `include=assignments`, and `GET /users/:id/studio_settings`. Admins get the names of all users.
 
 ### Personal settings (user scope)
 
@@ -415,7 +415,7 @@ Response:
 
 ### POST /studio_settings/:id/users/:user_id
 
-Add a user to the assignment. Returns existing assignment if already exists. A user who cannot be assigned (not visible, not existing, not active, or not a member for a `project`-scoped setting) returns 422. `user`-scoped settings cannot be assigned (422).
+Add a user to the assignment (201). If the user is already assigned, nothing changes and the existing assignment is returned (200; also when the same request arrives at almost the same time, the assignment written first is returned with 200). A user who cannot be assigned (not visible, not existing, not active, or not a member for a `project`-scoped setting) returns 422. `user`-scoped settings cannot be assigned (422).
 
 Response (201 Created):
 

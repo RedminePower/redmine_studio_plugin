@@ -2,7 +2,7 @@
 
 class UserStudioSettingsController < ApplicationController
   accept_api_auth :index
-  helper :studio_setting_assignments
+  helper :studio_setting_user_names
 
   before_action :require_login
   before_action :find_user

@@ -2,6 +2,7 @@
 
 class StudioSettingHistoriesController < ApplicationController
   accept_api_auth :index, :show, :destroy, :restore
+  helper :studio_setting_user_names
 
   before_action :require_login
   before_action :find_studio_setting

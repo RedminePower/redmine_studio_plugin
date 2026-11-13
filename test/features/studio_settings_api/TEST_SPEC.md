@@ -257,7 +257,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
 - バッチ 3: [1-30] ～ [1-35] を1つのスクリプトにまとめて実行（可視性・属性名の翻訳）
-- バッチ 4: [1-36] ～ [1-50] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証、割り当ての相手）
+- バッチ 4: [1-36] ～ [1-51] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証、割り当ての相手、割り当ての重複）
 
 ### フェーズ 2: HTTP テスト
 
@@ -966,7 +966,7 @@ nonmember.password, nonmember.password_confirmation = 'password123', 'password12
 nonmember.status = User::STATUS_ACTIVE
 nonmember.save
 
-# 割り当ての相手の確かめ用（[1-50]・[2-22b]）
+# 割り当ての相手の確かめ用（[1-50]・[1-51]・[2-22b]・[2-22c]）
 # vis_limited：「表示できるユーザー」を絞ったロールだけを持つ人。vis_hidden：どのプロジェクトにも入っていない（vis_limited からは見えない）。vis_locked：ロック中
 limited_role = Role.find_by(name: 'Vis Limited') || Role.create(name: 'Vis Limited', users_visibility: 'members_of_visible_projects', permissions: [:view_issues])
 def upsert_user(login, status)
@@ -1116,7 +1116,7 @@ puts en_ok
 
 ## 1C. 本人の設定と版・入力の検証（Runner テスト）
 
-user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-50]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
+user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-51]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
 
 ### [1-36] studio_settings の version / owner_id 列
 
@@ -1598,6 +1598,89 @@ StudioSetting.where(schema_type: t).destroy_all
 
 **期待結果:**
 - `true` が 10 回
+
+### [1-51] 割り当ては何度送っても同じ結果（同時に届いて先に書かれた場合も、今ある割り当てを返す）
+
+同時に届いた同じ依頼が「確かめてから書くまでの間」に先に書く場面を作る。
+先に書いた依頼の行（割り当てた人は vis_member）を、次の 2 か所で差し込む。
+
+- 検証の前：保存の途中で行を差し込む。検証の重複の確かめで断られる
+- 書く時点：DB の重複禁止の索引で断られると取引が巻き戻り、同じ取引で差し込んだ行も消える。そのため、行は先に書いておく。そのうえで、書く処理（`assign_locked`）が索引で断られたことにして作る
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+member = User.find_by_login('vis_member')
+limited = User.find_by_login('vis_limited')
+t = "rt_assign_race_#{SecureRandom.hex(4)}"
+g = StudioSetting.create!(name: 'g', schema_type: t, scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin)
+first_writer = ->(uid) { StudioSettingAssignment.insert_all([{ setting_id: g.id, user_id: uid, assigned_by_id: member.id, assigned_on: Time.current }]) }
+
+# 検証の前に行を差し込む仕掛け
+$ssa_inject = nil
+StudioSettingAssignment.class_eval do
+  def ssa_test_inject
+    f = $ssa_inject
+    $ssa_inject = nil
+    f&.call
+  end
+end
+StudioSettingAssignment.set_callback(:validation, :before, :ssa_test_inject)
+# 書く処理が、DB の索引で断られたことにする仕掛け（1 回だけ）
+$ssa_not_unique = false
+StudioSettingAssignment.singleton_class.prepend(Module.new do
+  def assign_locked(*args)
+    if $ssa_not_unique
+      $ssa_not_unique = false
+      raise ActiveRecord::RecordNotUnique, 'simulated'
+    end
+    super
+  end
+end)
+
+begin
+  # 1 回目は作る、2 回目は今ある割り当てを返す
+  a1, c1 = StudioSettingAssignment.assign(g, member.id, admin)
+  a2, c2 = StudioSettingAssignment.assign(g, member.id, admin)
+  puts a1.persisted? && c1 == true && a2.id == a1.id && c2 == false
+
+  # 検証の前に先に書かれた → 検証の重複で断られるが、先に書かれた割り当てを返す
+  $ssa_inject = -> { first_writer.(admin.id) }
+  a3, c3 = StudioSettingAssignment.assign(g, admin.id, admin)
+  puts a3.persisted? && c3 == false && a3.assigned_by_id == member.id
+
+  # 書く時点で DB の索引に断られた → 先に書かれた割り当てを返す
+  first_writer.(limited.id)
+  $ssa_not_unique = true
+  a4, c4 = StudioSettingAssignment.assign(g, limited.id, admin)
+  # 仕掛けが使われた（索引で断られた道を通った）ことも確かめる
+  puts a4.persisted? && c4 == false && a4.assigned_by_id == member.id && $ssa_not_unique == false
+
+  # 本物の DB の索引も、検証を通さない重複を RecordNotUnique で断る
+  raised = false
+  begin
+    StudioSettingAssignment.new(setting: g, user_id: member.id, assigned_by: admin).save(validate: false)
+  rescue ActiveRecord::RecordNotUnique
+    raised = true
+  end
+  puts raised
+
+  # 割り当ての行は 1 人 1 行のまま
+  puts g.assignments.group(:user_id).count.values.uniq == [1] && g.assignments.count == 3
+
+  # 重複でない理由で断られたときは、保存していない割り当てを返す（今までどおり 422 になる）
+  a5, c5 = StudioSettingAssignment.assign(g, 999_999, admin)
+  puts a5.new_record? && c5 == false && a5.errors.of_kind?(:user_id, :user_not_found)
+ensure
+  StudioSettingAssignment.skip_callback(:validation, :before, :ssa_test_inject)
+  $ssa_not_unique = false
+  StudioSetting.where(schema_type: t).destroy_all
+end
+```
+
+**期待結果:**
+- `true` が 6 回
 
 ---
 
@@ -3317,6 +3400,94 @@ $a = @($r.Json.studio_setting_assignments)
 - `200 True 2`（今いる人の割り当ては同じもの・新しい人が足され 2 件）
 - `cleanup: 204,204`
 
+### [2-22c] 利用者の欄（作った人・更新した人・消した人・履歴の変えた人・割り当てた人・相手）の名前も、見る人から見えなければ出さない
+
+設定・履歴・割り当ての返事にある利用者の欄（`created_by`・`updated_by`・`deleted_by`・`changed_by`・`assigned_by`・`user`）は、どれも同じ扱いにする。
+見る人から Redmine で見えない人は `id` だけを返し、`name` を省く。管理者には全員の名前を出す。
+admin が作って更新し、割り当て、消した設定を、admin が見えない vis_limited と、admin が見える vis_member と、admin が読み比べる。
+ロック中の人は、管理者でない人からは見えない（Redmine で見えるのは有効な人だけ）。そこで、一時的な利用者に設定を作らせ、ロックする前と後で読み比べる。
+
+**確認方法:**
+```powershell
+foreach ($n in 'AdminKey', 'MemberKey', 'LimitedKey', 'MemberId') {
+    if (-not (Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue)) { throw "事前準備の `$$n が入っていない" }
+}
+function Send-As($key, $method, $path, $body = $null) {
+    $req = @{ Uri = "{BaseUrl}$path$(if ($path.Contains('?')) { '&' } else { '?' })key=$key"; Method = $method; ContentType = 'application/json'; SkipHttpErrorCheck = $true }
+    if ($null -ne $body) { $req.Body = [Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 5 -Compress)) }
+    $r = Invoke-WebRequest @req
+    [pscustomobject]@{ Status = [int]$r.StatusCode; Json = $(if ($r.Content) { $r.Content | ConvertFrom-Json } else { $null }) }
+}
+# 利用者の欄が、その人の id で、名前があるか（name）・id だけか（id）・欄が無いか違う人か（missing）
+function Get-Kind($ref, $uid) { if ($ref.id -ne $uid) { 'missing' } elseif ($ref.name) { 'name' } else { 'id' } }
+$AdminUserId = (Send-As $AdminKey GET '/users/current.json').Json.user.id
+$LimitedUserId = (Send-As $LimitedKey GET '/users/current.json').Json.user.id
+# 前提：vis_limited から admin は見えず、vis_member からは見える
+"pre $((Send-As $LimitedKey GET "/users/$AdminUserId.json").Status) $((Send-As $MemberKey GET "/users/$AdminUserId.json").Status)"
+
+# admin が作って更新し（履歴ができる）、vis_member と vis_limited を割り当てる。もう 1 つ作って論理削除する
+$st = "names_$(Get-Random)"
+$new = { param($key, $name) (Send-As $key POST '/studio_settings.json' @{ studio_setting = @{ name = $name; schema_type = $st; scope_type = 'global'; payload = '{}'; schema_version = 0 } }).Json.studio_setting }
+$g = & $new $AdminKey 'Names'
+Send-As $AdminKey PUT "/studio_settings/$($g.id).json" @{ studio_setting = @{ payload = '{"a":1}' }; expected_version = $g.version } | Out-Null
+foreach ($u in $MemberId, $LimitedUserId) { Send-As $AdminKey POST "/studio_settings/$($g.id)/users/$u.json" | Out-Null }
+$hver = @((Send-As $AdminKey GET "/studio_settings/$($g.id)/histories.json").Json.studio_setting_histories)[0].version
+$d = & $new $AdminKey 'Names_Deleted'
+Send-As $AdminKey DELETE "/studio_settings/$($d.id).json" | Out-Null
+
+# 返事の中の admin の欄を、見る人ごとに並べる（追加・置き換えは、今ある割り当てをそのまま返す依頼にする）
+function Get-AdminRefs($key) {
+    $show = (Send-As $key GET "/studio_settings/$($g.id).json?include=assignments").Json.studio_setting
+    $list = @((Send-As $key GET "/studio_settings.json?schema_type=$st&include=assignments").Json.studio_settings) | Where-Object id -eq $g.id
+    $del = (Send-As $key GET "/studio_settings/$($d.id).json").Json.studio_setting
+    $dlist = @((Send-As $key GET "/studio_settings.json?schema_type=$st&include_deleted=1").Json.studio_settings) | Where-Object id -eq $d.id
+    $hist = @((Send-As $key GET "/studio_settings/$($g.id)/histories.json").Json.studio_setting_histories)[0]
+    $hone = (Send-As $key GET "/studio_settings/$($g.id)/histories/$hver.json").Json.studio_setting_history
+    $users = @((Send-As $key GET "/studio_settings/$($g.id)/users.json").Json.studio_setting_assignments)
+    $add = (Send-As $key POST "/studio_settings/$($g.id)/users/$MemberId.json").Json.studio_setting_assignment
+    $rep = @((Send-As $key PUT "/studio_settings/$($g.id)/users.json" @{ user_ids = @($MemberId, $LimitedUserId) }).Json.studio_setting_assignments)
+    $refs = [ordered]@{
+        'show.created_by' = $show.created_by; 'show.updated_by' = $show.updated_by
+        'show.assigned_by' = $show.assignments[0].assigned_by
+        'list.created_by' = $list.created_by; 'list.updated_by' = $list.updated_by
+        'list.assigned_by' = $list.assignments[0].assigned_by
+        'deleted.deleted_by' = $del.deleted_by; 'deleted_list.deleted_by' = $dlist.deleted_by
+        'histories.changed_by' = $hist.changed_by; 'history.changed_by' = $hone.changed_by
+        'users.assigned_by' = $users[0].assigned_by
+        'add.assigned_by' = $add.assigned_by; 'replace.assigned_by' = $rep[0].assigned_by
+    }
+    ($refs.Keys | ForEach-Object { "$_=$(Get-Kind $refs[$_] $AdminUserId)" }) -join ' '
+}
+"limited: $(Get-AdminRefs $LimitedKey)"
+"member: $(Get-AdminRefs $MemberKey)"
+"admin: $(Get-AdminRefs $AdminKey)"
+# 本人の割り当て一覧の assigned_by と、見える相手（user）の名前
+$mine = @((Send-As $LimitedKey GET "/users/$LimitedUserId/studio_settings.json").Json.studio_setting_assignments) | Where-Object setting_id -eq $g.id
+"mine assigned_by=$(Get-Kind $mine.assigned_by $AdminUserId) user=$(Get-Kind $mine.user $LimitedUserId)"
+
+# ロック中の人：一時的な利用者に設定を作らせ、ロックする前と後で vis_member と admin が読む
+$tl = "names_tmp_$(Get-Random)"
+$tu = (Send-As $AdminKey POST '/users.json' @{ user = @{ login = $tl; firstname = 'Tmp'; lastname = 'Names'; mail = "$tl@example.com"; password = "Pw-$(Get-Random)-x9" } }).Json.user
+$tkey = (Send-As $AdminKey GET "/users/$($tu.id).json").Json.user.api_key
+$l = & $new $tkey 'Names_Locked'
+$before = Get-Kind (Send-As $MemberKey GET "/studio_settings/$($l.id).json").Json.studio_setting.created_by $tu.id
+Send-As $AdminKey PUT "/users/$($tu.id).json" @{ user = @{ status = 3 } } | Out-Null
+$after = Get-Kind (Send-As $MemberKey GET "/studio_settings/$($l.id).json").Json.studio_setting.created_by $tu.id
+$byAdmin = Get-Kind (Send-As $AdminKey GET "/studio_settings/$($l.id).json").Json.studio_setting.created_by $tu.id
+"locked before=$before after=$after admin=$byAdmin"
+
+# 後片付け（設定は物理削除、一時的な利用者は削除）
+"cleanup: " + ((@($g.id, $d.id, $l.id | ForEach-Object { (Send-As $AdminKey DELETE "/studio_settings/$_.json?force=1").Status }) + (Send-As $AdminKey DELETE "/users/$($tu.id).json").Status) -join ',')
+```
+
+**期待結果:**
+- `pre 404 200`（vis_limited から admin は見えず、vis_member からは見える）
+- `limited:` の 13 項目がすべて `id`（名前を出さない）
+- `member:`・`admin:` の 13 項目がすべて `name`
+- `mine assigned_by=id user=name`（割り当てた admin の名前は出さず、見える相手〔自分〕の名前は出す）
+- `locked before=name after=id admin=name`（ロックされると、管理者でない人には名前を出さない。管理者には出す）
+- `cleanup: 204,204,204,204`
+
 ### [2-23] /users/:id/studio_settings：自分 or admin のみ
 
 **確認方法:**
@@ -4078,7 +4249,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
    - バッチ 3: [1-30]～[1-35] 可視性（Runner）・属性名の翻訳。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id / limited_key / hidden_id / nonmember_user_id を出力する
-   - バッチ 4: [1-36]～[1-50] 本人の設定と版、削除の後片付け、入力の検証、割り当ての相手（Runner）。バッチ 3 の後に流す
+   - バッチ 4: [1-36]～[1-51] 本人の設定と版、削除の後片付け、入力の検証、割り当ての相手・重複（Runner）。バッチ 3 の後に流す
 3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能

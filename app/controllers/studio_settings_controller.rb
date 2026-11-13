@@ -2,7 +2,7 @@
 
 class StudioSettingsController < ApplicationController
   accept_api_auth :index, :show, :create, :update, :destroy, :versions
-  helper :studio_setting_assignments
+  helper :studio_setting_user_names
 
   before_action :require_login
   before_action :find_studio_setting, only: [:show, :update, :destroy]

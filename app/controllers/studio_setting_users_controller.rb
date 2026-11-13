@@ -2,7 +2,7 @@
 
 class StudioSettingUsersController < ApplicationController
   accept_api_auth :index, :replace, :add, :remove
-  helper :studio_setting_assignments
+  helper :studio_setting_user_names
 
   before_action :require_login
   before_action :find_studio_setting
@@ -38,7 +38,7 @@ class StudioSettingUsersController < ApplicationController
     end
 
     StudioSettingAssignment.transaction do
-      # 設定の行を押さえてから読む（同時の置き換えで、互いの結果が混ざらないように）
+      # 設定の行を押さえてから読む（同時の置き換え・割り当てで、互いの結果が混ざらないように）
       @studio_setting.lock!
 
       # 送られた中に今もいる人の割り当ては、確かめ直さずにそのまま残す
@@ -72,27 +72,12 @@ class StudioSettingUsersController < ApplicationController
 
   # POST /studio_settings/:id/users/:user_id
   def add
-    user_id = params[:user_id]
+    # もう割り当て済みなら（同時に届いた同じ依頼が先に書いた場合も）、今ある割り当てを 200 で返す
+    @assignment, created = StudioSettingAssignment.assign(@studio_setting, params[:user_id], User.current)
 
-    # Check if assignment already exists
-    existing = @studio_setting.assignments.find_by(user_id: user_id)
-    if existing
-      @assignment = existing
+    if @assignment.persisted?
       respond_to do |format|
-        format.api { render :action => 'add', :status => :ok }
-      end
-      return
-    end
-
-    @assignment = StudioSettingAssignment.new(
-      setting: @studio_setting,
-      user_id: user_id,
-      assigned_by: User.current
-    )
-
-    if @assignment.save
-      respond_to do |format|
-        format.api { render :action => 'add', :status => :created }
+        format.api { render :action => 'add', :status => created ? :created : :ok }
       end
     else
       respond_to do |format|
