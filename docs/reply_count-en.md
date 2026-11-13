@@ -30,7 +30,9 @@ Displays the number of times an issue's assignee has been changed as "Reply Coun
 ```
 
 - `items` is ordered as "initial assignee → new assignee of each change" (element count = `count` + 1)
-- No assignee is represented as `id: 0, name: ""`; a deleted or invalid user as `id: <original ID>, name: ""`
+- When the assignee is a group, the group name is returned
+- No assignee is represented as `id: 0, name: ""`; a deleted group as `id: <original ID>, name: ""`
+- A deleted user is returned as the anonymous user, because Redmine replaces the assignee in the history with the anonymous user
 - Issues with no assignee changes return `count: 0` and `items` containing only the current assignee
 
 ## How to Use
@@ -64,4 +66,5 @@ Taro Tanaka
 - First line (no indent): Initial assignee at issue creation
 - Subsequent lines (with ` - `): Assignee change targets
 - If no assignee is set, displayed as "(No assignee)"
-- Deleted users are displayed as "(No assignee)"
+- When the assignee is a group, the group name is displayed
+- Deleted users are displayed as "Anonymous", and deleted groups as "(No assignee)"

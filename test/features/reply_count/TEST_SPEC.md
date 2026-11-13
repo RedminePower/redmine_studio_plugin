@@ -114,9 +114,9 @@ puts "label_reply_count_no_assignee: #{I18n.t(:label_reply_count_no_assignee)}"
 **確認方法:**
 ```ruby
 User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
-user_b = User.where(status: 1).where.not(id: 1).first
+# 最初のトラッカーで担当者にできる人が 2 人いるプロジェクトで試す（担当者にできない人を選ぶと、担当者の変更が保存されない）
+project = Project.all.detect { |p| p.trackers.first && p.assignable_users(p.trackers.first).size >= 2 }
+user_a, user_b = project.assignable_users(project.trackers.first).first(2)
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'RC_1-9_Increment', author: user_a)
 # 作成時はカウントなし
@@ -185,9 +185,9 @@ puts "count: #{count}"
 **確認方法:**
 ```ruby
 User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
-user_b = User.where(status: 1).where.not(id: 1).first
+# 最初のトラッカーで担当者にできる人が 2 人いるプロジェクトで試す（担当者にできない人を選ぶと、担当者の変更が保存されない）
+project = Project.all.detect { |p| p.trackers.first && p.assignable_users(p.trackers.first).size >= 2 }
+user_a, user_b = project.assignable_users(project.trackers.first).first(2)
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'RC_1-12_Delete', author: user_a)
 issue.reload
@@ -213,9 +213,9 @@ puts "after_delete: #{exists_after}"
 **確認方法:**
 ```ruby
 User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
-user_b = User.where(status: 1).where.not(id: 1).first
+# 最初のトラッカーで担当者にできる人が 2 人いるプロジェクトで試す（担当者にできない人を選ぶと、担当者の変更が保存されない）
+project = Project.all.detect { |p| p.trackers.first && p.assignable_users(p.trackers.first).size >= 2 }
+user_a, user_b = project.assignable_users(project.trackers.first).first(2)
 
 issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'RC_1-13_Tooltip', author: user_a)
 
@@ -288,44 +288,54 @@ puts "default_order: #{col.default_order}"
 
 **期待結果:** `default_order: desc`
 
-### [1-17] 削除済みユーザーのツールチップ表示
+### [1-17] 担当者がグループ・削除したユーザー・削除したグループのときの名前
+
+担当が「なし → ユーザー（後で削除） → グループ → グループ（後で削除） → admin」と移ったチケットで、1 件ずつ引く場合と一括で引く場合の両方を確かめる。
+グループへの割り当ての設定に左右されないよう、履歴は直接書く。
+削除したユーザーは、Redmine が履歴の担当者を匿名ユーザーに置き換える。削除したグループは id だけが残る。
 
 **確認方法:**
 ```ruby
 User.current = User.find(1)
 project = Project.first
-user_a = User.find(1)
+admin = User.find(1)
+suffix = SecureRandom.hex(3)
+temp_user = User.new(login: "rc_tmp_#{suffix}", firstname: 'Temp', lastname: 'User', mail: "rc_tmp_#{suffix}@example.com", status: 1)
+temp_user.password = temp_user.password_confirmation = 'password123'
+temp_user.save!
+group = Group.create!(lastname: "RC_Group_#{suffix}")
+gone = Group.create!(lastname: "RC_Gone_#{suffix}")
 
-# テスト用ユーザーを作成して担当者に設定後、削除
-temp_user = User.create(login: 'rc_temp_user', firstname: 'Temp', lastname: 'User', mail: 'rc_temp@example.com', status: 1)
-temp_user.password = 'password123'
-temp_user.password_confirmation = 'password123'
-temp_user.save
+issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'RC_1-17_Principals', author: admin)
+begin
+  [['', temp_user.id], [temp_user.id, group.id], [group.id, gone.id], [gone.id, admin.id]].each do |ov, v|
+    j = Journal.create!(journalized: issue, user: admin, notes: '')
+    JournalDetail.create!(journal: j, property: 'attr', prop_key: 'assigned_to_id', old_value: ov.to_s, value: v.to_s)
+  end
+  temp_user.destroy
+  gone.destroy
 
-issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'RC_1-17_DeletedUser', author: user_a)
-
-# 担当者にtemp_userを設定
-issue.reload
-issue.init_journal(user_a)
-issue.assigned_to = temp_user
-issue.save
-
-# temp_userを削除
-temp_user.destroy
-
-# ツールチップを確認（エラーにならないこと）
-fresh = Issue.find(issue.id)
-tooltip = fresh.reply_tooltip
-puts "tooltip: #{tooltip}"
-puts "no_error: true"
-
-no_assignee = I18n.t(:label_reply_count_no_assignee)
-puts "contains_no_assignee: #{tooltip.include?(no_assignee)}"
+  expected = ['', User.anonymous.name, group.name, '', admin.name]
+  single = Issue.find(issue.id).reply_items.map { |i| i[:name] }
+  batch_issue = Issue.find(issue.id)
+  Issue.load_reply_items([batch_issue])
+  batch = batch_issue.reply_items.map { |i| i[:name] }
+  no_assignee = I18n.t(:label_reply_count_no_assignee)
+  tooltip_expected = ([no_assignee] + [User.anonymous.name, group.name, no_assignee, admin.name].map { |n| " - #{n}" }).join("\n")
+  puts "single: #{single == expected}"
+  puts "batch: #{batch == expected}"
+  puts "tooltip: #{Issue.find(issue.id).reply_tooltip == tooltip_expected}"
+ensure
+  issue.destroy
+  group.destroy
+  temp_user.destroy if User.exists?(temp_user.id)
+  gone.destroy if Group.exists?(gone.id)
+end
 ```
 
 **期待結果:**
-- `no_error: true`（エラーなし）
-- `contains_no_assignee: true`（削除済みユーザーは「（担当者なし）」と表示される）
+- `single: true`・`batch: true`（グループはグループの名前、削除したユーザーは匿名ユーザー、削除したグループと担当者なしは空）
+- `tooltip: true`（空の所は「（担当者なし）」）
 
 ---
 

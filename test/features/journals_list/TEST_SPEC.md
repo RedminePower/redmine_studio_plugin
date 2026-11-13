@@ -320,6 +320,105 @@ puts "j2_expected: #{status_2.name}"
 - `j1_status` と `j1_expected` が一致（コメントなしジャーナルの変更が次のコメント直前の値として反映）
 - `j2_status` と `j2_expected` が一致（最後のコメントなので現在値）
 
+### [1-16] 担当者がグループ・削除したグループのときの累積担当者
+
+担当が「なし →（コメント1）→ グループ（後で削除） →（コメント2）→ グループ →（コメント3）」と移り、今の担当がグループのチケットで、1 件ずつ引く場合と一括で引く場合の両方を確かめる。
+グループへの割り当ての設定に左右されないよう、履歴は直接書く。
+担当者の列のリンクは本体の `link_to_principal` で作るので、担当者そのもの（`@cumulative_assigned_to`）も確かめる。
+
+**確認方法:**
+```ruby
+User.current = User.find(1)
+project = Project.first
+admin = User.find(1)
+suffix = SecureRandom.hex(3)
+group = Group.create!(lastname: "JL_Group_#{suffix}")
+gone = Group.create!(lastname: "JL_Gone_#{suffix}")
+issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-16_Principals', author: admin)
+add_change = ->(ov, v) {
+  j = Journal.create!(journalized: issue, user: admin, notes: '')
+  JournalDetail.create!(journal: j, property: 'attr', prop_key: 'assigned_to_id', old_value: ov.to_s, value: v.to_s)
+}
+begin
+  Journal.create!(journalized: issue, user: admin, notes: 'Comment 1')
+  add_change.call('', gone.id)
+  Journal.create!(journalized: issue, user: admin, notes: 'Comment 2')
+  add_change.call(gone.id, group.id)
+  Journal.create!(journalized: issue, user: admin, notes: 'Comment 3')
+  issue.update_columns(assigned_to_id: group.id)
+  gone.destroy
+
+  describe = ->(journals) {
+    journals.map { |j| [j.instance_variable_get(:@cumulative_assigned_to_name), j.instance_variable_get(:@cumulative_assigned_to)&.class&.name] }
+  }
+  expected = [['', nil], [group.name, 'Group'], [group.name, 'Group']]
+  puts "single: #{describe.call(Issue.find(issue.id).visible_journals_with_notes) == expected}"
+  batch_issue = Issue.find(issue.id)
+  Issue.load_visible_journals_list([batch_issue], admin)
+  puts "batch: #{describe.call(batch_issue.visible_journals_with_notes) == expected}"
+ensure
+  issue.destroy
+  group.destroy
+  gone.destroy if Group.exists?(gone.id)
+end
+```
+
+**期待結果:**
+- `single: true`・`batch: true`（コメント1 は削除したグループなので空、コメント2・3 はグループの名前とグループそのもの）
+
+---
+
+### [1-17] 担当者・書いた人のリンク（グループ・ロック中のユーザー）
+
+担当がグループで、コメントを書いた人がロック中のユーザーのチケットで、一覧の表を描いて確かめる。
+本体と同じく、グループはグループのページへのリンクになる。ロック中のユーザーは、管理者以外にはリンクなし（名前だけ）、管理者にはリンクになる。
+
+**確認方法:**
+```ruby
+User.current = User.find(1)
+project = Project.first
+admin = User.find(1)
+suffix = SecureRandom.hex(3)
+group = Group.create!(lastname: "JL_Group_#{suffix}")
+locked = User.new(login: "jl_lock_#{suffix}", firstname: 'Locked', lastname: 'User', mail: "jl_lock_#{suffix}@example.com", status: 1)
+locked.password = locked.password_confirmation = 'password123'
+locked.save!
+issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-17_Links', author: admin)
+begin
+  j = Journal.create!(journalized: issue, user: locked, notes: 'Comment 1')
+  JournalDetail.create!(journal: j, property: 'attr', prop_key: 'assigned_to_id', old_value: '', value: group.id.to_s)
+  issue.update_columns(assigned_to_id: group.id)
+  locked.update_columns(status: User::STATUS_LOCKED)
+
+  column = IssueQuery.new(name: '_').available_columns.find { |c| c.name == :journals_list }
+  target = Issue.find(issue.id)
+  Issue.load_visible_journals_list([target], admin)
+  # ロック中の人へのリンクは見る人（User.current）で変わるので、管理者以外（匿名）と管理者の両方で描く
+  draw = ->(viewer) {
+    User.current = viewer
+    IssuesController.renderer.render(inline: '<%= column_content(column, target) %>', locals: { column: column, target: target })
+  }
+  html = draw.call(User.anonymous)
+  admin_html = draw.call(admin)
+  assignee_cell = html[/<td class="jl-assigned-to">.*?<\/td>/m].to_s
+  author_cell = html[/<td class="jl-author">.*?<\/td>/m].to_s
+  admin_author_cell = admin_html[/<td class="jl-author">.*?<\/td>/m].to_s
+  puts "group_link: #{assignee_cell.include?("/groups/#{group.id}\"") && assignee_cell.include?(group.name)}"
+  puts "locked_no_link: #{!author_cell.include?('<a') && author_cell.include?(locked.name)}"
+  puts "locked_admin_link: #{admin_author_cell.include?("/users/#{locked.id}\"")}"
+ensure
+  User.current = admin
+  issue.destroy
+  locked.destroy
+  group.destroy
+end
+```
+
+**期待結果:**
+- `group_link: true`（担当者の列はグループのページ `/groups/<id>` へのリンク）
+- `locked_no_link: true`（管理者以外には、書いた人の列はロック中のユーザーの名前だけで、リンクなし）
+- `locked_admin_link: true`（管理者には、ロック中のユーザーもユーザーのページへのリンク）
+
 ---
 
 ## 2. HTTP テスト
@@ -648,7 +747,7 @@ try {
 
 **確認1:** 各コメント行にステータス列と担当者列が表示される
 
-**確認2:** 担当者名がリンクになっている（クリックでユーザーページに遷移）
+**確認2:** 担当者名がリンクになっている（ユーザーはユーザーのページ、グループはグループのページに遷移。ロック中のユーザーは管理者以外にはリンクなし）
 
 **確認3:** ステータスと担当者が各コメント時点の正しい値を表示している
 

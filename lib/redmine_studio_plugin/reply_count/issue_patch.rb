@@ -19,7 +19,8 @@ module RedmineStudioPlugin
       end
 
       # 担当者の遷移（初期担当者 → 変更ごとの新担当者）を { id:, name: } の配列で返す。
-      # 担当者なしは id: 0, name: ''、削除済み等の無効ユーザーは id: 元のID, name: '' で表現する。
+      # 担当者はユーザーまたはグループ。担当者なしは id: 0, name: ''、削除したグループは id: 元のID, name: '' で表現する
+      # （削除したユーザーは、Redmine が履歴を匿名ユーザーに置き換えるので、匿名ユーザーになる）。
       # 変更履歴がないチケットは現在の担当者 1 件を返す。
       # プリロードされていない場合は個別にロードする。
       def reply_items
@@ -46,9 +47,9 @@ module RedmineStudioPlugin
             .order('journals.id')
             .pluck('journals.journalized_id', :old_value, :value)
 
-          # ユーザー名を一括取得
-          user_ids = changes.flat_map { |_, ov, v| [ov, v] }.compact.reject(&:empty?).map(&:to_i).uniq
-          user_names = User.where(id: user_ids).map { |u| [u.id, u.name] }.to_h
+          # 担当者（ユーザー・グループ）の名前を一括取得
+          assignee_ids = changes.flat_map { |_, ov, v| [ov, v] }.compact.reject(&:empty?).map(&:to_i).uniq
+          assignee_names = Principal.where(id: assignee_ids).map { |p| [p.id, p.name] }.to_h
 
           changes_by_issue = changes.group_by(&:first)
 
@@ -59,9 +60,9 @@ module RedmineStudioPlugin
               issue.reply_items = [current_assignee_item(issue)]
             else
               # 初期担当者（最初の変更の old_value）→ 変更ごとの新担当者
-              items = [to_reply_item(issue_changes.first[1], user_names)]
+              items = [to_reply_item(issue_changes.first[1], assignee_names)]
               issue_changes.each do |_, _, new_value|
-                items << to_reply_item(new_value, user_names)
+                items << to_reply_item(new_value, assignee_names)
               end
               issue.reply_items = items
             end
@@ -69,18 +70,18 @@ module RedmineStudioPlugin
         end
 
         # reply_items からツールチップ文字列を構築する。
-        # 名前が引けない要素（担当者なし・無効ユーザー）はラベルに置き換える。
+        # 名前が引けない要素（担当者なし・削除したグループ）はラベルに置き換える。
         def build_reply_tooltip(items)
           no_assignee = I18n.t(:label_reply_count_no_assignee)
           names = items.map { |item| item[:name].presence || no_assignee }
           ([names.first] + names.drop(1).map { |n| " - #{n}" }).join("\n")
         end
 
-        # user id (文字列) を reply_items の 1 要素に変換する。
-        def to_reply_item(value, user_names)
+        # 担当者の id（文字列。ユーザーかグループ）を reply_items の 1 要素に変換する。
+        def to_reply_item(value, assignee_names)
           return { id: 0, name: '' } if value.blank?
 
-          { id: value.to_i, name: user_names[value.to_i] || '' }
+          { id: value.to_i, name: assignee_names[value.to_i] || '' }
         end
 
         # 現在の担当者を reply_items の 1 要素に変換する。
@@ -111,13 +112,13 @@ module RedmineStudioPlugin
 
         return [self.class.current_assignee_item(self)] if changes.empty?
 
-        user_ids = changes.flatten.compact.reject(&:empty?).map(&:to_i).uniq
-        user_names = User.where(id: user_ids).map { |u| [u.id, u.name] }.to_h
+        assignee_ids = changes.flatten.compact.reject(&:empty?).map(&:to_i).uniq
+        assignee_names = Principal.where(id: assignee_ids).map { |p| [p.id, p.name] }.to_h
 
         # 初期担当者（最初の変更の old_value）→ 変更ごとの新担当者
-        items = [self.class.to_reply_item(changes.first[0], user_names)]
+        items = [self.class.to_reply_item(changes.first[0], assignee_names)]
         changes.each do |_, new_value|
-          items << self.class.to_reply_item(new_value, user_names)
+          items << self.class.to_reply_item(new_value, assignee_names)
         end
         items
       end
