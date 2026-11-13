@@ -257,7 +257,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
 - バッチ 3: [1-30] ～ [1-35] を1つのスクリプトにまとめて実行（可視性・属性名の翻訳）
-- バッチ 4: [1-36] ～ [1-51] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証、割り当ての相手、割り当ての重複）
+- バッチ 4: [1-36] ～ [1-54] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証、割り当ての相手、割り当ての重複、置き換えのやり直し、本人の設定を作るときの競合）
 
 ### フェーズ 2: HTTP テスト
 
@@ -1116,7 +1116,7 @@ puts en_ok
 
 ## 1C. 本人の設定と版・入力の検証（Runner テスト）
 
-user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-51]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
+user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-54]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
 
 ### [1-36] studio_settings の version / owner_id 列
 
@@ -1681,6 +1681,157 @@ end
 
 **期待結果:**
 - `true` が 6 回
+
+---
+
+### [1-52] 割り当ての置き換えも、同時に届いた依頼と書き込みがぶつかったら 1 度だけやり直す
+
+置き換えで、読んでから書くまでの間にほかの依頼が同じ人を先に書くと、DB の重複禁止の索引で断られる。
+そのときは、今の割り当てを読み直して 1 度だけやり直す。2 度目もぶつかったら、何も変えずに `RecordNotUnique` を上げる（受け口は 409 にする）。
+割り当てを作る処理（`create!`）が索引で断られたことにして確かめる（外す人を消した後で断られるので、本物の巻き戻しを通る）。
+差し替えは、印（`$ssa_create_conflicts` の残りの回数）があるときだけ働き、最後に印を下ろす。
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+users = User.active.where(type: 'User', admin: false).order(:id).limit(3).to_a
+setting = StudioSetting.create!(name: 'race', schema_type: "rt_replace_race_#{SecureRandom.hex(3)}", scope_type: 'global', payload: '{}', schema_version: 1, created_by: admin, updated_by: admin)
+$ssa_create_conflicts = 0
+# 印の回数だけ、割り当てを作る時点でほかの依頼とぶつかったことにする
+StudioSettingAssignment.singleton_class.prepend(Module.new do
+  define_method(:create!) do |*a, **kw, &b|
+    if $ssa_create_conflicts > 0
+      $ssa_create_conflicts -= 1
+      raise ActiveRecord::RecordNotUnique, 'simulated'
+    end
+    super(*a, **kw, &b)
+  end
+end)
+begin
+  # 1 回目だけぶつかる → 読み直してやり直し、置き換わる
+  $ssa_create_conflicts = 1
+  result = StudioSettingAssignment.replace(setting, users[0..1].map(&:id), admin)
+  puts $ssa_create_conflicts == 0 && result.map(&:user_id) == users[0..1].map(&:id) && setting.assignments.reload.count == 2
+
+  # 2 回ともぶつかる → 上げる。外したはずの users[1] は残り（巻き戻った）、足すはずの users[2] は無い
+  $ssa_create_conflicts = 2
+  raised = begin
+    StudioSettingAssignment.replace(setting, [users[0].id, users[2].id], admin)
+    false
+  rescue ActiveRecord::RecordNotUnique
+    true
+  end
+  puts raised && $ssa_create_conflicts == 0 && setting.assignments.reload.map(&:user_id).sort == users[0..1].map(&:id).sort
+ensure
+  $ssa_create_conflicts = 0
+  setting.destroy
+end
+```
+
+**期待結果:**
+- `true` が 2 回（1 回目はやり直して置き換わる。2 回ともぶつかると上げて、割り当ては前のまま。外す人を消した分も巻き戻る）
+
+---
+
+### [1-53] 置き換えが 2 度ぶつかったら 409（errors の形）で返す
+
+置き換えの受け口が、2 度目もぶつかったときに 409 を返すことを、Rails の結合試験の部品で API キーを付けて呼んで確かめる。
+409 の本文は、本人の設定・版の 409（今の設定を返す）と違い、`{ "errors": [...] }` の形。
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+users = User.active.where(type: 'User', admin: false).order(:id).limit(2).to_a
+setting = StudioSetting.create!(name: 'race', schema_type: "rt_replace_409_#{SecureRandom.hex(3)}", scope_type: 'global', payload: '{}', schema_version: 1, created_by: admin, updated_by: admin)
+# 印が立っている間だけ、書く処理が毎回ぶつかったことにする（最後に印を下ろす）
+$ssa_replace_409 = false
+StudioSettingAssignment.singleton_class.prepend(Module.new do
+  define_method(:replace_locked) { |*a| $ssa_replace_409 ? raise(ActiveRecord::RecordNotUnique, 'simulated') : super(*a) }
+end)
+begin
+  $ssa_replace_409 = true
+  s = ActionDispatch::Integration::Session.new(Rails.application)
+  s.host! 'localhost'
+  headers = { 'X-Redmine-API-Key' => admin.api_key, 'CONTENT_TYPE' => 'application/json' }
+  s.put "/studio_settings/#{setting.id}/users.json", params: { user_ids: users.map(&:id) }.to_json, headers: headers
+  json = JSON.parse(s.response.body) rescue {}
+  puts s.response.status == 409 && json['errors'].is_a?(Array) && json['errors'].any? && setting.assignments.reload.empty?
+  s.put "/studio_settings/#{setting.id}/users.xml", params: '<user_ids type="array"><user_id>' + users.first.id.to_s + '</user_id></user_ids>', headers: headers.merge('CONTENT_TYPE' => 'application/xml')
+  puts s.response.status == 409 && s.response.body.include?('<errors')
+ensure
+  $ssa_replace_409 = false
+  setting.destroy
+end
+```
+
+**期待結果:**
+- `true` が 2 回（JSON・XML とも 409 で `errors` を返し、割り当ては作らない）
+
+---
+
+### [1-54] 本人の設定を作るとき、確かめた直後にほかの端末が作っていたら :exists を返す
+
+本人の設定は、作る前に今ある設定を確かめる。確かめた直後にほかの端末が同じ種類の設定を作った場面を、`save` の差し替えで作る。
+ほかの端末の行は、検証の重複の確かめで断られる場合と、DB の重複禁止の索引で断られる場合の 2 つがあり、どちらも :exists にする。
+本人の設定でない範囲（global）で索引に断られたときは、そのまま上げる。差し替えは印が立っている間だけ働く。
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+sfx = SecureRandom.hex(3)
+types = []
+mk = ->(t, scope = 'user') { StudioSetting.new(name: 'p', schema_type: t, scope_type: scope, scope_id: (scope == 'user' ? admin.id : nil), schema_version: 0, created_by: admin, updated_by: admin) }
+# 印（:validation・:index・:raise）があるとき、保存の前にほかの端末が作ったことにする
+$ss_create_race = nil
+StudioSetting.prepend(Module.new do
+  def save(*a, **kw)
+    mode = $ss_create_race
+    $ss_create_race = nil
+    return super if mode.nil?
+    raise ActiveRecord::RecordNotUnique, 'simulated' if mode == :raise
+
+    StudioSetting.create!(name: 'other', schema_type: schema_type, scope_type: scope_type, scope_id: scope_id, schema_version: 0, created_by: created_by, updated_by: updated_by)
+    return super if mode == :validation
+
+    # 検証を通さずに書く（検証の前の owner_id の用意も通らないので、ここで入れる）
+    self.owner_id = scope_id
+    super(validate: false)
+  end
+end)
+begin
+  # 検証の重複の確かめで断られる
+  t1 = "rt_create_race_v_#{sfx}"; types << t1
+  $ss_create_race = :validation
+  r1 = mk.(t1).create_with_history(admin)
+  puts r1 == :exists && StudioSetting.where(schema_type: t1).count == 1
+
+  # DB の重複禁止の索引で断られる
+  t2 = "rt_create_race_i_#{sfx}"; types << t2
+  $ss_create_race = :index
+  r2 = mk.(t2).create_with_history(admin)
+  # この試験では、ほかの端末の行も同じ取引の中で作るので、索引で断られると一緒に巻き戻って 0 行になる（本当のほかの端末の行は別の取引なので残る）
+  puts r2 == :exists && StudioSetting.where(schema_type: t2).count == 0
+
+  # 本人の設定でない範囲は、索引に断られたらそのまま上げる
+  t3 = "rt_create_race_g_#{sfx}"; types << t3
+  $ss_create_race = :raise
+  raised = begin
+    mk.(t3, 'global').create_with_history(admin)
+    false
+  rescue ActiveRecord::RecordNotUnique
+    true
+  end
+  puts raised && StudioSetting.where(schema_type: t3).count == 0
+ensure
+  $ss_create_race = nil
+  StudioSetting.where(schema_type: types).destroy_all
+end
+```
+
+**期待結果:**
+- `true` が 3 回（本人の設定は、検証・索引のどちらで断られても :exists。自分の行は作らない。global は上げて、行を作らない）
 
 ---
 

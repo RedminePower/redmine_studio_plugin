@@ -378,7 +378,7 @@ Response:
 
 ### PUT /studio_settings/:id/users
 
-Replace user assignments (deletes the assignments of users not in `user_ids` and creates assignments for new users). Users in `user_ids` who are already assigned are kept as they are, without checking again whether they can be assigned, so the current list (including users who have since been locked, for example) can be sent back as is. The `id`, `assigned_on` and `assigned_by` of kept assignments do not change. If any new user cannot be assigned, nothing changes and 422 is returned (only the reason for the first refused user is returned). `user`-scoped settings cannot be assigned (422).
+Replace user assignments (deletes the assignments of users not in `user_ids` and creates assignments for new users). Users in `user_ids` who are already assigned are kept as they are, without checking again whether they can be assigned, so the current list (including users who have since been locked, for example) can be sent back as is. The `id`, `assigned_on` and `assigned_by` of kept assignments do not change. If any new user cannot be assigned, nothing changes and 422 is returned (only the reason for the first refused user is returned). `user`-scoped settings cannot be assigned (422). If the write collides with another request that arrived at the same time, the assignments are read again and the replacement is retried once. If it still collides, nothing changes and 409 (body `{ "errors": [...] }`) is returned; send the request again.
 
 Request:
 
@@ -680,6 +680,8 @@ The body is not `{ "errors": [...] }` but the current setting (same shape as `GE
 
 - `POST /studio_settings` and a `user`-scoped setting with the same owner and `schema_type` already exists
 - `PUT /studio_settings/:id` and `expected_version` differs from the current `version`
+
+However, the 409 of `PUT /studio_settings/:id/users` (the write collided with another request; nothing changed, so send it again) has the same `{ "errors": [...] }` shape as other errors.
 
 ### 422 Unprocessable Entity
 

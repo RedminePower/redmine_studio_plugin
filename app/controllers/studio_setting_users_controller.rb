@@ -37,29 +37,7 @@ class StudioSettingUsersController < ApplicationController
       return
     end
 
-    StudioSettingAssignment.transaction do
-      # 設定の行を押さえてから読む（同時の置き換え・割り当てで、互いの結果が混ざらないように）
-      @studio_setting.lock!
-
-      # 送られた中に今もいる人の割り当ては、確かめ直さずにそのまま残す
-      # （今の一覧を読んで送り返すと、ロック中の人などがいるだけで全体が断られないように）。
-      # 列と同じ型にそろえて比べる（"5" と 5 を同じ人として扱う）
-      user_id_type = StudioSettingAssignment.type_for_attribute(:user_id)
-      requested = user_ids.map { |user_id| user_id_type.cast(user_id) }
-      kept, to_remove = @studio_setting.assignments.to_a.partition { |a| requested.include?(a.user_id) }
-      to_remove.each(&:destroy!)
-      kept_by_user = kept.index_by(&:user_id)
-
-      # 新しく足す人だけを作る（同じ人が 2 回あると、2 回目は重複で断る）
-      @assignments = user_ids.map do |user_id|
-        kept_by_user.delete(user_id_type.cast(user_id)) ||
-          StudioSettingAssignment.create!(
-            setting: @studio_setting,
-            user_id: user_id,
-            assigned_by: User.current
-          )
-      end
-    end
+    @assignments = StudioSettingAssignment.replace(@studio_setting, user_ids, User.current)
 
     respond_to do |format|
       format.api
@@ -67,6 +45,11 @@ class StudioSettingUsersController < ApplicationController
   rescue ActiveRecord::RecordInvalid => e
     respond_to do |format|
       format.api { render_validation_errors(e.record) }
+    end
+  rescue ActiveRecord::RecordNotUnique
+    # やり直しても、ほかの依頼と書き込みがぶつかった。何も変えていないので、送り直してもらう
+    respond_to do |format|
+      format.api { render_api_conflict('The assignments were changed by another request. Please retry') }
     end
   end
 
@@ -118,6 +101,12 @@ class StudioSettingUsersController < ApplicationController
   # 本人の設定の割り当ては、本人と管理者だけが変えられる
   def authorize_edit_studio_setting
     render_403 unless @studio_setting.editable?(User.current)
+  end
+
+  # 409 を { "errors": [...] } の形で返す（本体の render_api_errors と同じ形で、状態だけ変える）
+  def render_api_conflict(*messages)
+    @error_messages = messages.flatten
+    render :template => 'common/error_messages', :format => [:api], :status => :conflict, :layout => nil
   end
 
   # 本人の設定は本人だけが使うので、人に割り当てない（割り当てると相手の一覧に出てしまう）
