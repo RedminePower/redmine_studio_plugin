@@ -97,7 +97,7 @@ The main fields returned by each section's objects are as follows (see "Section 
 | `time_entry_activities` | `id` / `name` / `active` / `is_default` |
 | `queries` | `id` / `name` / `is_public` / `project_id` |
 | `custom_fields` | `id` / `name` / `customized_type` / `field_format` / `regexp` / `min_length` / `max_length` / `is_required` / `is_filter` / `searchable` / `multiple` / `default_value` / `visible` / `possible_values[]` / `trackers[]` / `roles[]` |
-| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status` (Redmine 6.1+ only) / `admin` / `twofa_scheme` |
+| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status` (Redmine 6.1+ only) / `admin` (both true and false when read as admin; only when true when read as non-admin) / `twofa_scheme` / `avatar_url` (only when Gravatar is enabled) / `custom_fields[]` (values of the user custom fields set to visible, in the same shape as the individual API) |
 | `roles` | `id` / `name` / `assignable` / `issues_visibility` / `time_entries_visibility` / `users_visibility` / `permissions[]` |
 | `groups` | `id` / `name` / `users[]` (each `id` / `name`) |
 | Each `project_memberships` element | `id` / `project` / `roles[]` (incl. `inherited`) / `user` or `group` |

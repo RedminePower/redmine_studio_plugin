@@ -97,7 +97,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `time_entry_activities` | `id` / `name` / `active` / `is_default` |
 | `queries` | `id` / `name` / `is_public` / `project_id` |
 | `custom_fields` | `id` / `name` / `customized_type` / `field_format` / `regexp` / `min_length` / `max_length` / `is_required` / `is_filter` / `searchable` / `multiple` / `default_value` / `visible` / `possible_values[]` / `trackers[]` / `roles[]` |
-| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status`（Redmine 6.1 以降のみ） / `admin` / `twofa_scheme` |
+| `users` | `id` / `login` / `firstname` / `lastname` / `mail` / `created_on` / `updated_on` / `last_login_on` / `passwd_changed_on` / `status`（Redmine 6.1 以降のみ） / `admin`（admin で読むと true・false とも。非 admin で読むと true のときだけ） / `twofa_scheme` / `avatar_url`（Gravatar が有効なときだけ） / `custom_fields[]`（ユーザーのカスタムフィールドのうち「表示する」にしてあるものの値。個別 API と同じ形） |
 | `roles` | `id` / `name` / `assignable` / `issues_visibility` / `time_entries_visibility` / `users_visibility` / `permissions[]` |
 | `groups` | `id` / `name` / `users[]`（各 `id` / `name`） |
 | `project_memberships` の各要素 | `id` / `project` / `roles[]`（`inherited` 含む）/ `user` または `group` |

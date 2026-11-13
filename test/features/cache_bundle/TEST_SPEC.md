@@ -1504,6 +1504,67 @@ end
 
 ---
 
+### [1-39] users の admin・avatar_url・custom_fields が、コアの利用者一覧 API と同じ作りで出る
+
+コアの利用者一覧 API（`GET /users.json`、admin が呼ぶ）は、`admin` を true・false とも返し、Gravatar が有効なら `avatar_url` を、利用者のカスタムフィールドは「表示する」にしてあるものの値を返す。
+テスト環境は Gravatar が無効で、ユーザーのカスタムフィールドも無いので、その場で有効にし、表示する・表示しないの 2 つを作って確かめる（終わったら元に戻す）。
+管理者でない人へは、`admin` を true のときだけ返す。
+見られる人・見る人（どちらも管理者でない）は、同じプロジェクトのメンバーとしてその場で作る（DB に条件に合う人がいなくても必ず通す）。
+
+**確認方法:**
+```ruby
+sfx = SecureRandom.hex(3)
+gravatar_was = Setting.gravatar_enabled
+shown = hidden = target = viewer = nil
+mk_user = ->(name) {
+  u = User.new(login: "cb_#{name}_#{sfx}", firstname: 'CB', lastname: name, mail: "cb_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  u
+}
+begin
+  Setting.gravatar_enabled = '1'
+  shown = UserCustomField.create!(name: "CB_Shown_#{sfx}", field_format: 'string', visible: true)
+  hidden = UserCustomField.create!(name: "CB_Hidden_#{sfx}", field_format: 'string', visible: false)
+  target = mk_user.call('target')
+  viewer = mk_user.call('viewer')
+  target.custom_field_values = { shown.id.to_s => 'shown value', hidden.id.to_s => 'hidden value' }
+  target.save!
+  role = Role.givable.first
+  [target, viewer].each { |u| Member.create!(principal: u, project: Project.first, roles: [role]) }
+  User.current = User.find(1)
+  c = CacheBundlesController.new
+  c.instance_variable_set(:@errors, [])
+  row = c.send(:fetch_users).find { |h| h[:id] == target.id }
+  helper = ApplicationController.helpers
+  exp_avatar = helper.gravatar_url(target.mail, { rating: nil, size: nil, default: Setting.gravatar_default })
+  cf = (row[:custom_fields] || []).map { |h| [h[:id], h[:value]] }
+  puts "admin_false: #{row.key?(:admin) && row[:admin] == false}"
+  puts "avatar_url: #{row[:avatar_url].present? && row[:avatar_url] == exp_avatar}"
+  puts "custom_fields: #{cf.include?([shown.id, 'shown value']) && cf.none? { |id, _| id == hidden.id }}"
+
+  # 管理者でない人へは、admin を true のときだけ返す
+  User.current = viewer
+  c2 = CacheBundlesController.new
+  c2.instance_variable_set(:@errors, [])
+  row2 = c2.send(:fetch_users).find { |h| h[:id] == target.id }
+  puts "non_admin_viewer_no_admin_false: #{!row2.nil? && !row2.key?(:admin)}"
+ensure
+  User.current = User.find(1)
+  [target, viewer].each { |u| u.destroy if u&.persisted? }
+  [shown, hidden].each { |f| f.destroy if f&.persisted? }
+  Setting.gravatar_enabled = gravatar_was
+end
+```
+
+**期待結果:**
+- `admin_false: true`（管理者でない利用者も `admin: false` が出る）
+- `avatar_url: true`（コアと同じヘルパーで作った URL）
+- `custom_fields: true`（表示するの値だけが出て、表示しないは出ない）
+- `non_admin_viewer_no_admin_false: true`
+
+---
+
 ## 2. HTTP テスト
 
 **実行方法:**
@@ -1659,6 +1720,64 @@ $response.cache_bundle.users.Count -gt 0
 
 **期待結果:**
 - admin で実行した場合、users に 1 件以上
+
+---
+
+### [2-11-2] admin で読む users が、コアの利用者一覧 API と同じ値になる
+
+admin で読んだ cache_bundle の users を、コアの `GET /users.json`（admin）と、ユーザーごとに項目を突き合わせる。
+コアが `null` で返す項目を cache_bundle が省くのは、同じ扱い（アプリはどちらも値なしとして読む）。
+`auth_source` は `include=auth_source` を付けたときだけ返る項目なので比べない。
+`avatar_url` と `custom_fields` も比べるため、先に Runner で Gravatar を有効にし、表示する・表示しないのユーザーのカスタムフィールドと、その値を持つユーザーを作る（終わったら元に戻す）。
+
+**確認方法:**
+```powershell
+$Container = '{Container}'
+$setup = @'
+sfx = SecureRandom.hex(3)
+was = Setting.gravatar_enabled
+Setting.gravatar_enabled = '1'
+shown = UserCustomField.create!(name: "CB2_Shown_#{sfx}", field_format: 'string', visible: true)
+hidden = UserCustomField.create!(name: "CB2_Hidden_#{sfx}", field_format: 'string', visible: false)
+u = User.new(login: "cb2_#{sfx}", firstname: 'CB2', lastname: 'User', mail: "cb2_#{sfx}@example.com", status: 1)
+u.password = u.password_confirmation = 'password123'
+u.custom_field_values = { shown.id.to_s => 'shown value', hidden.id.to_s => 'hidden value' }
+u.save!
+puts({ was: was, shown: shown.id, hidden: hidden.id, user: u.id }.to_json)
+'@
+# docker cp は「C:\...」をコンテナ名と読むので、今のフォルダに置いて相対の名前で渡す
+[IO.File]::WriteAllText((Join-Path $PWD 'cb_2_11_2_setup.rb'), $setup)
+docker cp 'cb_2_11_2_setup.rb' "${Container}:/tmp/cb_2_11_2_setup.rb" | Out-Null; Remove-Item 'cb_2_11_2_setup.rb'
+$prep = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner /tmp/cb_2_11_2_setup.rb 2>$null | Select-Object -Last 1 | ConvertFrom-Json
+try {
+    $h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }
+    $bundle = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json' -Headers $h).cache_bundle.users
+    $core = (Invoke-RestMethod -Uri '{BaseUrl}/users.json?limit=100' -Headers $h).users
+    $diff = foreach ($cu in $core) {
+        $bu = $bundle | Where-Object id -eq $cu.id
+        if (-not $bu) { "missing id=$($cu.id)"; continue }
+        foreach ($p in $cu.PSObject.Properties) {
+            if ($null -eq $p.Value) { continue }
+            $bv = $bu.PSObject.Properties[$p.Name]
+            if (-not $bv) { "id=$($cu.id) $($p.Name): bundle に無い"; continue }
+            if (($p.Value | ConvertTo-Json -Depth 5 -Compress) -ne ($bv.Value | ConvertTo-Json -Depth 5 -Compress)) { "id=$($cu.id) $($p.Name): core=$($p.Value | ConvertTo-Json -Compress) bundle=$($bv.Value | ConvertTo-Json -Compress)" }
+        }
+    }
+    $made = $core | Where-Object id -eq $prep.user
+    "users=$(@($core).Count) diff=$(@($diff).Count)"
+    "avatar_url_compared=$([bool]($made.avatar_url))"
+    "custom_fields_compared=$([bool]($made.custom_fields | Where-Object { $_.id -eq $prep.shown -and $_.value -eq 'shown value' }))"
+    $diff
+} finally {
+    $cleanup = "User.find_by(id: $($prep.user))&.destroy; CustomField.where(id: [$($prep.shown), $($prep.hidden)]).destroy_all; Setting.gravatar_enabled = '$($prep.was)'; puts 'cleaned'"
+    docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $cleanup 2>$null | Select-Object -Last 1
+}
+```
+
+**期待結果:**
+- `users` が 1 人以上で、`diff=0`（`users` は 100 人以下の環境で比べる）
+- `avatar_url_compared=True`・`custom_fields_compared=True`（Gravatar の URL とカスタムフィールドの値が、比べる対象に入っている）
+- 最後に `cleaned`（作ったユーザー・カスタムフィールドを消し、Gravatar の設定を戻した）
 
 ---
 

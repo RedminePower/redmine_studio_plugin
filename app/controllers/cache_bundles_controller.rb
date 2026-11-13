@@ -304,7 +304,7 @@ class CacheBundlesController < ApplicationController
     if User.current.admin?
       # 個別 API (GET /users.json) の既定挙動 (status=1) に合わせて全アクティブユーザ。
       # User.visible は admin だと status 無視の all（locked 含む）になるため、admin 経路はスコープを使わない。
-      User.where(type: 'User', status: User::STATUS_ACTIVE).order(:login).map { |u| user_to_hash(u) }
+      User.where(type: 'User', status: User::STATUS_ACTIVE).order(:login).preload(:custom_values).map { |u| user_to_hash(u) }
     else
       visible_users.map { |u| user_to_hash(u) }
     end
@@ -323,11 +323,20 @@ class CacheBundlesController < ApplicationController
     # 個別 API (GET /users.json) が users 一覧に status を入れるのは Redmine 6.1 以降。
     # 6.1 未満は一覧 API が status を返さないため、cache_bundle も出さずに揃える。
     hash[:status] = u.status if u.status && users_list_api_has_status?
-    hash[:admin] = u.admin? if u.admin?
+    # 個別 API (GET /users.json) は admin が呼ぶ API で、admin を true・false とも返す。
+    # 管理者でない人へは、true のときだけ返す
+    hash[:admin] = u.admin? if User.current.admin? || u.admin?
     # 個別 API (GET /users.json) が返すフィールドに揃える。
     hash[:updated_on] = to_api_time(u.updated_on)
     hash[:passwd_changed_on] = to_api_time(u.passwd_changed_on)
     hash[:twofa_scheme] = u.twofa_scheme
+    # アバターの URL は、コアと同じヘルパーで作る（Redmine の版ごとの作り方の違いもコアに任せる）
+    if Setting.gravatar_enabled?
+      hash[:avatar_url] = helpers.gravatar_url(u.mail, { rating: nil, size: nil, default: Setting.gravatar_default })
+    end
+    # ユーザのカスタムフィールドの値は、コアと同じく「表示する」にしてあるものだけ（preload 済みの custom_values の上で評価する）
+    cf_values = to_api_custom_field_values(u.visible_custom_field_values)
+    hash[:custom_fields] = cf_values if cf_values.present?
     # API キーと auth_source などは個別 API も返さないため含めない
     hash
   end
@@ -377,7 +386,7 @@ class CacheBundlesController < ApplicationController
   # current_user に可視な active User の一覧（fetch_users と groups のメンバー絞り込みで共有）。
   # admin 経路では使わない（admin は User.visible が locked 含む all になるため）。
   def visible_users
-    @visible_users ||= User.visible(User.current).where(type: 'User').order(:login).to_a
+    @visible_users ||= User.visible(User.current).where(type: 'User').order(:login).preload(:custom_values).to_a
   end
 
   # 可視ユーザの id 集合（groups のメンバー交差用）。visible_users から派生し追加クエリなし。
