@@ -75,7 +75,7 @@ JSON のみサポート。XML はサポートしない（バンドル内の `pro
 | `roles` | Role の配列 | givable（builtin=0）のみ。ビルトインロール（Non member / Anonymous）は含まない（個別 API `GET /roles.json` と同じ）。各 Role の `permissions` を文字列配列で含む（本体 roles/:id API と同じ形式。リスト取得 + 詳細取得の N+1 をサーバ側で吸収） |
 | `groups` | Group の配列 | admin は全グループ、非 admin は本人が見られるグループのみ。通常のグループ（type='Group'）のみでビルトイングループ（Anonymous / Non member）は含まない（個別 API `GET /groups.json` と同じ）。各 Group の `users` を含む（非 admin では、本人が見られるユーザだけに絞る） |
 | `project_memberships` | `{ project_id => [Membership...] }` | 対象ユーザが member となっているプロジェクトについて取得。ロックユーザの membership は除外 |
-| `project_versions` | `{ project_id => [Version...] }` | 対象ユーザが member となっているプロジェクト。さらに対象ユーザが **`view_issues` 権限**を持つプロジェクトのみ版を返す（個別 API `GET /projects/:id/versions.json` と同じゲート。権限が無いプロジェクトは空配列）。各 Version は対象ユーザに可視な **カスタムフィールド値**（`custom_fields`）を含む（個別 API の `render_api_custom_values` と同じ。単一値はスカラー、複数値は配列＋`multiple`） |
+| `project_versions` | `{ project_id => [Version...] }` | 対象ユーザが member となっているプロジェクト。さらに対象ユーザが **`view_issues` 権限**を持つプロジェクトのみ版を返す（個別 API `GET /projects/:id/versions.json` と同じゲート。権限が無いプロジェクトは空配列）。版の範囲も個別 API と同じで、そのプロジェクトの版に加え、**ほかのプロジェクトから共有された版**（共有の設定が system・tree・hierarchy・descendants のもの）を含む。共有された版の `project` は、共有元のプロジェクト。各 Version は対象ユーザに可視な **カスタムフィールド値**（`custom_fields`）を含む（個別 API の `render_api_custom_values` と同じ。単一値はスカラー、複数値は配列＋`multiple`） |
 | `project_issue_categories` | `{ project_id => [IssueCategory...] }` | 対象ユーザが member となっている **Active** プロジェクトのみ。さらに対象ユーザが **`manage_categories` 権限**を持つプロジェクトのみカテゴリを返す（個別 API `GET /projects/:id/issue_categories.json` と同じゲート。権限が無いプロジェクトは空配列） |
 | `errors` | `{ section, code, message }` の配列 | 部分失敗のメタデータ。空配列なら全成功 |
 

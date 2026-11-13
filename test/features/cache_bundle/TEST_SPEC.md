@@ -532,32 +532,50 @@ puts ok ? 'PASS' : 'FAIL: locked users found in memberships'
 
 個別 API (GET /projects/:id/versions.json) はコアで view_issues 権限を要求する（versions#index は view_issues 配下）。
 cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正）。
+版を持つプロジェクトと、view_issues を持つメンバー・持たないメンバーを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-controller = CacheBundlesController.new
-controller.instance_variable_set(:@errors, [])
-
-# 版を持つプロジェクトの中から、view_issues を「持つ member」と「持たない member」を探す
-target = nil
-Project.where(status: Project::STATUS_ACTIVE).each do |p|
-  next if Version.where(project_id: p.id).empty?
-  members = p.members.map(&:user).select { |u| u.is_a?(User) && u.status == User::STATUS_ACTIVE }
-  with_perm    = members.find { |u|  u.allowed_to?(:view_issues, p) }
-  without_perm = members.find { |u| !u.allowed_to?(:view_issues, p) }
-  if with_perm && without_perm
-    target = [p, with_perm, without_perm]; break
-  end
-end
-
-if target.nil?
-  puts 'SKIP: view_issues 権限の有無で分かれる member を持つプロジェクトが無い'
-else
-  p, with_perm, without_perm = target
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs = [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
+mk_project = ->(name) {
+  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.save!
+  made_projects << pr
+  pr
+}
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if u.persisted? }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if f.persisted? }
+}
+begin
+  User.current = User.find(1)
+  p = mk_project.call('Ver')
+  Version.create!(project: p, name: "CBS_V_#{sfx}")
+  with_perm = mk_user.call('with')
+  without_perm = mk_user.call('without')
+  Member.create!(principal: with_perm, project: p, roles: [mk_role.call('with', [:view_issues])])
+  Member.create!(principal: without_perm, project: p, roles: [mk_role.call('without', [])])
+  controller = CacheBundlesController.new
+  controller.instance_variable_set(:@errors, [])
   res_with    = controller.send(:fetch_per_project_versions, with_perm)
   res_without = controller.send(:fetch_per_project_versions, without_perm)
   ok = res_with[p.id.to_s].present? && res_without[p.id.to_s] == []
   puts ok ? 'PASS' : "FAIL: with=#{res_with[p.id.to_s].inspect} without=#{res_without[p.id.to_s].inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -572,28 +590,53 @@ end
 個別 API (GET /projects/:id/versions.json) は `render_api_custom_values` で対象ユーザに可視な
 Version のカスタムフィールド値を返す。cache_bundle でも同じ値を同じ形（単一値はスカラー、複数値は
 配列＋`multiple`）で返し、個別経路と cache_bundle 経路の CacheBundle を完全一致させる。
+版のカスタムフィールドと値、版が見えるメンバーを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-controller = CacheBundlesController.new
-controller.instance_variable_set(:@errors, [])
-
-# 可視な CF 値を持つ Version と、その版が見えるユーザを探す
-target = nil
-Version.all.each do |v|
-  next if v.visible_custom_field_values.reject { |cv| cv.value.blank? }.empty?
-  u = v.project.members.map(&:user).find { |m| m.is_a?(User) && m.allowed_to?(:view_issues, v.project) }
-  (target = [v, u]; break) if u
-end
-
-if target.nil?
-  puts 'SKIP: 可視な CF 値を持つ Version が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
-else
-  v, u = target
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs = [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
+mk_project = ->(name) {
+  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.save!
+  made_projects << pr
+  pr
+}
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if u.persisted? }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if f.persisted? }
+}
+begin
+  User.current = User.find(1)
+  p = mk_project.call('VerCf')
+  cf = VersionCustomField.create!(name: "CBS_VerCf_#{sfx}", field_format: 'string', visible: true)
+  made_cfs << cf
+  v = Version.create!(project: p, name: "CBS_V_#{sfx}")
+  v.custom_field_values = { cf.id.to_s => 'beta' }
+  v.save!
+  u = mk_user.call('viewer')
+  Member.create!(principal: u, project: p, roles: [mk_role.call('viewer', [:view_issues])])
+  controller = CacheBundlesController.new
+  controller.instance_variable_set(:@errors, [])
   res = controller.send(:fetch_per_project_versions, u)
-  row = res[v.project_id.to_s].find { |r| r[:id] == v.id }
-  ok  = row[:custom_fields].present? && row[:custom_fields].all? { |cf| cf.key?(:id) && cf.key?(:name) && cf.key?(:value) }
+  row = res[p.id.to_s].find { |r| r[:id] == v.id }
+  ok = row[:custom_fields].present? && row[:custom_fields].all? { |h| h.key?(:id) && h.key?(:name) && h.key?(:value) } &&
+       row[:custom_fields].any? { |h| h[:id] == cf.id && h[:value] == 'beta' }
   puts ok ? 'PASS' : "FAIL: #{row[:custom_fields].inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -661,32 +704,50 @@ puts intersect.empty? ? 'PASS' : "FAIL: non-active project IDs found: #{intersec
 
 個別 API (GET /projects/:id/issue_categories.json) はコアで manage_categories 権限を要求するため、
 cache_bundle でも対象ユーザが権限を持たないプロジェクトは空配列で返す（過剰露出の是正）。
+カテゴリを持つプロジェクトと、manage_categories を持つメンバー・持たないメンバーを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-controller = CacheBundlesController.new
-controller.instance_variable_set(:@errors, [])
-
-# カテゴリを持つ Active プロジェクトの中から、manage_categories を「持つ member」と「持たない member」を探す
-target = nil
-Project.where(status: Project::STATUS_ACTIVE).each do |p|
-  next if IssueCategory.where(project_id: p.id).empty?
-  members = p.members.map(&:user).select { |u| u.is_a?(User) && u.status == User::STATUS_ACTIVE }
-  with_perm    = members.find { |u|  u.allowed_to?(:manage_categories, p) }
-  without_perm = members.find { |u| !u.allowed_to?(:manage_categories, p) }
-  if with_perm && without_perm
-    target = [p, with_perm, without_perm]; break
-  end
-end
-
-if target.nil?
-  puts 'SKIP: manage_categories 権限の有無で分かれる member を持つプロジェクトが無い'
-else
-  p, with_perm, without_perm = target
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs = [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
+mk_project = ->(name) {
+  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.save!
+  made_projects << pr
+  pr
+}
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if u.persisted? }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if f.persisted? }
+}
+begin
+  User.current = User.find(1)
+  p = mk_project.call('Cat')
+  IssueCategory.create!(project: p, name: "CBS_C_#{sfx}")
+  with_perm = mk_user.call('with')
+  without_perm = mk_user.call('without')
+  Member.create!(principal: with_perm, project: p, roles: [mk_role.call('with', [:view_issues, :manage_categories])])
+  Member.create!(principal: without_perm, project: p, roles: [mk_role.call('without', [:view_issues])])
+  controller = CacheBundlesController.new
+  controller.instance_variable_set(:@errors, [])
   res_with    = controller.send(:fetch_per_project_issue_categories, with_perm)
   res_without = controller.send(:fetch_per_project_issue_categories, without_perm)
   ok = res_with[p.id.to_s].present? && res_without[p.id.to_s] == []
   puts ok ? 'PASS' : "FAIL: with=#{res_with[p.id.to_s].inspect} without=#{res_without[p.id.to_s].inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -1119,7 +1180,9 @@ end
 
 projects の埋め込み（activities / issue_custom_fields / parent）と per-project 3 種を「まとめて 1 クエリ＋group_by/preload」で
 畳んだ結果が、コアの per-project メソッド（`Project#activities` / `#all_issue_custom_fields` / `parent.visible?` /
-per-pid の `Member`・`Version`・`IssueCategory` ＋各ハッシュ生成ヘルパ）と**完全一致**することを、同一 DB で突き合わせる。
+per-pid の `Member`・`Project#shared_versions`・`IssueCategory` ＋各ハッシュ生成ヘルパ）と**完全一致**することを、同一 DB で突き合わせる。
+版の正解は、個別 API（`GET /projects/:id/versions.json`）と同じ `Project#shared_versions`（ほかのプロジェクトから共有された版を含む）で作る。
+共有のそれぞれの場合を必ず通す確認は [1-35-3]。
 コア側の仕様変更で赤くなる契約テスト（#2797 規律）。
 
 **確認方法:**
@@ -1157,11 +1220,12 @@ targets.each do |user|
     ref = Member.where(project_id: pid).preload(:user, :principal, :roles, :member_roles, :project).map { |m| c.send(:membership_to_hash, m) }.compact
     bad << "memb pid=#{pid}(#{user.login})" if mb[pid.to_s] != ref
   end
+  # versions はコアの個別 API と同じ Project#shared_versions（共有された版を含む）が正解。コアは並び順を決めないので id 順で比べる
   vb = c.send(:fetch_per_project_versions, user)
   Project.where(id: pids).each do |pr|
     next unless user.allowed_to?(:view_issues, pr)
-    ref = Version.where(project_id: pr.id).preload(:custom_values, :project).map { |v| c.send(:version_to_hash, v, user) }
-    bad << "vers pid=#{pr.id}(#{user.login})" if vb[pr.id.to_s] != ref
+    ref = pr.shared_versions.preload(:custom_values).to_a.sort_by(&:id).map { |v| c.send(:version_to_hash, v, user) }
+    bad << "vers pid=#{pr.id}(#{user.login})" if vb[pr.id.to_s].sort_by { |h| h[:id] } != ref
   end
   cb = c.send(:fetch_per_project_issue_categories, user)
   Project.where(id: pids, status: Project::STATUS_ACTIVE).each do |pr|
@@ -1182,25 +1246,52 @@ puts bad.empty? ? 'PASS' : "FAIL: #{bad.first(8).inspect}"
 
 `preload(:custom_values)` で per-version の CF 値 N+1 を畳んでも、`visible_custom_field_values` の可視性判定と値が
 崩れないことを、**実際に CF 値を持つ Version**で確認する（両側とも空だと検証にならないため値を行使する）。
+CF 値を持つ版と、版が見えるメンバーを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-target = nil
-Version.all.each do |v|
-  next if v.visible_custom_field_values(User.find(1)).reject { |cv| cv.value.blank? }.empty?
-  u = v.project.members.map(&:user).find { |m| m.is_a?(User) && m.status == User::STATUS_ACTIVE && m.allowed_to?(:view_issues, v.project) }
-  (target = [v, u]; break) if u
-end
-if target.nil?
-  puts 'SKIP: CF 値を持つ Version の member が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
-else
-  v, u = target
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs = [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
+mk_project = ->(name) {
+  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.save!
+  made_projects << pr
+  pr
+}
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if u.persisted? }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if f.persisted? }
+}
+begin
+  User.current = User.find(1)
+  p = mk_project.call('Batch')
+  cf = VersionCustomField.create!(name: "CBS_BatchCf_#{sfx}", field_format: 'string', visible: true)
+  made_cfs << cf
+  v = Version.create!(project: p, name: "CBS_V_#{sfx}")
+  v.custom_field_values = { cf.id.to_s => 'beta' }
+  v.save!
+  u = mk_user.call('viewer')
+  Member.create!(principal: u, project: p, roles: [mk_role.call('viewer', [:view_issues])])
   User.current = u
   c = CacheBundlesController.new
   c.instance_variable_set(:@errors, [])
-  row = c.send(:fetch_per_project_versions, u)[v.project_id.to_s].find { |h| h[:id] == v.id }
-  ref = c.send(:version_to_hash, v, u)
+  row = c.send(:fetch_per_project_versions, u)[p.id.to_s].find { |h| h[:id] == v.id }
+  ref = c.send(:version_to_hash, Version.find(v.id), u)
   puts (row == ref && row[:custom_fields].present?) ? 'PASS' : "FAIL: batched=#{row&.dig(:custom_fields).inspect} expect=#{ref[:custom_fields].inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -1209,9 +1300,77 @@ end
 
 ---
 
+### [1-35-3] ほかのプロジェクトから共有された版も、個別 API と同じ範囲で返す
+
+共有の設定（system・tree・hierarchy・descendants・none）とアーカイブしたプロジェクトの版を、その場で作って確かめる（今ある DB に共有の版が無くても、それぞれの場合を必ず通す）。
+プロジェクトの木は「Root → Mid → Leaf」と、Root の下のもう 1 本の枝 Side、木の外の Other・Archived。
+木の外の Other を含む 5 つのプロジェクトのメンバーのユーザーから見た、それぞれのプロジェクトの版が、コアの `shared_versions` と一致し、期待どおりの版だけであることを見る。
+DB にもともとある system 共有の版に左右されないよう、比べるのはこの試験で作った版だけにする。
+
+**確認方法:**
+```ruby
+User.current = User.find(1)
+sfx = SecureRandom.hex(3)
+mk = ->(name, parent = nil) { Project.create!(name: "SV_#{name}_#{sfx}", identifier: "sv-#{name.downcase}-#{sfx}", is_public: false, parent_id: parent&.id) }
+root = mk.call('Root'); mid = mk.call('Mid', root); leaf = mk.call('Leaf', mid); side = mk.call('Side', root)
+other = mk.call('Other'); archived = mk.call('Archived')
+[root, mid, leaf, side, other, archived].each { |p| p.enabled_module_names = %w[issue_tracking]; p.save! }
+ver = ->(p, name, sharing) { Version.create!(project: p, name: "#{name}_#{sfx}", sharing: sharing) }
+v = {
+  own: ver.call(mid, 'own', 'none'),
+  root_tree: ver.call(root, 'root_tree', 'tree'), side_tree: ver.call(side, 'side_tree', 'tree'),
+  root_desc: ver.call(root, 'root_desc', 'descendants'), root_hier: ver.call(root, 'root_hier', 'hierarchy'),
+  leaf_hier: ver.call(leaf, 'leaf_hier', 'hierarchy'), leaf_desc: ver.call(leaf, 'leaf_desc', 'descendants'),
+  side_hier: ver.call(side, 'side_hier', 'hierarchy'), root_none: ver.call(root, 'root_none', 'none'),
+  other_sys: ver.call(other, 'other_sys', 'system'), other_tree: ver.call(other, 'other_tree', 'tree'),
+  arch_sys: ver.call(archived, 'arch_sys', 'system')
+}
+user = nil
+begin
+  archived.update_column(:status, Project::STATUS_ARCHIVED)
+  role = Role.givable.detect { |r| r.has_permission?(:view_issues) }
+  user = User.new(login: "sv_#{sfx}", firstname: 'SV', lastname: 'User', mail: "sv_#{sfx}@example.com", status: 1)
+  user.password = user.password_confirmation = 'password123'
+  user.save!
+  [root, mid, leaf, side, other].each { |p| Member.create!(principal: user, project: p, roles: [role]) }
+  User.current = user
+  c = CacheBundlesController.new
+  c.instance_variable_set(:@errors, [])
+  bundle = c.send(:fetch_per_project_versions, user)
+  made = v.values.map(&:id)
+  expected = {
+    root  => %i[root_tree root_desc root_hier root_none side_tree leaf_hier side_hier other_sys],
+    mid   => %i[own root_tree side_tree root_desc root_hier leaf_hier other_sys],
+    leaf  => %i[leaf_hier leaf_desc root_tree side_tree root_desc root_hier other_sys],
+    side  => %i[side_tree side_hier root_tree root_desc root_hier other_sys],
+    other => %i[other_sys other_tree]
+  }
+  expected.each do |p, keys|
+    label = p.name.split('_')[1]
+    got = (bundle[p.id.to_s] || []).map { |h| h[:id] } & made
+    core = Project.find(p.id).shared_versions.map(&:id) & made
+    puts "#{label} core: #{got.sort == core.sort}"
+    puts "#{label} expected: #{got.sort == v.values_at(*keys).map(&:id).sort}"
+  end
+  puts "errors: #{c.instance_variable_get(:@errors).inspect}"
+ensure
+  User.current = User.find(1)
+  user.destroy if user&.persisted?
+  [leaf, mid, side, root, other, archived].each { |p| Project.find_by(id: p.id)&.destroy }
+end
+```
+
+**期待結果:**
+- 5 つのプロジェクト（Root・Mid・Leaf・Side・Other）すべてで `core: true`（コアの `shared_versions` と同じ版）
+- 5 つすべてで `expected: true`（自分の版、同じ木の tree、親の descendants・hierarchy、子の hierarchy、system を返す。子の descendants、ほかの枝の hierarchy、ほかのプロジェクトの none、ほかの木の tree、アーカイブしたプロジェクトの版は返さない）
+- `errors: []`
+
+---
+
 ### [1-36] N+1 バッチ化でクエリ本数がプロジェクト／バージョン数に比例しない
 
 memberships はプロジェクト数に依らず一定本数で取得できること（旧 per-project の N+1 が解消）を確認する。
+見えるプロジェクトの数が違う 2 人をその場で作り、最初の 1 回だけのクエリ（設定の読み込みなど）を除くため、1 回流してから測る。
 versions/issue_categories は per-project の権限判定（`allowed_to?`）が残るため O(プロジェクト数) だが、
 **バージョン件数には比例しない**（per-version の CF 値 N+1 が解消）ことを確認する。
 
@@ -1224,28 +1383,49 @@ def cb_count_sql
   n
 end
 
-# 複数プロジェクトの member を 2 人選び、memberships のクエリ本数がプロジェクト数に依らず一定であること
-members = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE)
-              .select { |u| u.memberships.map(&:project_id).uniq.size >= 1 }
-              .sort_by { |u| -u.memberships.map(&:project_id).uniq.size }
-if members.size < 2
-  puts 'SKIP: member ユーザが 2 人未満'
-else
-  many, few = members.first, members.last
-  User.current = many; cm = CacheBundlesController.new; cm.instance_variable_set(:@errors, [])
-  User.current = few;  cf = CacheBundlesController.new; cf.instance_variable_set(:@errors, [])
-  q_many = cb_count_sql { cm.send(:fetch_per_project_memberships, many) }
-  q_few  = cb_count_sql { cf.send(:fetch_per_project_memberships, few) }
-  pids_many = many.memberships.map(&:project_id).uniq.size
-  pids_few  = few.memberships.map(&:project_id).uniq.size
+# メンバーになっているプロジェクトの数が違う 2 人（3 つと 1 つ）を、その場で作る（DB にある人に頼らない）
+sfx = SecureRandom.hex(3)
+role = Role.givable.first
+projects = []
+made = []
+mk_user = ->(name) {
+  u = User.new(login: "cb36_#{name}_#{sfx}", firstname: 'CB36', lastname: name, mail: "cb36_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made << u
+  u
+}
+begin
+  User.current = User.find(1)
+  3.times { |i| projects << Project.create!(name: "CB36_#{i}_#{sfx}", identifier: "cb36-#{i}-#{sfx}", is_public: false) }
+  many = mk_user.call('many')
+  few = mk_user.call('few')
+  projects.each { |pr| Member.create!(principal: many, project: pr, roles: [role]) }
+  Member.create!(principal: few, project: projects.first, roles: [role])
+
+  measure = ->(u) {
+    User.current = u
+    c = CacheBundlesController.new
+    c.instance_variable_set(:@errors, [])
+    c.send(:fetch_per_project_memberships, u) # 1 回目は設定の読み込みなど最初の 1 回だけのクエリが入るので、測らずに流す
+    cb_count_sql { c.send(:fetch_per_project_memberships, u) }
+  }
+  q_many = measure.call(many)
+  q_few = measure.call(few)
+  pids_many = Project.visible(many).count
+  pids_few = Project.visible(few).count
   # プロジェクト数が違っても membership のクエリ本数は同じ（N+1 でない）
-  ok = q_many == q_few
+  ok = pids_many > pids_few && q_many == q_few
   puts ok ? "PASS (memberships: #{pids_many}proj->#{q_many}q, #{pids_few}proj->#{q_few}q)" : "FAIL: #{pids_many}proj->#{q_many}q vs #{pids_few}proj->#{q_few}q"
+ensure
+  User.current = User.find(1)
+  made.each { |u| u.destroy if u.persisted? }
+  projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
 end
 ```
 
 **期待結果:**
-- memberships のクエリ本数がプロジェクト数に依存せず一定（per-project の N+1 が解消されている）
+- `PASS`（見えるプロジェクトの数が多い人と少ない人で、memberships のクエリ本数が同じ。per-project の N+1 が解消されている）
 
 ---
 

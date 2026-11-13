@@ -437,18 +437,24 @@ class CacheBundlesController < ApplicationController
   # 個別 API (GET /projects/:id/versions.json) はコアで view_issues 権限を要求する
   # （versions#index は view_issues 配下）。cache_bundle でも対象ユーザの view_issues を確認し、
   # 権限が無いプロジェクトは空で返す（過剰露出の是正）。
+  # 返す範囲は個別 API と同じ、ほかのプロジェクトから共有された版を含む Project#shared_versions。
   def fetch_per_project_versions(user)
     projects = Project.where(id: visible_project_ids(user)).to_a
     result = projects.each_with_object({}) { |pr, h| h[pr.id.to_s] = [] }
     # view_issues を持たないロールは個別 API では 403 になるため、権限のあるプロジェクトのみ版を返す（他は空のまま）。
     allowed = projects.select { |pr| user.allowed_to?(:view_issues, pr) }
     begin
-      # 権限のある全プロジェクトの版を 1 クエリで取得。custom_values を preload し per-version の CF 値 N+1 を解消。
-      versions_by_pid = Version.where(project_id: allowed.map(&:id))
-                               .preload(:custom_values, :project)
-                               .group_by(&:project_id)
+      # 自分の版と、共有の設定がある版を 1 クエリで取得し、プロジェクトごとに shared_versions と同じ条件で振り分ける
+      # （プロジェクトごとに shared_versions を呼ぶと N+1 になる）。custom_values を preload し per-version の CF 値 N+1 も解消。
+      candidates = Version.joins(:project)
+                          .where("#{Version.table_name}.project_id IN (?) OR (#{Project.table_name}.status <> ? AND #{Version.table_name}.sharing <> 'none')",
+                                 allowed.map(&:id).presence || [-1], Project::STATUS_ARCHIVED)
+                          .preload(:custom_values, :project)
+                          .to_a
+      roots = allowed.any? ? Project.where(parent_id: nil).select(:id, :lft, :rgt).to_a : []
       allowed.each do |pr|
-        result[pr.id.to_s] = (versions_by_pid[pr.id] || []).map { |v| version_to_hash(v, user) }
+        root = roots.find { |r| r.lft <= pr.lft && r.rgt >= pr.rgt } || pr
+        result[pr.id.to_s] = candidates.select { |v| shared_with?(v, pr, root) }.map { |v| version_to_hash(v, user) }
       end
     rescue => e
       Rails.logger.warn "cache_bundle: project_versions failed: #{e.class} #{e.message}"
@@ -456,6 +462,24 @@ class CacheBundlesController < ApplicationController
       allowed.each { |pr| result[pr.id.to_s] = [] }
     end
     result
+  end
+
+  # 版 v が、プロジェクト pr（root はその最上位のプロジェクト）から使える版か。
+  # コアの Project#shared_versions の SQL の条件を、そのまま Ruby で書いたもの
+  def shared_with?(v, pr, root)
+    return true if v.project_id == pr.id
+
+    vp = v.project
+    return false if vp.status == Project::STATUS_ARCHIVED
+
+    case v.sharing
+    when 'system' then true
+    when 'tree' then vp.lft >= root.lft && vp.rgt <= root.rgt
+    when 'descendants' then vp.lft < pr.lft && vp.rgt > pr.rgt
+    when 'hierarchy'
+      (vp.lft < pr.lft && vp.rgt > pr.rgt) || (vp.lft > pr.lft && vp.rgt < pr.rgt)
+    else false
+    end
   end
 
   def version_to_hash(v, user)
