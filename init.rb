@@ -101,6 +101,8 @@ else
   require_relative 'lib/redmine_studio_plugin/status_background/hooks'
 
   # Load Wiki Lists macros
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/visible_lookup'
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/macro_error'
   require_relative 'lib/redmine_studio_plugin/wiki_lists/wiki_list'
   require_relative 'lib/redmine_studio_plugin/wiki_lists/issue_name_link'
   require_relative 'lib/redmine_studio_plugin/wiki_lists/ref_issues/parser'

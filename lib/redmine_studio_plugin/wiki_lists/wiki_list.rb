@@ -27,7 +27,9 @@ module RedmineStudioPlugin
                   when 'p' # リストアップの対象を特定の別プロジェクトのWikiに限定する場合
                     if arg=~/\A[^\=]+\=(.*)\z/ then # プロジェクト名を指定
                       name = $1.strip
-                      prj = Project.find_by_name(name)
+                      # 見られないプロジェクトは、無いプロジェクトと同じエラーにする
+                      prj = Project.visible.find_by(name: name)
+                      raise "- project:#{name} is not found." unless prj
                       cond += ' AND ' if cond != ''
                       cond += "project_id = #{prj.id}"
                     else # プロジェクト名の指定が無い場合は当該WIKIのPJに限定
@@ -71,7 +73,7 @@ usage: {{wiki_list([option]*,[column]*)}}<br>
 KEYWORD[| COLUMN_NAME] -> scan KEYWORD and show following words to EOL<br>
 KEYWORD\\TERMINATOR[| COLUMN_NAME] -> scan KEYWORD and show following words to TERMINATOR
 TEXT
-            raise msg.html_safe
+            return RedmineStudioPlugin::WikiLists::MacroError.html(self, :wiki_list, msg)
           end
 
           if column_keys.count.zero?

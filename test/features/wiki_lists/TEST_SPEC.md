@@ -50,6 +50,8 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 各マクロのオプション動作を確認する。コンテナの再起動は要らない（Runner テストは DB を書き換えない）。
 
+[5-V-1] は、試験用のプロジェクト・利用者を作って最後に消す（ほかの HTTP テストのデータには触らない）。
+
 ---
 
 ## セットアップデータ
@@ -642,6 +644,132 @@ puts "[1-7] PASS"
 
 ---
 
-## 5. ブラウザテスト
+## 5. HTTP テスト - 見られる範囲
+
+### [5-V-1] 見られないプロジェクト・チケット・ユーザーなどは、無い物と同じ表示になる
+
+マクロに名前で書いたものは、ページを見ている人が見られる範囲だけで探す。
+見られない物を書いたときの表示が、無い物を書いたときと（名前のところを除いて）同じで、期待するエラー文であることを確かめる。
+見られる物（ほかのプロジェクトから共有された版を含む）とロック中のメンバーは使えることも確かめる。
+エラー文の改行が改行として出ること（改行の印が文字のまま出ないこと）と、マクロに書いた文字が文字のまま出ることも確かめる。
+
+マクロは、プラグインの Wiki プレビュー（`POST /wiki_preview.json`）を viewer の API キーで呼んで描画する。
+
+用意（`rails runner`。下のスクリプトを `wm_setup.rb` として保存する）：非公開の Pub と Secret を作る。
+viewer は Pub だけのメンバー、secretonly は Secret だけのメンバー、locked は Pub のメンバーでロック中にする。
+Pub の中に、viewer から見えない非公開チケット（insider が作成）と、locked が担当のチケットを置く。
+Secret には、共有しないバージョン・system で共有するバージョンとカテゴリを置く。Pub にもバージョンとカテゴリを置く。
+最後の行に、viewer の API キーなどを JSON で出す。
+
+```ruby
+sfx = SecureRandom.hex(3)
+mk_user = ->(name) {
+  u = User.new(login: "wm_#{name}_#{sfx}", firstname: 'WM', lastname: name, mail: "wm_#{name}_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+  u.password = u.password_confirmation = "Pw-#{sfx}-x9Z"
+  u.save!
+  u
+}
+role = Role.create!(name: "WM_Role_#{sfx}", permissions: [:view_issues, :view_wiki_pages], users_visibility: 'members_of_visible_projects', issues_visibility: 'default', assignable: true)
+tracker = Tracker.first
+pub = Project.create!(name: "WM_Pub_#{sfx}", identifier: "wm-pub-#{sfx}", is_public: false, tracker_ids: [tracker.id])
+secret = Project.create!(name: "WM_Secret_#{sfx}", identifier: "wm-secret-#{sfx}", is_public: false, tracker_ids: [tracker.id])
+[pub, secret].each { |p| p.enabled_module_names = %w[issue_tracking wiki]; p.save! }
+viewer = mk_user.call('viewer')
+insider = mk_user.call('insider')
+Member.create!(principal: viewer, project: pub, roles: [role])
+Member.create!(principal: insider, project: secret, roles: [role])
+Member.create!(principal: insider, project: pub, roles: [role])
+locked = mk_user.call('locked')
+Member.create!(principal: locked, project: pub, roles: [role])
+secret_only = mk_user.call('secretonly')
+Member.create!(principal: secret_only, project: secret, roles: [role])
+admin = User.find(1)
+pub_issue = Issue.create!(project: pub, tracker: tracker, subject: "WM_PubIssue_#{sfx}", author: admin)
+Issue.create!(project: secret, tracker: tracker, subject: "WM_SecretIssue_#{sfx}", author: admin)
+# Pub の中の、viewer から見えない非公開のチケット（ほかの人が書いた private）
+Issue.create!(project: pub, tracker: tracker, subject: "WM_PrivateIssue_#{sfx}", author: insider, is_private: true)
+# locked が担当のチケット（担当にしてからロックする）
+Issue.create!(project: pub, tracker: tracker, subject: "WM_LockedIssue_#{sfx}", author: admin, assigned_to: locked)
+locked.update_column(:status, User::STATUS_LOCKED)
+Version.create!(project: secret, name: "WM_SecretVer_#{sfx}")
+Version.create!(project: secret, name: "WM_SharedVer_#{sfx}", sharing: 'system')
+Version.create!(project: pub, name: "WM_PubVer_#{sfx}")
+IssueCategory.create!(project: secret, name: "WM_SecretCat_#{sfx}")
+IssueCategory.create!(project: pub, name: "WM_PubCat_#{sfx}")
+api_key = viewer.api_key
+puts({ suffix: sfx, key: api_key, pub_id: pub.id, pub_ident: pub.identifier, pub_name: pub.name, pub_issue: pub_issue.id,
+       secret_id: secret.id, secret_ident: secret.identifier, secret_name: secret.name, secret_only: secret_only.login,
+       locked: locked.login, tracker: tracker.name }.to_json)
+```
+
+実行（PowerShell 7）：
+
+```powershell
+$Container = '{Container}'; $BaseUrl = '{BaseUrl}'
+docker cp "wm_setup.rb" "${Container}:/tmp/wm_setup.rb" | Out-Null
+$d = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner /tmp/wm_setup.rb 2>$null | Select-Object -Last 1 | ConvertFrom-Json
+try {
+    $s = $d.suffix
+    function Render($text) {
+        $body = @{ text = $text; project_id = $d.pub_id } | ConvertTo-Json -Compress
+        $r = Invoke-RestMethod -Uri "$BaseUrl/wiki_preview.json" -Method Post -Headers @{ 'X-Redmine-API-Key' = $d.key } -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+        $r.wiki_preview.html
+    }
+    # 見られない物（hidden）と無い物（missing）で、名前のところをそろえた表示が同じで、期待するエラー文（$expect）か
+    function Same($hiddenText, $missingText, $hiddenKey, $missingKey, $expect) {
+        $h = (Render $hiddenText).Replace($hiddenKey, 'KEY')
+        $m = (Render $missingText).Replace($missingKey, 'KEY')
+        if ($h -ne $m) { "DIFF`n  hidden=$h`n  missing=$m" }
+        elseif (-not $m.Contains($expect)) { "UNEXPECTED`n  missing=$m" }
+        else { 'same' }
+    }
+    # エラーの枠が出ていないか（見られる物を書いたときに使う）
+    function Works($text) { $html = Render $text; if ($html -match 'flash error') { "ERROR`n  $html" } else { 'works' } }
+    $none = "wm-none-$s"
+    "issue_name_link project: " + (Same "{{issue_name_link($($d.secret_ident):x)}}" "{{issue_name_link(${none}:x)}}" $d.secret_ident $none 'project:KEY is not found.')
+    "issue_name_link issue: " + (Same "{{issue_name_link($($d.pub_ident):WM_PrivateIssue_$s)}}" "{{issue_name_link($($d.pub_ident):WM_NoIssue_$s)}}" "WM_PrivateIssue_$s" "WM_NoIssue_$s" 'issue:KEY is not found in prj:')
+    "wiki_list -p: " + (Same "{{wiki_list(-p=$($d.secret_name))}}" "{{wiki_list(-p=WM_None_$s)}}" $d.secret_name "WM_None_$s" 'project:KEY is not found.')
+    "ref_issues -p: " + (Same "{{ref_issues(-p=$($d.secret_ident))}}" "{{ref_issues(-p=$none)}}" $d.secret_ident $none 'project:KEY is not found.')
+    "ref_issues -p id: " + (Same "{{ref_issues(-p=$($d.secret_id))}}" "{{ref_issues(-p=999999)}}" "$($d.secret_id)" '999999' 'project:KEY is not found.')
+    "ref_issues -f:assigned_to: " + (Same "{{ref_issues(-f:assigned_to=$($d.secret_only))}}" "{{ref_issues(-f:assigned_to=wm_nobody_$s)}}" $d.secret_only "wm_nobody_$s" 'can not resolve &#39;KEY&#39;')
+    "ref_issues -f:project: " + (Same "{{ref_issues(-f:project=$($d.secret_name))}}" "{{ref_issues(-f:project=WM_None_$s)}}" $d.secret_name "WM_None_$s" 'can not resolve &#39;KEY&#39;')
+    "ref_issues -f:version: " + (Same "{{ref_issues(-f:version=WM_SecretVer_$s)}}" "{{ref_issues(-f:version=WM_NoVer_$s)}}" "WM_SecretVer_$s" "WM_NoVer_$s" 'can not resolve &#39;KEY&#39;')
+    "ref_issues -f:category: " + (Same "{{ref_issues(-f:category=WM_SecretCat_$s)}}" "{{ref_issues(-f:category=WM_NoCat_$s)}}" "WM_SecretCat_$s" "WM_NoCat_$s" 'can not resolve &#39;KEY&#39;')
+    # 見られる物は使える
+    "visible issue_name_link: " + ((Render "{{issue_name_link($($d.pub_ident):WM_PubIssue_$s)}}") -match "issues/$($d.pub_issue)")
+    "visible ref_issues -p: " + (Works "{{ref_issues(-p=$($d.pub_ident),-c)}}")
+    "visible ref_issues -p id: " + (Works "{{ref_issues(-p=$($d.pub_id),-c)}}")
+    "visible -f:version: " + (Works "{{ref_issues(-f:version=WM_PubVer_$s,-c)}}")
+    # 共有された版は、本体と同じく、プロジェクトを決めたとき（-p）にそのプロジェクトで使える版として探す
+    "visible -f:version shared: " + (Works "{{ref_issues(-p=$($d.pub_ident),-f:version=WM_SharedVer_$s,-c)}}")
+    "visible -f:category: " + (Works "{{ref_issues(-f:category=WM_PubCat_$s,-c)}}")
+    "visible -f:project: " + (Works "{{ref_issues(-f:project=$($d.pub_name),-c)}}")
+    "visible -f:tracker: " + (Works "{{ref_issues(-f:tracker=$($d.tracker),-c)}}")
+    # ロック中のメンバーが担当のチケットが 1 件だけ数えられる
+    $lockedCount = Render "{{ref_issues(-f:assigned_to=$($d.locked),-c)}}"
+    "locked member count: " + ($lockedCount -replace '<[^>]+>', '').Trim()
+    # エラー文の改行は改行として出る（改行の印が文字にならない）。マクロに書いた文字は文字のまま出る
+    $usage = Render "{{wiki_list(-x)}}"
+    "error line break: " + (($usage -match '<br\s*/?>') -and -not ($usage -match '&lt;br'))
+    $tagged = Render "{{issue_name_link(<b>wm</b>:x)}}"
+    "error text escaped: " + (-not ($tagged -match '<b>wm</b>'))
+} finally {
+    # 後片付け。suffix が 6 桁の 16 進でなければ止める（空のまま LIKE で探すと、ほかのプロジェクト・ユーザーに当たる）
+    if ($d.suffix -notmatch '^[0-9a-f]{6}$') { throw "suffix が正しくない: '$($d.suffix)'" }
+    $cleanup = "sfx = '$($d.suffix)'; Project.where('identifier LIKE ?', ""wm-%-#{sfx}"").each(&:destroy); User.where('login LIKE ?', ""wm_%_#{sfx}"").each(&:destroy); Role.where(name: ""WM_Role_#{sfx}"").each(&:destroy); puts 'cleanup: ok'"
+    docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $cleanup 2>$null | Select-Object -Last 1
+}
+```
+
+**期待結果:**
+
+- 9 の組み合わせ（issue_name_link のプロジェクト・チケット、wiki_list の `-p=`、ref_issues の `-p=`〔識別子・数字の id〕・`-f:assigned_to`・`-f:project`・`-f:version`・`-f:category`）がすべて `same`（見られない物と無い物で同じ表示で、期待するエラー文）
+- `visible issue_name_link` が `True`、`visible ...` の 7 つがすべて `works`（ほかのプロジェクトから system で共有された版も、`-p` で決めたプロジェクトで使える）
+- `locked member count: 1`（ロック中のメンバーが担当のチケットを数えられる）
+- `error line break: True`・`error text escaped: True`
+- `cleanup: ok`
+---
+
+## 6. ブラウザテスト
 
 該当なし（HTTP テストで網羅可能）
