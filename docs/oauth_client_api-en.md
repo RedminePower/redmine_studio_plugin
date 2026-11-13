@@ -96,6 +96,11 @@ every time Redmine starts.
   a client cannot be created from the Redmine admin UI
 - The redirect target is loopback (`http://127.0.0.1/`); the actual port used may differ
 - Scopes are defined by the policy below, and the registration follows the definition when it changes
+- If several processes start at the same time and the application gets registered more than once
+  under the same name, the duplicates are merged into the oldest one (tokens issued for the others
+  are moved to it so that they keep working). Only public clients with the same name and the same
+  redirect URI are merged; an application with the same name but other settings created by an
+  administrator is left as it is
 
 ### Scope policy
 

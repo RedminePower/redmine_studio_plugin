@@ -115,7 +115,7 @@ Basic のユーザー名が「登録済み OAuth アプリの uid」でない場
 | 区分 | 対象ケース | 適用版 |
 |------|-----------|--------|
 | 全版共通 | [1-1]〜[1-5] / [1-9] / [2-0] / [2-1] | 全版 |
-| Doorkeeper 依存（登録・patch・トークン） | [1-6]〜[1-8] / [1-10]〜[1-14] / [2-2]〜[2-7] | **6.1 以上のみ**（6.1 未満は Doorkeeper 無しでスキップ） |
+| Doorkeeper 依存（登録・patch・トークン） | [1-6]〜[1-8]（[1-7-2]・[1-7-3] を含む） / [1-10]〜[1-14] / [2-2]〜[2-7] | **6.1 以上のみ**（6.1 未満は Doorkeeper 無しでスキップ） |
 | Doorkeeper なしの挙動（ロード・degradation） | [1-15]〜[1-16] / [2-8] | **6.1 未満のみ** |
 
 6.1 未満では、init.rb の Doorkeeper patch 適用が `defined?(Doorkeeper::OAuth::Client::Credentials)` でガードされ、
@@ -215,6 +215,91 @@ puts count == 1 ? 'PASS' : "FAIL: count=#{count}"
 ```
 
 **期待結果:** 登録は常に 1 件（起動のたびに呼んでも増えない）
+
+---
+
+### [1-7-2] 同じ名前のアプリが二重になっていたら、いちばん古いものにまとめる
+
+複数のプロセスが同時に起動すると、同じ名前のアプリが二重に登録されることがある。
+起動時の登録で、いちばん古いものを残し、ほかのアプリで発行したトークン・認可コードをそれへ付け替えてから、ほかを消す。
+まとめる前でも、`registered_application`（`/oauth_client` が返すアプリ）はいちばん古いものを選ぶ。
+
+```ruby
+R = RedmineStudioPlugin::OauthClient::AppRegistrar
+A = Doorkeeper::Application
+begin
+  R.ensure_registered
+  orig = A.where(name: 'Redmine Studio').order(:id).first
+  dup1 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+  dup2 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+  user = User.where(admin: true).first
+  tok = Doorkeeper::AccessToken.create!(application_id: dup2.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 7200, use_refresh_token: true)
+  grant = Doorkeeper::AccessGrant.create!(application_id: dup1.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 600, redirect_uri: 'http://127.0.0.1/')
+  picked = R.registered_application
+  R.ensure_registered
+  apps = A.where(name: 'Redmine Studio').to_a
+  ok = picked.id == orig.id && apps.map(&:id) == [orig.id] && tok.reload.application_id == orig.id && grant.reload.application_id == orig.id && R.registered_application.id == orig.id
+  puts ok ? 'PASS' : "FAIL: picked=#{picked.id} orig=#{orig.id} apps=#{apps.map(&:id)} tok=#{tok.reload.application_id} grant=#{grant.reload.application_id}"
+ensure
+  Doorkeeper::AccessToken.where(id: tok&.id).delete_all
+  Doorkeeper::AccessGrant.where(id: grant&.id).delete_all
+  # 途中で落ちても、二重のアプリを残さない
+  R.ensure_registered
+end
+```
+
+**期待結果:** まとめる前の `registered_application` がいちばん古いアプリ。まとめた後はそのアプリ 1 件だけが残り、トークン・認可コードがそれに付け替わっている
+
+---
+
+### [1-7-3] 作った直後にほかのプロセスも作っていたらまとめる・管理者が作った同じ名前のアプリは残す
+
+未登録のときに作った直後、同時に起動したほかのプロセスも同じアプリを作っていた場面を、`create!` の差し替えで作る（差し替えは印が立っている間だけ働く）。
+同じ名前でもリダイレクト先・confidential の違うアプリ（管理者が画面から作ったもの）は、消さず、正にもしない。
+今あるサインイン用アプリは、名前を一時的に変えて「未登録」にし、最後に戻す。
+
+```ruby
+R = RedmineStudioPlugin::OauthClient::AppRegistrar
+A = Doorkeeper::Application
+sfx = SecureRandom.hex(3)
+$oauth_173_dup = false
+module OAuth173Stub
+  def create!(*args, **kw, &blk)
+    app = super
+    if $oauth_173_dup
+      $oauth_173_dup = false
+      super(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+    end
+    app
+  end
+end
+A.singleton_class.prepend(OAuth173Stub)
+saved = R.signin_applications.to_a
+made = []
+begin
+  saved.each { |a| a.update_column(:name, "Redmine Studio saved #{sfx}") }
+  admin_app = A.create!(name: 'Redmine Studio', redirect_uri: "https://example.com/cb-#{sfx}", scopes: 'view_issues', confidential: true)
+  made << admin_app.id
+  $oauth_173_dup = true
+  R.ensure_registered
+  apps = R.signin_applications.to_a
+  made.concat(A.where(name: 'Redmine Studio').pluck(:id))
+  puts "dup_made: #{!$oauth_173_dup}"
+  puts "merged_to_one: #{apps.size == 1}"
+  puts "admin_app_kept: #{A.exists?(admin_app.id) && R.registered_application&.id != admin_app.id}"
+ensure
+  $oauth_173_dup = false
+  A.where(id: made.uniq).delete_all
+  saved.each { |a| a.update_column(:name, 'Redmine Studio') }
+  puts "restored: #{R.signin_applications.pluck(:id) == saved.map(&:id)}"
+end
+```
+
+**期待結果:**
+- `dup_made: true`（作った直後にもう 1 つ作られた）
+- `merged_to_one: true`（サインイン用アプリが 1 つにまとまった）
+- `admin_app_kept: true`（管理者が作った同じ名前のアプリは残り、正にはならない）
+- `restored: true`（今あるサインイン用アプリを元に戻した）
 
 ---
 
