@@ -67,7 +67,7 @@ class StudioSettingsController < ApplicationController
   end
 
   # POST /studio_settings/versions
-  # 本人の設定（own: schema_type の配列）と、id で頼んだ設定（ids: id の配列。範囲は問わない）の版だけを返す。
+  # 本人の設定（own: schema_type の配列）と、id で頼んだ設定のうち読めるもの（ids: id の配列。範囲は問わない）の版だけを返す。
   # 求めたのに返らないものは「確定的に無い」。そう読めるよう、読めない依頼は 200 の空で返さず 422 で断る。
   def versions
     # XML は一番外側の要素が 1 つ要るので studio_setting_versions で包んで送られる。包みがあればその中から読む

@@ -115,9 +115,9 @@ user スコープでは `expected_version` が必須（無ければ 422 `expecte
 | 操作 | 振る舞い |
 |------|----------|
 | 作成 | `scope_id` を省くと自分。他人の分を作れるのは admin だけ（403）。持ち主は実在の利用者（いなければ 422）。同じ持ち主・同じ schema_type が既にあれば 409 で今ある設定を返す |
-| 取得 | ログインしていれば誰でも読める（一覧でもまとめて読める） |
+| 取得 | 持ち主を見られる人（本人を含む）と admin が読める（一覧でもまとめて読める）。見られない人は 403、一覧・versions にも出ない。ロック中の持ち主の分は admin だけ |
 | 更新・削除・履歴の操作 | 本人と admin だけ（403） |
-| 割り当て | 一覧は誰でも読める。置換・追加は本人と admin 以外は 403、本人と admin でも 422（本人の設定は人に割り当てない）。削除は本人と admin 以外は 403 |
+| 割り当て | 一覧は、設定を読める人が読める。置換・追加は本人と admin 以外は 403、本人と admin でも 422（本人の設定は人に割り当てない）。削除は本人と admin 以外は 403 |
 | 更新 | `scope_type` の user への／からの付け替えは 422（`scope_type cannot be changed to or from user`）。`scope_id` と `schema_type` は送っても無視する |
 | 削除 | 常に物理削除（以後 404）。同じ schema_type で作り直せる |
 | 履歴 | 残さない |
@@ -130,7 +130,7 @@ user スコープでは `expected_version` が必須（無ければ 422 `expecte
 {
   "studio_setting_versions": {
     "own":  [ { "id": 5, "schema_type": "work_settings", "version": 3 } ],
-    "team": [ { "id": 12, "version": 7, "updated_on": "2026-..." } ]
+    "team": [ { "id": 12, "version": 7 } ]
   }
 }
 ```
@@ -945,7 +945,7 @@ puts fk&.on_delete == :cascade
 
 ## 1B. 可視性（Runner テスト）
 
-`StudioSetting.visible` scope / `visible?` を検証する。global は全ログインユーザーに可視、project スコープは当該プロジェクトのメンバーのみ、admin は全件。**バッチ 3**（[1-30]〜[1-35]）としてまとめて実行し、[1-30] が前提データを作る。
+`StudioSetting.visible` scope / `visible?` を検証する。global は全ログインユーザーに可視、project スコープは当該プロジェクトのメンバーのみ、user スコープは持ち主を見られる（`User.visible`）人のみ、admin は全件。**バッチ 3**（[1-30]〜[1-35]）としてまとめて実行し、[1-30] が前提データを作る。
 
 ### [1-30] 可視性テストデータ整備（前提）
 
@@ -1229,11 +1229,23 @@ User.current = admin
 t = "rt_perm_#{SecureRandom.hex(4)}"
 s = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: member.id, schema_version: 0, created_by: member, updated_by: member)
 
-# 読むのはログインしていれば誰でも
+# 読めるのは持ち主を見られる人（vis_nonmember から vis_member が見えることは、下の前提の行で確かめる）
 puts s.visible?(member)
 puts s.visible?(nonmember)
 puts s.visible?(User.anonymous) == false
 puts StudioSetting.visible(nonmember).where(id: s.id).exists?
+
+# 持ち主を見られない人は読めない（vis_limited から vis_hidden は見えない。[1-30] の前提）
+limited = User.find_by_login('vis_limited')
+hidden = User.find_by_login('vis_hidden')
+h = StudioSetting.create!(name: 'p', schema_type: t, scope_type: 'user', scope_id: hidden.id, schema_version: 0, created_by: hidden, updated_by: hidden)
+puts User.visible(nonmember).where(id: member.id).exists? && User.visible(limited).where(id: hidden.id).exists? == false
+puts h.visible?(limited) == false
+puts StudioSetting.visible(limited).where(id: h.id).exists? == false
+puts h.visible?(hidden)
+puts h.visible?(admin)
+puts StudioSetting.visible(admin).where(id: h.id).exists?
+h.destroy
 
 # 書けるのは本人と admin だけ
 puts s.editable?(member)
@@ -1245,7 +1257,7 @@ s.destroy
 ```
 
 **期待結果:**
-- `true` が 8 回
+- `true` が 14 回
 
 ### [1-41] user スコープは履歴を残さない
 
@@ -3367,9 +3379,9 @@ $s2 = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$rg.json?key=$AdminKey"
 
 ## 2C. 本人の設定と版（HTTP テスト）
 
-本人の設定（user スコープ）の作成・更新・削除、版による衝突検出、`versions` エンドポイント、`ids` フィルタを確かめる。2B と同じ API キー（admin / vis_member / vis_nonmember）を使う。番号順に流す（前のテストで作った ID・版を後で使う）。
+本人の設定（user スコープ）の作成・更新・削除、版による衝突検出、`versions` エンドポイント、`ids` フィルタを確かめる。2B と同じ API キー（admin / vis_member / vis_nonmember / vis_limited）を使う。番号順に流す（前のテストで作った ID・版を後で使う）。
 
-2B の変数（`$AdminKey`・`$MemberKey`・`$NonMemberKey`・`$MemberId`・`$projASettingId`）をそのまま使う。2C だけを新しいシェルで流すときは、先に 2B の事前準備を流す。
+2B の変数（`$AdminKey`・`$MemberKey`・`$NonMemberKey`・`$MemberId`・`$LimitedKey`・`$HiddenId`・`$projASettingId`）をそのまま使う。2C だけを新しいシェルで流すときは、先に 2B の事前準備を流す。
 
 2C は、ほかの HTTP テストと違い、最後（[2-40]）に作った設定を消す（同じ schema_type での作り直しを何度でも確かめられるように）。
 
@@ -3484,10 +3496,12 @@ $r.Status; $r.Json.total_count
 **期待結果:**
 - 200／`total_count` が 0
 
-### [2-31] 他の利用者は読めるが書けない
+### [2-31] 持ち主を見られる他の利用者は、読めるが書けない
 
 **確認方法:**
 ```powershell
+# 前提：vis_member から admin が見える
+(Send-Json $MemberKey GET "/users/$AdminId.json" $null).Status
 (Send-Json $MemberKey GET "/studio_settings/$PersonalId.json" $null).Status
 (Send-Json $MemberKey PUT "/studio_settings/$PersonalId.json" @{ studio_setting = @{ payload = 'x'; expected_version = 3 } }).Status
 (Send-Json $MemberKey DELETE "/studio_settings/$PersonalId.json" $null).Status
@@ -3496,8 +3510,12 @@ $r.Status; $r.Json.total_count
 ```
 
 **期待結果:**
+- 前提（vis_member から admin が見える）: 200
 - 取得: 200／更新: 403／削除: 403／他人（admin）の分の作成: 403
 - admin で取り直した `version` は 3 のまま（書き込まれていない）
+
+**備考:**
+- vis_member から admin が見えるのは、vis_member のロールの「表示できるユーザー」が「すべてのアクティブなユーザー」のため（admin は vis-proj-a のメンバーではない）。前提が 200 でなければ、テスト用 Redmine のロールの設定を確かめる。持ち主を見られない人の場合は [2-31c]
 
 ### [2-31b] 本人の設定の履歴・割り当ての操作
 
@@ -3535,6 +3553,56 @@ foreach ($k in $ops.Keys) {
 | `users_remove` | 403 | 404（割り当てが無い） |
 
 - 割り当ての件数は 0／`version` は 3 のまま
+
+### [2-31c] 持ち主を見られない人は、本人の設定を読めない
+
+持ち主を見られる人には見え、見られない人（ロック中の持ち主を含む）には、取得・一覧・versions・履歴・割り当てのどこからも見えないことを、両側から確かめる。
+
+**確認方法:**
+```powershell
+foreach ($n in 'LimitedKey', 'HiddenId', 'MemberId') {
+    if (-not (Get-Variable -Name $n -ValueOnly -ErrorAction SilentlyContinue)) { throw "2B の事前準備を先に流す（$n が空）" }
+}
+# 前提：vis_limited から vis_member は見え（同じ vis-proj-a のメンバー）、vis_hidden は見えない（[1-30] の前提）
+(Send-Json $LimitedKey GET "/users/$MemberId.json" $null).Status
+(Send-Json $LimitedKey GET "/users/$HiddenId.json" $null).Status
+$LockedId = @((Send-Json $AdminKey GET '/users.json?status=3&name=vis_locked' $null).Json.users)[0].id
+$LimitedId = (Send-Json $LimitedKey GET '/users/current.json' $null).Json.user.id
+
+# admin が 4 人の分を作る（ほかの項目と重ならない種類で）
+$S = "$T`_c"
+$P = [ordered]@{}
+foreach ($o in [ordered]@{ hidden = $HiddenId; locked = $LockedId; member = $MemberId; limited = $LimitedId }.GetEnumerator()) {
+    $c = Send-Json $AdminKey POST '/studio_settings.json' @{ studio_setting = @{ name = "vis_$($o.Key)"; schema_type = $S; scope_type = 'user'; scope_id = $o.Value; payload = '{}'; schema_version = 1 } }
+    $P[$o.Key] = $c.Json.studio_setting.id
+    "create $($o.Key)=$($c.Status)"
+}
+
+# vis_limited の 1 件取得
+foreach ($k in $P.Keys) { "get $k=$((Send-Json $LimitedKey GET "/studio_settings/$($P[$k]).json" $null).Status)" }
+# vis_limited の一覧・versions：見える 2 件（vis_member・自分）だけが出る
+$l = Send-Json $LimitedKey GET "/studio_settings.json?schema_type=$S&limit=100" $null
+"list $($l.Status) $((@($l.Json.studio_settings).id | Sort-Object) -join ',')"
+$v = Send-Json $LimitedKey POST '/studio_settings/versions.json' @{ ids = @($P.Values) }
+"versions $($v.Status) $((@($v.Json.studio_setting_versions.team).id | Sort-Object) -join ',')"
+"expected $((@($P.member, $P.limited) | Sort-Object) -join ',')"
+# 履歴・割り当ての一覧：vis_limited は見えない持ち主の分を読めず、admin は読める
+"histories limited=$((Send-Json $LimitedKey GET "/studio_settings/$($P.hidden)/histories.json" $null).Status) admin=$((Send-Json $AdminKey GET "/studio_settings/$($P.hidden)/histories.json" $null).Status)"
+"users limited=$((Send-Json $LimitedKey GET "/studio_settings/$($P.hidden)/users.json" $null).Status) admin=$((Send-Json $AdminKey GET "/studio_settings/$($P.hidden)/users.json" $null).Status)"
+# admin は見えない持ち主・ロック中の持ち主の分も読める
+"admin hidden=$((Send-Json $AdminKey GET "/studio_settings/$($P.hidden).json" $null).Status) locked=$((Send-Json $AdminKey GET "/studio_settings/$($P.locked).json" $null).Status)"
+# 後片付け（本人の設定は物理削除）
+foreach ($k in $P.Keys) { "delete $k=$((Send-Json $AdminKey DELETE "/studio_settings/$($P[$k]).json" $null).Status)" }
+```
+
+**期待結果:**
+- 前提: vis_member は 200、vis_hidden は 404。`$LockedId` が取れている（空でない）
+- 作成: 4 件とも 201
+- vis_limited の取得: hidden 403／locked 403／member 200／limited（自分）200
+- 一覧・versions: どちらも 200 で、出る id が `expected` と同じ（vis_member と自分の 2 件だけ）
+- 履歴・割り当ての一覧: vis_limited 403／admin 200
+- admin の取得: hidden 200／locked 200
+- 後片付け: 4 件とも 204
 
 ### [2-32] 持ち主が違えば同じ種類を作れる・admin は他人の分も書ける
 
@@ -3630,11 +3698,9 @@ $r.Status
 $own.Count; $own[0].id; $own[0].schema_type; $own[0].version
 $team.Count; ($team.id | Sort-Object) -join ','
 ($team | Where-Object id -eq $TeamId).version; ($team | Where-Object id -eq $MemberPersonalId).version
-# updated_on は単体取得と同じ文字列（ConvertFrom-Json は日時に変えるので、生の本文で比べる）
-$g = Send-Json $AdminKey GET "/studio_settings/$TeamId.json" $null
-$vu = [regex]::Match($r.Raw, "`"id`":$TeamId,`"version`":\d+,`"updated_on`":`"([^`"]+)`"").Groups[1].Value
-$gu = [regex]::Match($g.Raw, "`"updated_on`":`"([^`"]+)`"").Groups[1].Value
-($vu -ne '') -and ($vu -eq $gu)
+# 版と id だけを返す（変わったかどうかは版で見るので、更新の時刻は返さない）
+($team | ForEach-Object { ($_.PSObject.Properties.Name | Sort-Object) -join ',' } | Sort-Object -Unique) -join ';'
+$r.Raw -match 'updated_on'
 $r.Raw -match 'payload'
 ```
 
@@ -3644,7 +3710,8 @@ $r.Raw -match 'payload'
 - `own` は 1 件（`$PersonalId`・`$T`・版 3）。無い種類・他人（member）の同じ種類は返らない
 - `team` は 2 件（`$MemberPersonalId` と `$TeamId`。小さい順）。無い id・論理削除した id は返らない。本人の設定でも `ids` で頼めば返る
 - `team` の版は `$TeamId` が 2、`$MemberPersonalId` が 2
-- `updated_on` が単体取得と同じ（True）
+- `team` の要素の項目は `id,version` だけ
+- `updated_on` を含まない（False）
 - `payload` を含まない（False）
 
 ### [2-35b] versions：読めない依頼は 422、明示の空は 200、包んでもよい
@@ -3682,14 +3749,14 @@ $w.Status; @($w.Json.studio_setting_versions.own).id; @($w.Json.studio_setting_v
 
 **確認方法:**
 ```powershell
-# 2B の ProjA 設定（$projASettingId）は非メンバーには見えない。本人の設定（$PersonalId）はログインしていれば誰でも見える
-$r = Send-Json $NonMemberKey POST '/studio_settings/versions.json' @{ ids = @($projASettingId, $TeamId, $PersonalId) }
+# 2B の ProjA 設定（$projASettingId）は非メンバーには見えない。本人の設定が見える人に絞られることは [2-31c]
+$r = Send-Json $NonMemberKey POST '/studio_settings/versions.json' @{ ids = @($projASettingId, $TeamId) }
 $r.Status; (@($r.Json.studio_setting_versions.team).id | Sort-Object) -join ','
 (Invoke-WebRequest -Uri "{BaseUrl}/studio_settings/versions.json" -Method POST -ContentType 'application/json' -Body '{"own":["x"]}' -SkipHttpErrorCheck).StatusCode
 ```
 
 **期待結果:**
-- 非メンバー: 200・`team` は `$PersonalId` と `$TeamId` の 2 件（小さい順。`$projASettingId` は返らない）
+- 非メンバー: 200・`team` は `$TeamId` の 1 件（`$projASettingId` は返らない）
 - API キーなし: 401
 
 ### [2-37] 一覧の ids フィルタ
