@@ -39,18 +39,26 @@ class StudioSetting < ActiveRecord::Base
   scope :deleted, -> { where.not(deleted_on: nil) }
 
   # global は全ログインユーザーに可視。project は当該プロジェクトのメンバーのみ。
-  # user は、持ち主が Redmine で見える人（User.visible。本人を含む）だけ。admin は全件。
+  # user は、その人から持ち主が Redmine で見えるもの（visible_owners）だけ。admin は全件。
   scope :visible, ->(user = User.current) {
     next all if user&.admin?
 
     project_ids = user ? user.projects.pluck(:id) : []
     # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）。
     # ほかの表と結合しても列がぶつからないよう、表の名前を付ける
-    owner_ids_sql = user&.logged? ? User.visible(user).where(type: 'User').select(:id).to_sql : 'SELECT -1'
     where("#{table_name}.scope_type = ? OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (?))" \
-          " OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (#{owner_ids_sql}))",
-          SCOPE_GLOBAL, SCOPE_PROJECT, project_ids.presence || [-1], SCOPE_USER)
+          " OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (?))",
+          SCOPE_GLOBAL, SCOPE_PROJECT, project_ids.presence || [-1], SCOPE_USER, visible_owners(user).select(:id))
   }
+
+  # その人から Redmine で見える利用者（User.visible。本人を含み、有効な人だけ）。本人の設定を読めるかはこれで決める。
+  # User.visible は匿名ユーザーも返しうるので、利用者（type 'User'）に絞る。
+  # ログインしていなければ誰も見えない（User.none は Rails 6.1 で IN () という壊れた SQL になるので、1 = 0 で空にする）
+  def self.visible_owners(user)
+    return User.where('1 = 0') unless user&.logged?
+
+    User.visible(user).where(type: 'User')
+  end
 
   before_validation :sync_owner_id
   before_create :set_timestamps
@@ -83,8 +91,8 @@ class StudioSetting < ActiveRecord::Base
   def visible?(user = User.current)
     return true if user&.admin?
     return true if scope_type == SCOPE_GLOBAL
-    # 本人の設定は、持ち主が Redmine で見える人だけ（見えない人の名前と中身を出さない）
-    return user.present? && user.logged? && User.visible(user).where(type: 'User', id: scope_id).exists? if user_scope?
+    # 本人の設定は、その人から持ち主が Redmine で見えるときだけ（見えない持ち主の、設定の名前と中身を出さない）
+    return self.class.visible_owners(user).where(id: scope_id).exists? if user_scope?
 
     project_scope? && scope_id.present? && user&.member_of?(Project.find_by(id: scope_id))
   end

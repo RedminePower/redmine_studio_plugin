@@ -50,7 +50,7 @@ Visibility is determined by `scope_type`. Login is required for all endpoints. `
 | `user` | Users who can see the owner (including the owner) | The owner (the user in `scope_id`) |
 | (admin) | All settings (any scope) | All settings (any scope) |
 
-- `GET /studio_settings` (list) returns only visible settings (`project`-scoped settings are excluded for non-members). `user`-scoped settings are visible only to users who can see the owner (following the "Users visibility" of Redmine roles); settings of owners the requester cannot see are not listed (and showing one returns 403). Users who can see the owner can read them in bulk through the list. Do not put values in a `user`-scoped payload that others must not see (passwords, tokens, etc.).
+- `GET /studio_settings` (list) returns only visible settings (`project`-scoped settings are excluded for non-members). `user`-scoped settings are visible only to users who can see the owner (following the "Users visibility" of Redmine roles); settings of owners the requester cannot see are not listed (and showing one returns 403). Users who can see the owner can read them in bulk through the list. Settings of locked or not-yet-activated owners can be read only by admins (Redmine shows only active users). Do not put values in a `user`-scoped payload that others must not see (passwords, tokens, etc.).
 - Accessing an individual setting, its history, or its user assignments (show/create/update/delete/restore) that the user cannot read or write returns **403 Forbidden**.
 - A `project`-scoped setting can only be created by a member of that project (or an admin). Only an admin can change the scope of a setting on update (`scope_type`, and `scope_id` for a `project`-scoped setting); others get 403, because the contents of earlier versions would become visible to the new scope. To change the scope, create the setting again in the new scope. `scope_id` must be the ID of an existing project (a missing or unknown ID returns 422 for an admin and 403 for others). `global` settings can be created by any logged-in user. For the `user` scope, see "Personal settings (user scope)" below.
 - `GET /users/:id/studio_settings` is allowed only when `:id` is the requester themselves or an admin (otherwise 403).
@@ -334,7 +334,7 @@ Response:
       { "id": 5, "schema_type": "work_settings", "version": 3 }
     ],
     "team": [
-      { "id": 12, "version": 7, "updated_on": "2026-02-19T..." }
+      { "id": 12, "version": 7 }
     ]
   }
 }
