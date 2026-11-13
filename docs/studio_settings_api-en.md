@@ -415,7 +415,7 @@ Response:
 
 ### POST /studio_settings/:id/users/:user_id
 
-Add a user to the assignment. Returns existing assignment if already exists. A user who cannot be assigned (not visible, not existing, not active, or not a member for a `project`-scoped setting) returns 422. `user`-scoped settings cannot be assigned (422).
+Add a user to the assignment (201). If the user is already assigned, nothing changes and the existing assignment is returned (200; also when the same request arrives at almost the same time, the assignment written first is returned with 200). A user who cannot be assigned (not visible, not existing, not active, or not a member for a `project`-scoped setting) returns 422. `user`-scoped settings cannot be assigned (422).
 
 Response (201 Created):
 

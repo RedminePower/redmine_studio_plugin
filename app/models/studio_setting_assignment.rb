@@ -13,6 +13,34 @@ class StudioSettingAssignment < ActiveRecord::Base
 
   before_create :set_assigned_on
 
+  # 割り当てる。もう割り当て済みなら、何もせず今ある割り当てを返す（同じ依頼を何度送っても同じ結果になるように）。
+  # 戻り値は [割り当て, 新しく作ったか]。検証で断られたときは、保存していない割り当て（errors 付き）を返す。
+  # 設定の行を押さえてから確かめる（同時の割り当て・置き換えと順に処理する）。
+  # 押さえが効かない DB で、確かめてから書くまでの間にほかの依頼が先に書いたときも、今ある割り当てを返す
+  def self.assign(setting, user_id, assigned_by)
+    assign_locked(setting, user_id, assigned_by)
+  rescue ActiveRecord::RecordNotUnique
+    # 書く時点で、DB の重複禁止の索引に断られた（取引は巻き戻っているので、外で読み直す）
+    [setting.assignments.find_by!(user_id: user_id), false]
+  end
+
+  def self.assign_locked(setting, user_id, assigned_by)
+    setting.with_lock do
+      existing = setting.assignments.find_by(user_id: user_id)
+      next [existing, false] if existing
+
+      assignment = new(setting: setting, user_id: user_id, assigned_by: assigned_by)
+      next [assignment, true] if assignment.save
+
+      # 検証の間に先に書かれた（重複で断られた）。上と同じ問い合わせなので、覚えておいた「無し」を使わずに読み直す
+      if assignment.errors.of_kind?(:user_id, :taken)
+        existing = uncached { setting.assignments.find_by(user_id: user_id) }
+      end
+      existing ? [existing, false] : [assignment, false]
+    end
+  end
+  private_class_method :assign_locked
+
   def as_json(options = {})
     result = {
       id: id,

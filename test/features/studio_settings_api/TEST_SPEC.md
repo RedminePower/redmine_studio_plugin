@@ -257,7 +257,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 - バッチ 1: [1-1] ～ [1-12] を1つのスクリプトにまとめて実行（設定・割り当て基本機能）
 - バッチ 2: [1-13] ～ [1-29] を1つのスクリプトにまとめて実行（履歴機能）
 - バッチ 3: [1-30] ～ [1-35] を1つのスクリプトにまとめて実行（可視性・属性名の翻訳）
-- バッチ 4: [1-36] ～ [1-50] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証、割り当ての相手）
+- バッチ 4: [1-36] ～ [1-51] を1つのスクリプトにまとめて実行（本人の設定と版、利用者・プロジェクトの削除の後片付け、入力の検証、割り当ての相手、割り当ての重複）
 
 ### フェーズ 2: HTTP テスト
 
@@ -966,7 +966,7 @@ nonmember.password, nonmember.password_confirmation = 'password123', 'password12
 nonmember.status = User::STATUS_ACTIVE
 nonmember.save
 
-# 割り当ての相手の確かめ用（[1-50]・[2-22b]）
+# 割り当ての相手の確かめ用（[1-50]・[1-51]・[2-22b]）
 # vis_limited：「表示できるユーザー」を絞ったロールだけを持つ人。vis_hidden：どのプロジェクトにも入っていない（vis_limited からは見えない）。vis_locked：ロック中
 limited_role = Role.find_by(name: 'Vis Limited') || Role.create(name: 'Vis Limited', users_visibility: 'members_of_visible_projects', permissions: [:view_issues])
 def upsert_user(login, status)
@@ -1116,7 +1116,7 @@ puts en_ok
 
 ## 1C. 本人の設定と版・入力の検証（Runner テスト）
 
-user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-50]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
+user スコープ（本人の設定）と版（`version`）、利用者・プロジェクトを削除したときの後片付け、入力の検証（長さ・プロジェクトの実在・comment）を、モデルと DB で確かめる。**バッチ 4**（[1-36]〜[1-51]）としてまとめて実行する。バッチ 3（[1-30]）が作る `vis_member` / `vis_nonmember` を使うので、バッチ 3 の後に流す。各テストは `schema_type` に毎回違う値（`SecureRandom.hex`）を使い、最後に作ったデータを消すので、何度流してもよい。
 
 ### [1-36] studio_settings の version / owner_id 列
 
@@ -1598,6 +1598,89 @@ StudioSetting.where(schema_type: t).destroy_all
 
 **期待結果:**
 - `true` が 10 回
+
+### [1-51] 割り当ては何度送っても同じ結果（同時に届いて先に書かれた場合も、今ある割り当てを返す）
+
+同時に届いた同じ依頼が「確かめてから書くまでの間」に先に書く場面を作る。
+先に書いた依頼の行（割り当てた人は vis_member）を、次の 2 か所で差し込む。
+
+- 検証の前：保存の途中で行を差し込む。検証の重複の確かめで断られる
+- 書く時点：DB の重複禁止の索引で断られると取引が巻き戻り、同じ取引で差し込んだ行も消える。そのため、行は先に書いておく。そのうえで、書く処理（`assign_locked`）が索引で断られたことにして作る
+
+**確認方法:**
+```ruby
+admin = User.find_by_login('{Username}')
+User.current = admin
+member = User.find_by_login('vis_member')
+limited = User.find_by_login('vis_limited')
+t = "rt_assign_race_#{SecureRandom.hex(4)}"
+g = StudioSetting.create!(name: 'g', schema_type: t, scope_type: 'global', schema_version: 0, created_by: admin, updated_by: admin)
+first_writer = ->(uid) { StudioSettingAssignment.insert_all([{ setting_id: g.id, user_id: uid, assigned_by_id: member.id, assigned_on: Time.current }]) }
+
+# 検証の前に行を差し込む仕掛け
+$ssa_inject = nil
+StudioSettingAssignment.class_eval do
+  def ssa_test_inject
+    f = $ssa_inject
+    $ssa_inject = nil
+    f&.call
+  end
+end
+StudioSettingAssignment.set_callback(:validation, :before, :ssa_test_inject)
+# 書く処理が、DB の索引で断られたことにする仕掛け（1 回だけ）
+$ssa_not_unique = false
+StudioSettingAssignment.singleton_class.prepend(Module.new do
+  def assign_locked(*args)
+    if $ssa_not_unique
+      $ssa_not_unique = false
+      raise ActiveRecord::RecordNotUnique, 'simulated'
+    end
+    super
+  end
+end)
+
+begin
+  # 1 回目は作る、2 回目は今ある割り当てを返す
+  a1, c1 = StudioSettingAssignment.assign(g, member.id, admin)
+  a2, c2 = StudioSettingAssignment.assign(g, member.id, admin)
+  puts a1.persisted? && c1 == true && a2.id == a1.id && c2 == false
+
+  # 検証の前に先に書かれた → 検証の重複で断られるが、先に書かれた割り当てを返す
+  $ssa_inject = -> { first_writer.(admin.id) }
+  a3, c3 = StudioSettingAssignment.assign(g, admin.id, admin)
+  puts a3.persisted? && c3 == false && a3.assigned_by_id == member.id
+
+  # 書く時点で DB の索引に断られた → 先に書かれた割り当てを返す
+  first_writer.(limited.id)
+  $ssa_not_unique = true
+  a4, c4 = StudioSettingAssignment.assign(g, limited.id, admin)
+  # 仕掛けが使われた（索引で断られた道を通った）ことも確かめる
+  puts a4.persisted? && c4 == false && a4.assigned_by_id == member.id && $ssa_not_unique == false
+
+  # 本物の DB の索引も、検証を通さない重複を RecordNotUnique で断る
+  raised = false
+  begin
+    StudioSettingAssignment.new(setting: g, user_id: member.id, assigned_by: admin).save(validate: false)
+  rescue ActiveRecord::RecordNotUnique
+    raised = true
+  end
+  puts raised
+
+  # 割り当ての行は 1 人 1 行のまま
+  puts g.assignments.group(:user_id).count.values.uniq == [1] && g.assignments.count == 3
+
+  # 重複でない理由で断られたときは、保存していない割り当てを返す（今までどおり 422 になる）
+  a5, c5 = StudioSettingAssignment.assign(g, 999_999, admin)
+  puts a5.new_record? && c5 == false && a5.errors.of_kind?(:user_id, :user_not_found)
+ensure
+  StudioSettingAssignment.skip_callback(:validation, :before, :ssa_test_inject)
+  $ssa_not_unique = false
+  StudioSetting.where(schema_type: t).destroy_all
+end
+```
+
+**期待結果:**
+- `true` が 6 回
 
 ---
 
@@ -4078,7 +4161,7 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
    - バッチ 1: [1-1]～[1-12] 基本機能（12件）
    - バッチ 2: [1-13]～[1-29] 履歴機能（17件）
    - バッチ 3: [1-30]～[1-35] 可視性（Runner）・属性名の翻訳。[1-30] が前提データを作成し member_key / nonmember_key / proj_a / proj_b / member_id / limited_key / hidden_id / nonmember_user_id を出力する
-   - バッチ 4: [1-36]～[1-50] 本人の設定と版、削除の後片付け、入力の検証、割り当ての相手（Runner）。バッチ 3 の後に流す
+   - バッチ 4: [1-36]～[1-51] 本人の設定と版、削除の後片付け、入力の検証、割り当ての相手・重複（Runner）。バッチ 3 の後に流す
 3. フェーズ 2: HTTP テスト実行
    - [2-1]～[2-7]: 基本機能
    - [2-8]～[2-13]: 履歴機能
