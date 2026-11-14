@@ -70,7 +70,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 ### フェーズ 2: 機能テスト（バッチ 2～4）
 
-自動クローズ機能の動作を確認する。テストデータをセットアップ後、以下のバッチ単位で実行する。
+自動クローズ機能の動作を確認する。「2. 機能テスト」の「テストデータ」のセットアップを流してから、以下のバッチ単位で実行する。バッチ 3 のあと（バッチ 4 より前）に後片付けを流す。
 
 **バッチ 2: 全子チケット終了時（[2-A] ～ [2-D]）**
 - [2-A] 基本動作テスト
@@ -242,8 +242,83 @@ puts en_ok
 **トラッカー:**
 - 既存のトラッカーを使用
 
-**ステータス:**
-- 既存の「新規」「終了」ステータスを使用
+**ステータス・トラッカーの選び方:**
+- 既存のものを使う。英語で作った環境でも同じに流せるように、名前では探さず、並び順で選ぶ。この仕様書の「新規」「進行中」「終了」「バグ」「機能」は、次のものを指す
+
+```ruby
+status_new = IssueStatus.where(is_closed: false).sorted.first          # 「新規」
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second # 「進行中」
+status_closed = IssueStatus.where(is_closed: true).sorted.first        # 「終了」
+bug = Tracker.sorted.first                                             # 「バグ」
+feature = Tracker.sorted.second                                        # 「機能」
+```
+
+**ルールの作り方:**
+- テストで作るルールのタイトルは `AC-Test` で始める（後片付けで消すため）。1 つのテストが終わったら、そのテストで作ったルールを消す（`begin`〜`ensure`）。ルールは全体に効くので、残すと次のテストの結果が変わる
+- ほかのデータ（同じ環境のほかのプロジェクトのチケット）に当たらないように、プロジェクトを条件にしないルールにも、テスト用プロジェクトを `project_ids` に入れる。プロジェクトを試すテスト（[2-B-1]〜[2-B-3]・[2-F-1]・[2-F-2]）は書いてある `project_ids` のまま作り、[2-B-3]（未指定）は、題名のパターンでそのテストのチケットだけに当てる
+- 期限切れの「処理される／されない」は、`check_expired` を実行して、チケットが変わったか（または `find_expired_issues` に入るか）で見る
+
+**セットアップ（バッチ 2 の前に 1 回）:**
+
+前回の残りを消してから作る。最後の行に、作った物の番号を JSON で出す。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+projects = %w[auto-close-test-1 auto-close-test-2]
+logins = %w[autoclose-testuser1 autoclose-testuser2 autoclose-testuser3]
+fields = %w[AutoClose_BoolField AutoClose_UserField]
+# 前回の残りを消す
+AutoClose.where('title LIKE ?', 'AC-Test%').destroy_all
+Project.where(identifier: projects).order(lft: :desc).each(&:destroy)
+User.where(login: logins).each(&:destroy)
+IssueCustomField.where(name: fields).each(&:destroy)
+Role.where('name LIKE ?', 'AutoClose-Test-%').each(&:destroy)
+
+trackers = Tracker.sorted.to_a
+# 担当者にできるロール（名前で探さず、ここで作る）
+role = Role.create!(name: "AutoClose-Test-#{SecureRandom.hex(3)}", assignable: true,
+                    permissions: %i[view_issues add_issues edit_issues add_issue_notes])
+users = logins.map do |login|
+  u = User.new(firstname: 'AutoClose', lastname: login, mail: "#{login}@example.com")
+  u.login = login
+  u.password = u.password_confirmation = "#{SecureRandom.hex(12)}Aa1!"
+  u.save!
+  u
+end
+# testuser1・2 は両方のプロジェクトのメンバー。testuser3 はどこのメンバーにもしない
+prs = projects.map do |identifier|
+  pr = Project.new(name: identifier, identifier: identifier, is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = trackers
+  pr.save!
+  users[0, 2].each { |u| Member.create!(project: pr, principal: u, roles: [role]) }
+  pr
+end
+# カスタムフィールドはテスト用プロジェクトだけで使う
+bool_cf = IssueCustomField.create!(name: fields[0], field_format: 'bool', is_for_all: false,
+                                   trackers: trackers, projects: prs)
+user_cf = IssueCustomField.create!(name: fields[1], field_format: 'user', is_for_all: false,
+                                   trackers: trackers, projects: prs)
+puts({ Project1Id: prs[0].id, Project2Id: prs[1].id, User1Id: users[0].id, User2Id: users[1].id,
+       User3Id: users[2].id, BoolFieldId: bool_cf.id, UserFieldId: user_cf.id }.to_json)
+```
+
+**後片付け（バッチ 3 のあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+AutoClose.where('title LIKE ?', 'AC-Test%').destroy_all
+Project.where(identifier: %w[auto-close-test-1 auto-close-test-2]).order(lft: :desc).each(&:destroy)
+User.where(login: %w[autoclose-testuser1 autoclose-testuser2 autoclose-testuser3]).each(&:destroy)
+IssueCustomField.where(name: %w[AutoClose_BoolField AutoClose_UserField]).each(&:destroy)
+Role.where('name LIKE ?', 'AutoClose-Test-%').each(&:destroy)
+puts [AutoClose.where('title LIKE ?', 'AC-Test%'), Project.where('identifier LIKE ?', 'auto-close-test-%'),
+      User.where('login LIKE ?', 'autoclose-testuser%'), IssueCustomField.where(name: %w[AutoClose_BoolField AutoClose_UserField]),
+      Role.where('name LIKE ?', 'AutoClose-Test-%')].all?(&:none?)
+```
+
+**期待結果:** `true` が出力される
 
 ---
 
@@ -570,7 +645,7 @@ puts ac.valid? # true
 ```ruby
 # nil の場合（after_initialize で 50 にデフォルト設定されるため有効）
 # 期限切れのルールは条件が 1 つは要るので、trigger_tracker を付ける
-ac = AutoClose.new(title: 'Test', trigger_type: 'expired', trigger_tracker: Tracker.first.id, action_status: 1, action_user: 'author', max_issues_per_run: nil)
+ac = AutoClose.new(title: 'Test', trigger_type: 'expired', trigger_tracker: Tracker.sorted.first.id, action_status: IssueStatus.where(is_closed: true).sorted.first.id, action_user: 'author', max_issues_per_run: nil)
 puts ac.valid? # true（max_issues_per_run は 50 になる）
 
 # 0の場合
@@ -919,6 +994,8 @@ docker exec -i -u redmine -w /usr/src/redmine {Container} sh -c '<手順に書�
 
 - root が要るのは、`/etc/cron.d` を書く・消すときと、cron を入れる・動かすときだけ（`-u` を付けない）
 - 「crontab が入っている環境」は、root で `apt-get update && apt-get install -y cron` を実行して作る
+- 実行した利用者の crontab は、この章の最初に `crontab -l` で中身を控え、この章の最後に戻す（もともと無かったら `crontab -r`）。この章で足した `/etc/cron.d` のファイルも消す。[2-I-1b] で毎分の行を入れるので、cron が動いている環境で残すと、毎分 `check_expired` が動く
+- コンテナに `TZ` が設定されていると（`docker exec {Container} printenv TZ` で出る）、install はその値を行に付ける。「`TZ` を付けずに」と書いた手順は、`env -u TZ` を前に付けて実行する
 - install は統合済みの旧プラグインのフォルダを消すので、`plugins` の中を `redmine` 利用者が書き換えられない環境では権限のエラーになる。そのときは `plugins` の持ち主を確かめる
 
 **cron が動いているかの確かめ方:**
@@ -950,7 +1027,7 @@ docker exec {Container} ps -o pid,stat,comm -C cron
 
 **備考:**
 - install タスクは旧プラグイン削除、DB マイグレーション、cron 登録を一括で行う
-- 登録した cron エントリはテスト後も削除しない
+- 登録した cron エントリは、この章の最後に、章の最初の crontab に戻す
 
 ### [2-I-1d] crontab が入っていない環境（公式 Docker イメージのまま）
 
@@ -972,7 +1049,7 @@ docker exec {Container} ps -o pid,stat,comm -C cron
    ```bash
    echo "* * * * * cd /usr/src/redmine && bundle exec rake redmine_studio_plugin:auto_close:check_expired RAILS_ENV=production >> log/auto_close.log 2>&1" | crontab -
    ```
-2. `bundle exec rake redmine_studio_plugin:install` を実行
+2. `TZ` を付けずに `bundle exec rake redmine_studio_plugin:install` を実行
 3. `crontab -l` で cron の内容を確認
 4. 登録された行の時刻より後ろを、cron と同じ条件で実行する:
    ```bash
@@ -991,6 +1068,7 @@ docker exec {Container} ps -o pid,stat,comm -C cron
 **条件:**
 - [2-I-1b] の後（実行した利用者の crontab に、この Redmine の行がある）
 - OS の時間帯の設定（`/etc/localtime`）が UTC
+- 日本時間の 0:00〜9:00 以外に行うときは、下の `Asia/Tokyo` と「日本時間」を、そのとき UTC と日付が違う時間帯（例: UTC の 0:00〜5:00 なら `America/New_York`）に読み替える
 
 **手順:**
 1. `TZ=Asia/Tokyo bundle exec rake redmine_studio_plugin:install` を実行し、`crontab -l` で確認
@@ -998,6 +1076,7 @@ docker exec {Container} ps -o pid,stat,comm -C cron
 3. 期日が「日本時間の昨日」のチケットと「日本時間の今日」のチケットを、期限切れのルールの対象にして用意する
 4. 登録された行の時刻より後ろを、cron と同じ条件で実行する（[2-I-1b] の手順 4 と同じ）。日本時間と UTC で日付が違う時間帯（日本時間の 0:00〜9:00）に行う
 5. `TZ` を付けずに `bundle exec rake redmine_studio_plugin:install` を実行し、`crontab -l` で確認
+6. 3 で用意したチケットとルールを消す
 
 **期待結果:**
 - 1: ログに「Removed: <TZ の無い行>」と「Registered in the crontab of user ...: <新しい行>」が出力され、行に `TZ=Asia/Tokyo` が含まれる
@@ -1011,17 +1090,17 @@ docker exec {Container} ps -o pid,stat,comm -C cron
 - [2-I-1b] の後（実行した利用者の crontab に、この Redmine の行がある）
 
 **手順:**
-1. root で、`/etc/cron.d/redmine_auto_close` に、この Redmine の行（利用者の欄つき）を書く
+1. root で、`/etc/cron.d/redmine_studio_plugin_test` に、この Redmine の行（利用者の欄つき）を書く（もとからあるファイルを上書きしないように、テスト用の名前にする）
 2. 実行した利用者の crontab に、別の Redmine の行を足す（例: `cd /other/redmine && bundle exec rake redmine_studio_plugin:auto_close:check_expired`）
 3. `bundle exec rake redmine_studio_plugin:install` を実行
 4. `crontab -l` で cron の内容を確認
 
 **期待結果:**
-- ログに「Removed: <この Redmine の行>」「Already registered in /etc/cron.d/redmine_auto_close: ...」「Not added to the crontab of user ...」が出力される
+- ログに「Removed: <この Redmine の行>」「Already registered in /etc/cron.d/redmine_studio_plugin_test: ...」「Not added to the crontab of user ...」が出力される
 - crontab には別の Redmine の行だけが残っている
 
 **後片づけ:**
-- `/etc/cron.d/redmine_auto_close` と、足した別の Redmine の行を消し、[2-I-1] の状態に戻す（install を再実行）
+- `/etc/cron.d/redmine_studio_plugin_test` と、足した別の Redmine の行を消し、[2-I-1] の状態に戻す（install を再実行）
 
 ### [2-I-1a] install タスクによる旧 cron エントリの削除
 
@@ -1113,7 +1192,8 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 
 ### テストデータの管理
 
-- テストデータ（「2. 機能テスト」の「テストデータ」に挙げたプロジェクト・ユーザー・カスタムフィールドと、テストで作ったルール）は、セットアップの最初に前回の残りを消してから作り、バッチ 3 のあと（バッチ 4 の uninstall より前）に消す。何度流しても同じ結果になるようにするため
+- テストデータ（「2. 機能テスト」の「テストデータ」に挙げたプロジェクト・ユーザー・カスタムフィールド・ロールと、テストで作ったルール）は、セットアップの最初に前回の残りを消してから作り、バッチ 3 のあと（バッチ 4 の uninstall より前）の後片付けで消す。何度流しても同じ結果になるようにするため
+- もとからあるルール・プロジェクト・チケットは使わず、変えない
 - 既存のトラッカー・ステータスは使うだけで、変えない
 
 ### Runner テスト実行時の注意事項

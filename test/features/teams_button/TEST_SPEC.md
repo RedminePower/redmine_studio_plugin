@@ -169,7 +169,7 @@ $loginPage = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable session -U
 $csrfMatch = [regex]::Match($loginPage.Content, 'name="authenticity_token" value="([^"]+)"')
 $csrfToken = $csrfMatch.Groups[1].Value
 $body = "authenticity_token=$([System.Web.HttpUtility]::UrlEncode($csrfToken))&username={Username}&password={Password}"
-Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded"
+Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded" | Out-Null
 $response = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/1" -WebSession $session
 $response.email
 ```
@@ -183,7 +183,13 @@ $response.email
 
 **確認方法:**
 ```powershell
-# [2-1] と同じセッションを使用
+# [2-1] と同じ手順でログインする（試験は 1 つずつでも流せるように）
+$BaseUrl = "{BaseUrl}"
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$loginPage = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable session -UseBasicParsing
+$csrfToken = [regex]::Match($loginPage.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([System.Web.HttpUtility]::UrlEncode($csrfToken))&username={Username}&password={Password}"
+Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded" | Out-Null
 $response = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/99999" -WebSession $session
 $response.email -eq $null
 ```
@@ -194,8 +200,8 @@ $response.email -eq $null
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "$BaseUrl/teams_button/user_email/1" -MaximumRedirection 0 -ErrorAction SilentlyContinue
-$response.StatusCode
+# リダイレクトを止めると例外になる版がある（PowerShell 7）ので、例外のときは例外から状態コードを読む
+try { (Invoke-WebRequest -Uri "{BaseUrl}/teams_button/user_email/1" -MaximumRedirection 0 -ErrorAction Stop).StatusCode } catch { [int]$_.Exception.Response.StatusCode }
 ```
 
 **期待結果:** 302（ログインページへリダイレクト）

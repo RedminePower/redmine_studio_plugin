@@ -64,7 +64,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 ### フェーズ 3: HTTP テスト
 
-- [3-1] で有効にした状態で、[2-1] 〜 [2-3] を実行する
+- [2-1] 〜 [2-3] を実行する。用意で「背景色を変える」を有効にし、後片付けで元に戻す（[3-1] の状態に頼らない）
 
 ### フェーズ 4: ブラウザテスト（色の選択・無効化・再オープン）
 
@@ -75,14 +75,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 ## 1. Runner テスト
 
-共通の準備:
-
-```ruby
-B = RedmineStudioPlugin::StatusBackground::StyleBuilder
-open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
-closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
-statuses = [open_status, closed_status]
-```
+[1-3] 〜 [1-9] は、各試験の頭で、試験用のステータス（ID 901 の終了扱いでないもの・ID 902 の終了扱いのもの。DB には保存しない）を作る。
 
 ### [1-1] フック登録確認
 
@@ -106,7 +99,12 @@ puts defaults['status_background_custom_colors'] == {}
 ### [1-3] 有効にして色を選んでいないと、終了扱いだけ薄いグレー
 
 ```ruby
-puts B.css({ 'status_background_enabled' => 'true' }, statuses)
+# 試験用のステータス（DB には保存しない）
+b = RedmineStudioPlugin::StatusBackground::StyleBuilder
+open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
+closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
+statuses = [open_status, closed_status]
+puts b.css({ 'status_background_enabled' => 'true' }, statuses)
 ```
 
 **期待結果:** `div.issue.details.status-902 { background-color: #f2f2f2; border-color: #d5d5d5; }` の1行だけ（status-901 は出ない）
@@ -116,9 +114,14 @@ puts B.css({ 'status_background_enabled' => 'true' }, statuses)
 この機能より前に設定を保存した環境では、`status_background_enabled` のキーが無い。入れただけ・上げただけで全員の画面が変わらないよう、どちらも無効にする。
 
 ```ruby
-puts B.enabled?({ 'status_background_enabled' => false })
-puts B.enabled?({ 'subtask_list_accordion_expand_all' => false })
-puts B.css({ 'subtask_list_accordion_expand_all' => false }, statuses).empty?
+# 試験用のステータス（DB には保存しない）
+b = RedmineStudioPlugin::StatusBackground::StyleBuilder
+open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
+closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
+statuses = [open_status, closed_status]
+puts b.enabled?({ 'status_background_enabled' => false })
+puts b.enabled?({ 'subtask_list_accordion_expand_all' => false })
+puts b.css({ 'subtask_list_accordion_expand_all' => false }, statuses).empty?
 ```
 
 **期待結果:** `false`、`false`、`true`
@@ -126,7 +129,12 @@ puts B.css({ 'subtask_list_accordion_expand_all' => false }, statuses).empty?
 ### [1-5] 無効にすると CSS を出さない
 
 ```ruby
-puts B.css({ 'status_background_enabled' => 'false' }, statuses).empty?
+# 試験用のステータス（DB には保存しない）
+b = RedmineStudioPlugin::StatusBackground::StyleBuilder
+open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
+closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
+statuses = [open_status, closed_status]
+puts b.css({ 'status_background_enabled' => 'false' }, statuses).empty?
 ```
 
 **期待結果:** `true`
@@ -134,9 +142,14 @@ puts B.css({ 'status_background_enabled' => 'false' }, statuses).empty?
 ### [1-6] 候補の色と「変えない」
 
 ```ruby
+# 試験用のステータス（DB には保存しない）
+b = RedmineStudioPlugin::StatusBackground::StyleBuilder
+open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
+closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
+statuses = [open_status, closed_status]
 settings = { 'status_background_enabled' => 'true',
              'status_background_colors' => { '901' => '#e8f1fb', '902' => '' } }
-puts B.css(settings, statuses)
+puts b.css(settings, statuses)
 ```
 
 **期待結果:** `div.issue.details.status-901 { background-color: #e8f1fb; border-color: #ccd4dd; }` の1行だけ（終了扱いでも「変えない」なら出ない）
@@ -144,10 +157,15 @@ puts B.css(settings, statuses)
 ### [1-7] 色を指定
 
 ```ruby
+# 試験用のステータス（DB には保存しない）
+b = RedmineStudioPlugin::StatusBackground::StyleBuilder
+open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
+closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
+statuses = [open_status, closed_status]
 settings = { 'status_background_enabled' => 'true',
              'status_background_colors' => { '902' => 'custom' },
              'status_background_custom_colors' => { '902' => '#FFE8CC' } }
-puts B.color_for(settings, closed_status)
+puts b.color_for(settings, closed_status)
 ```
 
 **期待結果:** `#ffe8cc`
@@ -155,12 +173,17 @@ puts B.color_for(settings, closed_status)
 ### [1-8] 形の正しくない値は使わない
 
 ```ruby
+# 試験用のステータス（DB には保存しない）
+b = RedmineStudioPlugin::StatusBackground::StyleBuilder
+open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
+closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
+statuses = [open_status, closed_status]
 settings = { 'status_background_enabled' => 'true',
              'status_background_colors' => { '901' => 'red; } body { display: none', '902' => 'custom' },
              'status_background_custom_colors' => { '902' => 'red' } }
-puts B.color_for(settings, open_status).inspect
-puts B.color_for(settings, closed_status)
-puts B.css(settings, statuses).include?('body')
+puts b.color_for(settings, open_status).inspect
+puts b.color_for(settings, closed_status)
+puts b.css(settings, statuses).include?('body')
 ```
 
 **期待結果:** `nil`、`#f2f2f2`（指定した色が正しくないときは薄いグレー）、`false`
@@ -168,9 +191,14 @@ puts B.css(settings, statuses).include?('body')
 ### [1-9] 設定画面の選択肢の初期値
 
 ```ruby
-puts B.choice_for({}, open_status).inspect
-puts B.choice_for({}, closed_status)
-puts B.custom_color_for({}, closed_status)
+# 試験用のステータス（DB には保存しない）
+b = RedmineStudioPlugin::StatusBackground::StyleBuilder
+open_status = IssueStatus.new(name: 'open'); open_status.id = 901; open_status.is_closed = false
+closed_status = IssueStatus.new(name: 'closed'); closed_status.id = 902; closed_status.is_closed = true
+statuses = [open_status, closed_status]
+puts b.choice_for({}, open_status).inspect
+puts b.choice_for({}, closed_status)
+puts b.custom_color_for({}, closed_status)
 ```
 
 **期待結果:** `""`、`#f2f2f2`、`#f2f2f2`
@@ -179,20 +207,83 @@ puts B.custom_color_for({}, closed_status)
 
 ## 2. HTTP テスト
 
-事前に、管理者でログインしたセッションを作る（ログイン画面の `authenticity_token` を取り、`{Username}` / `{Password}` で POST する）。以下の `$session` はそのセッション。
+**実行方法:** 各ブロックを PowerShell で流す。各ブロックの頭で、管理者でログインしたセッション（`$session`）を作る（ログイン画面の `authenticity_token` を取り、`{Username}` / `{Password}` で POST する）。
+
+**用意（HTTP テストの前に 1 回）:**
+終了扱いのステータスのチケットを Runner で作り、「背景色を変える」を有効にする（前回の残りがあれば、先に設定を戻してから消す）。
+そのステータスの色の選択は外して、初期の色（薄いグレー）にする。変える前の設定は、作ったプロジェクトの説明に控えておき、後片付けで戻す。
+最後の行の `ClosedIssueId`・`ClosedStatusId` を、各試験の `{ClosedIssueId}`・`{ClosedStatusId}` に入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+keys = %w[status_background_enabled status_background_colors]
+# 前回の残りがあれば、いちばん古いものに控えた設定に戻してから消す
+left = Project.where('identifier LIKE ?', 'sb-http-%').order(:id).to_a
+if left.any?
+  s = Setting.plugin_redmine_studio_plugin.to_h.dup
+  JSON.parse(left.first.description).each { |k, v| v.nil? ? s.delete(k) : s[k] = v }
+  Setting.plugin_redmine_studio_plugin = s
+  left.each(&:destroy)
+end
+current = Setting.plugin_redmine_studio_plugin.to_h
+saved = keys.to_h { |k| [k, current.key?(k) ? current[k] : nil] }
+sfx = SecureRandom.hex(3)
+closed = IssueStatus.where(is_closed: true).order(:position).first
+pr = Project.new(name: "SB_HTTP_#{sfx}", identifier: "sb-http-#{sfx}", description: saved.to_json)
+pr.enabled_module_names = %w[issue_tracking]
+pr.trackers = [Tracker.first]
+pr.save!
+issue = Issue.create!(project: pr, tracker: pr.trackers.first, subject: "SB_HTTP_closed_#{sfx}", author: admin)
+# ワークフローに左右されないよう、ステータスは直接書く
+Issue.where(id: issue.id).update_all(status_id: closed.id)
+s = Setting.plugin_redmine_studio_plugin.to_h.dup
+colors = (s['status_background_colors'] || {}).to_h.dup
+colors.delete(closed.id.to_s)
+s['status_background_enabled'] = 'true'
+s['status_background_colors'] = colors
+Setting.plugin_redmine_studio_plugin = s
+puts({ ClosedIssueId: issue.id, ClosedStatusId: closed.id }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+設定を、用意で控えた値に戻してから消す（ほかの項目は今の値のまま）。
+
+```ruby
+User.current = User.find(1)
+left = Project.where('identifier LIKE ?', 'sb-http-%').order(:id).to_a
+if left.any?
+  s = Setting.plugin_redmine_studio_plugin.to_h.dup
+  JSON.parse(left.first.description).each { |k, v| v.nil? ? s.delete(k) : s[k] = v }
+  Setting.plugin_redmine_studio_plugin = s
+  left.each(&:destroy)
+end
+puts Project.where('identifier LIKE ?', 'sb-http-%').count
+```
+
+**期待結果（後片付け）:** `0`。「背景色を変える」と色の選択が、用意の前の値に戻っている
 
 ### [2-1] 終了扱いのチケットの詳細画面に CSS が入る
 
 ```powershell
-$html = (Invoke-WebRequest -Uri '{BaseUrl}/issues/{終了扱いのチケットID}' -WebSession $session -UseBasicParsing).Content
-$html -match 'div\.issue\.details\.status-\d+ \{ background-color: #f2f2f2;'
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{Username}'; password = '{Password}' } | Out-Null
+$html = (Invoke-WebRequest -Uri '{BaseUrl}/issues/{ClosedIssueId}' -WebSession $session -UseBasicParsing).Content
+$html -match 'div\.issue\.details\.status-{ClosedStatusId} \{ background-color: #f2f2f2;'
+$html -match '<div class="issue [^"]*\bstatus-{ClosedStatusId}\b[^"]*\bclosed\b[^"]*\bdetails\b'
 ```
 
-**期待結果:** `True`。`div.issue` に `closed` と `status-{ID}` のクラスが付いている
+**期待結果:** 両方 `True`。`div.issue` に `closed` と `status-{ClosedStatusId}` のクラスが付いている
 
 ### [2-2] チケット一覧には CSS を入れない
 
 ```powershell
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{Username}'; password = '{Password}' } | Out-Null
 $html = (Invoke-WebRequest -Uri '{BaseUrl}/issues' -WebSession $session -UseBasicParsing).Content
 $html -match 'div\.issue\.details\.status-'
 ```
@@ -202,6 +293,10 @@ $html -match 'div\.issue\.details\.status-'
 ### [2-3] 設定画面に項目が出る
 
 ```powershell
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{Username}'; password = '{Password}' } | Out-Null
 $html = (Invoke-WebRequest -Uri '{BaseUrl}/settings/plugin/redmine_studio_plugin' -WebSession $session -UseBasicParsing).Content
 $html -match 'id="status_background_settings"'
 $html -match 'settings\[status_background_colors\]\[\d+\]'

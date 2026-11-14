@@ -73,39 +73,8 @@ API は JSON と XML の両方をサポートする。
 ## テスト前提条件
 
 - features 配下の共通事前条件（統合プラグインの無効化）に従う。詳細は `test/README.md`。
-- HTTP テストの一部はテキスト変換結果を検証する。`#NNN` チケットリンクの確認には
-  **閲覧可能なチケットが 1 件以上存在すること**が前提（既定では `#1` と `project_id=1` を使用。
-  環境に存在するチケット ID／プロジェクト ID に合わせて調整する）。
-- `ref_issues` マクロ展開（[2-12]）には **`redmine_studio_plugin` が有効**で、対象プロジェクト
-  （既定 `test-plugin`）に**チケットと wiki モジュール**があること。
-- 「このページのプロジェクト」の解決（[2-19]・[2-20]）には、`test-plugin` の**プロジェクト ID**（`{TestPluginProjectId}`）を使う。
-  また `test-plugin` **以外のプロジェクトにも閲覧できるチケットがあること**（なければ絞り込みの有無で件数が変わらず、判定できない）。
-  Runner で確認する:
-
-  ```ruby
-  p = Project.find_by(identifier: 'test-plugin')
-  others = Issue.visible(User.find_by(admin: true)).where.not(project_id: p.id).count
-  puts "TEST_PLUGIN_PROJECT_ID=#{p.id} OTHER_ISSUES=#{others}"   # OTHER_ISSUES が 1 以上であること
-  ```
-- 可視性 404（[2-15]）の検証には、以下のインフラデータを作成する（命名 `wikipreview_*`／再利用・削除しない）。
-  Runner で作成する（`rails runner`）:
-
-  ```ruby
-  # 非 admin ユーザー（API キー付き）
-  login = 'wikipreview_user'
-  user = User.find_by(login: login) || begin
-    u = User.new(login: login, firstname: 'WikiPreview', lastname: 'Tester', mail: 'wikipreview_tester@example.com')
-    u.admin = false; u.status = User::STATUS_ACTIVE
-    u.password = 'password123'; u.password_confirmation = 'password123'
-    u.must_change_passwd = false; u.save; u
-  end
-  token = Token.find_by(user_id: user.id, action: 'api') || Token.create(user: user, action: 'api')
-  # 非公開プロジェクト（user は非メンバー → 閲覧不可）
-  proj = Project.find_by(identifier: 'wikipreview-private') ||
-         Project.create(name: 'WikiPreview Private', identifier: 'wikipreview-private', is_public: false)
-  puts "API_KEY=#{token.value}"            # 非 admin ユーザーの API キー
-  puts "PRIVATE_PROJECT_ID=#{proj.id}"     # 閲覧不可プロジェクト ID
-  ```
+- HTTP テストで使うデータ（プロジェクト・チケット・非 admin ユーザーなど）は、「2. HTTP テスト」の用意で作り、後片付けで消す。
+  前からある Redmine のデータには頼らない。
 
 ---
 
@@ -215,6 +184,54 @@ puts themes.any? ? "PASS (themes=#{themes.inspect}, current=#{Setting.ui_theme.i
 PowerShell で各エンドポイントに POST リクエストを送信する。API キー認証が必要。
 JSON ボディは `ConvertTo-Json` で生成し、`-ContentType 'application/json'` を指定する。
 
+**用意（HTTP テストの前に 1 回）:**
+試験に使うデータを Runner で作る（前回の残りがあれば先に消す）。
+- このページのプロジェクト（チケット 2 件・wiki あり）と、その外のプロジェクト（チケット 1 件）
+- 非 admin ユーザー（API キー付き）と、その人がメンバーでない非公開プロジェクト
+
+最後の行の値を、各試験の `{ProjectId}`・`{ProjectIdentifier}`・`{IssueId}`・`{UserApiKey}`・`{PrivateProjectId}` に入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+Project.where('identifier LIKE ?', 'wpv-%').order(lft: :desc).each(&:destroy)
+User.where('login LIKE ?', 'wpv_%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+tracker = Tracker.first
+mk_project = ->(name, modules) {
+  pr = Project.new(name: "WPV_#{name}_#{sfx}", identifier: "wpv-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = modules
+  pr.trackers = [tracker]
+  pr.save!
+  pr
+}
+mk_issue = ->(pr, subject) {
+  Issue.create!(project: pr, tracker: tracker, subject: "WPV_#{subject}_#{sfx}", author: admin,
+                status: IssueStatus.first, priority: IssuePriority.default || IssuePriority.active.first)
+}
+page = mk_project.call('page', %w[issue_tracking wiki])
+issue = mk_issue.call(page, 'a')
+mk_issue.call(page, 'b')
+other = mk_project.call('other', %w[issue_tracking])
+mk_issue.call(other, 'c')
+private_project = mk_project.call('private', %w[issue_tracking])
+user = User.new(login: "wpv_user_#{sfx}", firstname: 'WPV', lastname: 'User', mail: "wpv_user_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+user.password = user.password_confirmation = 'password123'
+user.save!
+token = Token.create!(user: user, action: 'api')
+puts({ ProjectId: page.id, ProjectIdentifier: page.identifier, IssueId: issue.id, UserApiKey: token.value, PrivateProjectId: private_project.id }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+Project.where('identifier LIKE ?', 'wpv-%').order(lft: :desc).each(&:destroy)
+User.where('login LIKE ?', 'wpv_%').each(&:destroy)
+puts 'cleaned'
+```
+
 ### [2-0a] 未認証（匿名）は 401 で拒否される（login_required 無効環境でも）
 
 **確認方法:**
@@ -236,7 +253,7 @@ try {
 
 **確認方法:**
 ```powershell
-$body = @{ text = 'h1. Test'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = 'h1. Test'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.StatusCode
 ```
@@ -250,7 +267,7 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$body = @{ text = 'h1. Test'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = 'h1. Test'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.xml' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.StatusCode
 ```
@@ -264,7 +281,7 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$body = @{ text = 'h1. Test'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = 'h1. Test'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.wiki_preview.html -ne $null
 ```
@@ -280,7 +297,7 @@ $response.wiki_preview.html -ne $null
 
 **確認方法:**
 ```powershell
-$body = @{ text = '# Heading'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = '# Heading'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.wiki_preview.html -match '<h1'
 ```
@@ -294,7 +311,7 @@ $response.wiki_preview.html -match '<h1'
 
 **確認方法:**
 ```powershell
-$body = @{ text = "* Item 1`n* Item 2"; project_id = 1 } | ConvertTo-Json
+$body = @{ text = "* Item 1`n* Item 2"; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.wiki_preview.html -match '<li>'
 ```
@@ -306,17 +323,17 @@ $response.wiki_preview.html -match '<li>'
 
 ### [2-6] project コンテキストでチケットリンクが展開される
 
-**前提条件:** 閲覧可能なチケットが存在すること（既定 `#1`／`project_id=1`。環境に合わせて調整）。
+**前提条件:** 用意で作ったチケット（`{IssueId}`）とプロジェクト（`{ProjectId}`）を使う。
 
 **確認方法:**
 ```powershell
-$body = @{ text = 'ref #1'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = 'ref #{IssueId}'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.wiki_preview.html -match 'class="issue'
 ```
 
 **期待結果:**
-- `#1` が `<a class="issue" ...>` リンクに展開される
+- `#{IssueId}` が `<a class="issue" ...>` リンクに展開される
 
 ---
 
@@ -324,7 +341,7 @@ $response.wiki_preview.html -match 'class="issue'
 
 **確認方法:**
 ```powershell
-$body = @{ text = ''; project_id = 1 } | ConvertTo-Json
+$body = @{ text = ''; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.wiki_preview.html -eq ''
 ```
@@ -352,7 +369,7 @@ $response.wiki_preview.html -match '<h1'
 
 **確認方法:**
 ```powershell
-$body = @{ project_id = 1 } | ConvertTo-Json
+$body = @{ project_id = {ProjectId} } | ConvertTo-Json
 try {
     Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 } catch {
@@ -386,7 +403,7 @@ try {
 
 **確認方法:**
 ```powershell
-$body = @{ text = 'h1. Test'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = 'h1. Test'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.xml' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 ($response.Content -match '<wiki_preview>') -and ($response.Content -match '<html>')
 ```
@@ -401,11 +418,11 @@ $response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.xml' -Method Post -Bo
 `ref_issues` は内部で `issues/_list` パーシャルを描画する。format 固定が効いていれば
 マクロが展開され、効いていないと `Missing partial` のエラー表示になる。
 
-**前提条件:** `redmine_studio_plugin` 有効・対象プロジェクト（`test-plugin`）にチケットあり。
+**前提条件:** `redmine_studio_plugin` 有効・用意で作ったプロジェクト（`{ProjectIdentifier}`）にチケットあり。
 
 **確認方法:**
 ```powershell
-$body = @{ text = '{{ref_issues(-p=test-plugin, -n=3, id, subject)}}'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = '{{ref_issues(-p={ProjectIdentifier}, -n=3, id, subject)}}'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 ($response.wiki_preview.html -match '/issues/') -and ($response.wiki_preview.html -notmatch 'Error executing')
 ```
@@ -417,11 +434,11 @@ $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -B
 
 ### [2-13] Wiki リンク `[[ページ]]` が展開される
 
-**前提条件:** 対象プロジェクト（`project_id=1`）に wiki モジュールが有効。
+**前提条件:** 用意で作ったプロジェクト（`{ProjectId}`）に wiki モジュールが有効。
 
 **確認方法:**
 ```powershell
-$body = @{ text = '[[TestLink]]'; project_id = 1 } | ConvertTo-Json
+$body = @{ text = '[[TestLink]]'; project_id = {ProjectId} } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.wiki_preview.html -match 'class="wiki-page'
 ```
@@ -433,11 +450,11 @@ $response.wiki_preview.html -match 'class="wiki-page'
 
 ### [2-14] 非 admin ユーザーの API キーでも利用できる
 
-**前提条件:** テスト前提条件の `wikipreview_user`（非 admin・API キー）を作成済み。
+**前提条件:** 用意で作った非 admin ユーザー（API キー `{UserApiKey}`）を使う。
 
 **確認方法:**
 ```powershell
-# {UserApiKey} = wikipreview_user の API キー
+# {UserApiKey} = 用意で作った非 admin ユーザーの API キー
 $body = @{ text = '# Hi' } | ConvertTo-Json
 $response = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{UserApiKey}'}
 $response.wiki_preview.html -match '<h1'
@@ -453,12 +470,12 @@ $response.wiki_preview.html -match '<h1'
 `Project.visible.find` により、存在しても閲覧不可なプロジェクトは 404 になることを確認する。
 （[2-10] は「存在しない ID」、本ケースは「存在するが閲覧不可」を検証）
 
-**前提条件:** テスト前提条件の `wikipreview_user`（非 admin）と非公開 `wikipreview-private`
-（`{PrivateProjectId}`）を作成済み。`wikipreview_user` は当該プロジェクトの非メンバー。
+**前提条件:** 用意で作った非 admin ユーザー（`{UserApiKey}`）と非公開プロジェクト（`{PrivateProjectId}`）を使う。
+そのユーザーは当該プロジェクトの非メンバー。
 
 **確認方法:**
 ```powershell
-# {UserApiKey} = wikipreview_user の API キー、{PrivateProjectId} = wikipreview-private の ID
+# {UserApiKey} = 用意で作った非 admin ユーザーの API キー、{PrivateProjectId} = 用意で作った非公開プロジェクトの ID
 $body = @{ text = '# Hi'; project_id = {PrivateProjectId} } | ConvertTo-Json
 try {
     Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers @{'X-Redmine-API-Key'='{UserApiKey}'}
@@ -536,25 +553,25 @@ $response = Invoke-WebRequest -Uri '{BaseUrl}/wiki_preview.xml' -Method Post -Bo
 Wiki に貼ったときの `{{ref_issues(-p)}}` は、貼ったページのプロジェクトに絞られる。プレビューでも
 `project_id` のプロジェクトを「このページのプロジェクト」として同じ結果になることを確認する。
 
-**前提条件:** テスト前提条件の `{TestPluginProjectId}` を確認済み・`test-plugin` 以外にもチケットがある。
+**前提条件:** 用意で作ったプロジェクト（`{ProjectId}`）と、その外のプロジェクトのチケットを使う（外にチケットが無いと、絞り込みの有無で件数が変わらず判定できない）。
 
 **確認方法:**
 ```powershell
 $h = @{'X-Redmine-API-Key'='{ApiKey}'}
 $count = {
   param($text)
-  $body = @{ text = $text; project_id = {TestPluginProjectId} } | ConvertTo-Json
+  $body = @{ text = $text; project_id = {ProjectId} } | ConvertTo-Json
   $r = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
   $r.wiki_preview.html -replace '<[^>]+>', '' -replace '\s', ''
 }
 $current = & $count '{{ref_issues(-p, -c)}}'
-$named   = & $count '{{ref_issues(-p=test-plugin, -c)}}'
+$named   = & $count '{{ref_issues(-p={ProjectIdentifier}, -c)}}'
 "current=$current named=$named"
 ($current -match '^\d+$') -and ($current -eq $named)
 ```
 
 **期待結果:**
-- `-p`（プロジェクト名なし）の件数が `-p=test-plugin` の件数と同じ（すべてのプロジェクトの件数にならない）
+- `-p`（プロジェクト名なし）の件数が `-p={ProjectIdentifier}` の件数（2）と同じ（すべてのプロジェクトの件数にならない）
 
 ---
 
@@ -565,10 +582,10 @@ $named   = & $count '{{ref_issues(-p=test-plugin, -c)}}'
 **確認方法:**
 ```powershell
 $h = @{'X-Redmine-API-Key'='{ApiKey}'}
-$body = @{ text = '{{ref_issues(-f:project_id=[current_project_id], -c)}}'; project_id = {TestPluginProjectId} } | ConvertTo-Json
+$body = @{ text = '{{ref_issues(-f:project_id=[current_project_id], -c)}}'; project_id = {ProjectId} } | ConvertTo-Json
 $r = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
 $current = $r.wiki_preview.html -replace '<[^>]+>', '' -replace '\s', ''
-$body = @{ text = '{{ref_issues(-f:project_id={TestPluginProjectId}, -c)}}'; project_id = {TestPluginProjectId} } | ConvertTo-Json
+$body = @{ text = '{{ref_issues(-f:project_id={ProjectId}, -c)}}'; project_id = {ProjectId} } | ConvertTo-Json
 $r = Invoke-RestMethod -Uri '{BaseUrl}/wiki_preview.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
 $named = $r.wiki_preview.html -replace '<[^>]+>', '' -replace '\s', ''
 "current=$current named=$named"
@@ -576,7 +593,7 @@ $named = $r.wiki_preview.html -replace '<[^>]+>', '' -replace '\s', ''
 ```
 
 **期待結果:**
-- エラー（`Error executing`）にならず、件数がプロジェクトの番号をじかに書いた `-f:project_id={TestPluginProjectId}` の件数と同じ（`-p` と違い、子プロジェクトのチケットは含まない）
+- エラー（`Error executing`）にならず、件数がプロジェクトの番号をじかに書いた `-f:project_id={ProjectId}` の件数と同じ（`-p` と違い、子プロジェクトのチケットは含まない）
 
 ---
 

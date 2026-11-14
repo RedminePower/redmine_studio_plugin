@@ -205,15 +205,42 @@ puts result&.id == 1 ? 'PASS' : "FAIL: Expected user_id=1, got #{result&.id.insp
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)  # admin
-target = User.where(type: 'User').where.not(id: 1).first
-unless target
-  puts 'SKIP: no non-admin user available'
-else
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  target = mk_user.call('target')
   controller = CacheBundlesController.new
   controller.params = ActionController::Parameters.new(user_id: target.id.to_s)
   result = controller.send(:resolve_target_user)
   puts result&.id == target.id ? 'PASS' : "FAIL: Expected user_id=#{target.id}, got #{result&.id.inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -239,33 +266,101 @@ puts result == expected ? 'PASS' : "FAIL: Expected '#{expected}', got '#{result}
 
 ### [1-7] fetch_projects が target_user 可視のプロジェクトを返す（Project.visible スコープ）
 
+見えるはずのプロジェクトを 1 つ、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_projects, admin)
-expected_count = Project.visible(admin).count
-puts result.size == expected_count ? 'PASS' : "FAIL: Expected #{expected_count}, got #{result.size}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  pr = mk_project.call('Vis')
+  admin = User.find(1)
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_projects, admin)
+  expected_count = Project.visible(admin).count
+  ok = result.size == expected_count && result.any? { |h| h[:id] == pr.id }
+  puts ok ? 'PASS' : "FAIL: Expected #{expected_count} (incl. #{pr.id}), got #{result.size}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- `Project.visible(target_user)` と同じ件数が取得される（個別 API と同等の可視性スコープ）
+- `PASS`（`Project.visible(target_user)` と同じ件数で、作ったプロジェクトを含む。個別 API と同等の可視性スコープ）
 
 ---
 
 ### [1-8] fetch_projects が必須フィールドを含む
 
+確かめるプロジェクトを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_projects, admin)
-sample = result.first
-required = [:id, :name, :identifier, :status, :is_public, :trackers, :enabled_modules, :issue_categories, :time_entry_activities, :issue_custom_fields]
-missing = required - sample.keys
-puts missing.empty? ? 'PASS' : "FAIL: Missing keys: #{missing.join(', ')}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  pr = mk_project.call('Keys')
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_projects, User.find(1))
+  sample = result.find { |h| h[:id] == pr.id }
+  required = [:id, :name, :identifier, :status, :is_public, :trackers, :enabled_modules, :issue_categories, :time_entry_activities, :issue_custom_fields]
+  missing = sample ? required - sample.keys : required
+  puts missing.empty? ? 'PASS' : "FAIL: Missing keys: #{missing.join(', ')}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -280,31 +375,73 @@ puts missing.empty? ? 'PASS' : "FAIL: Missing keys: #{missing.join(', ')}"
 Redmine 7.0 以降はコアの個別 API が include を権限でゲートするため（`issue_categories` /
 `issue_custom_fields` は `view_issues`、`time_entry_activities` は `view_time_entries`）、期待値も
 同じゲートを掛ける（権限が無いプロジェクトは空配列。6.1 以前は無ゲートで常に返す）。
+is_for_all の CF とプロジェクトに紐付けた CF を持つプロジェクトを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_projects, admin)
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  # is_for_all の CF と、プロジェクトに紐付けた CF を持つプロジェクトを作る
+  pr = mk_project.call('Inc', {}, %w[issue_tracking time_tracking])
+  cf_all = IssueCustomField.create!(name: "CBS_IncAll_#{sfx}", field_format: 'string', is_for_all: true, tracker_ids: pr.tracker_ids)
+  made_cfs << cf_all
+  cf_own = IssueCustomField.create!(name: "CBS_IncOwn_#{sfx}", field_format: 'string', is_for_all: false, tracker_ids: pr.tracker_ids, project_ids: [pr.id])
+  made_cfs << cf_own
+  admin = User.find(1)
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_projects, admin)
 
-gate = Redmine::VERSION::MAJOR >= 7 # 7.0 以降のみコアが include を権限でゲートする
-ok = true
-Project.visible(admin).each do |p|
-  row = result.find { |h| h[:id] == p.id }
-  next if row.nil?
-  cf = row[:issue_custom_fields].map { |x| x[:id] }.sort
-  exp_cf = (gate && !admin.allowed_to?(:view_issues, p)) ? [] : p.all_issue_custom_fields.map(&:id).sort
-  act = row[:time_entry_activities].map { |x| x[:id] }.sort
-  exp_act = (gate && !admin.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
-  tr = row[:trackers].map { |x| x[:id] }.sort
-  exp_tr = p.rolled_up_trackers(false).visible(admin).map(&:id).sort
-  if cf != exp_cf || act != exp_act || tr != exp_tr
-    ok = false
-    puts "FAIL project=#{p.id} cf=#{cf}/#{exp_cf} act=#{act}/#{exp_act} tr=#{tr}/#{exp_tr}"
+  gate = Redmine::VERSION::MAJOR >= 7 # 7.0 以降のみコアが include を権限でゲートする
+  ok = true
+  Project.visible(admin).each do |p|
+    row = result.find { |h| h[:id] == p.id }
+    next if row.nil?
+    cf = row[:issue_custom_fields].map { |x| x[:id] }.sort
+    exp_cf = (gate && !admin.allowed_to?(:view_issues, p)) ? [] : p.all_issue_custom_fields.map(&:id).sort
+    act = row[:time_entry_activities].map { |x| x[:id] }.sort
+    exp_act = (gate && !admin.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
+    tr = row[:trackers].map { |x| x[:id] }.sort
+    exp_tr = p.rolled_up_trackers(false).visible(admin).map(&:id).sort
+    if cf != exp_cf || act != exp_act || tr != exp_tr
+      ok = false
+      puts "FAIL project=#{p.id} cf=#{cf}/#{exp_cf} act=#{act}/#{exp_act} tr=#{tr}/#{exp_tr}"
+    end
   end
+  # 作ったプロジェクトに、2 つの CF・トラッカー・活動が出ている（空どうしの一致で通らない）
+  mine = result.find { |h| h[:id] == pr.id }
+  mine_ok = mine && ([cf_all.id, cf_own.id] - mine[:issue_custom_fields].map { |x| x[:id] }).empty? && mine[:trackers].any? && mine[:time_entry_activities].any?
+  puts "FAIL: 作ったプロジェクトの行 #{mine.inspect}" unless mine_ok
+  puts (ok && mine_ok) ? 'PASS' : 'FAIL: 埋め込み includes が render_api_includes と不一致'
+ensure
+  cleanup.call
 end
-puts ok ? 'PASS' : 'FAIL: 埋め込み includes が render_api_includes と不一致'
 ```
 
 **期待結果:**
@@ -346,22 +483,67 @@ puts result.size == expected_count ? 'PASS' : "FAIL: Expected #{expected_count},
 ### [1-11] fetch_custom_fields は non-admin で CustomField.visible に一致する
 
 非 admin は `CustomField.visible`（visible=true の CF＋自分のロールに紐づく role 限定 CF）に絞る。
+見える範囲が限られた非 admin と、その人のロールに紐づかない role 限定 CF を、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-# 可視性が制限された非 admin（全件が見えるユーザだと制限を行使できないため CustomField.visible < 全件 を選ぶ）
-non_admin = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
-  CustomField.visible(u).count < CustomField.count
-end
-non_admin ||= User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).first
-unless non_admin
-  puts 'SKIP: no non-admin user available'
-else
-  User.current = non_admin
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+# 見える範囲が限られた非 admin（limited）と、その人から見えない物（hidden・g_out・cf_gated）を作る
+mk_restricted = -> {
+  role = mk_role.call('limited', [:view_issues], users_visibility: 'members_of_visible_projects')
+  other_role = mk_role.call('other', [:view_issues])
+  pr = mk_project.call('Lim')
+  limited = mk_user.call('limited')
+  Member.create!(principal: limited, project: pr, roles: [role])
+  hidden = mk_user.call('hidden')  # どのプロジェクトのメンバーでもない
+  g_in = mk_group.call('Gin')      # limited のプロジェクトのメンバーのグループ
+  g_in.users << limited
+  Member.create!(principal: g_in, project: pr, roles: [role])
+  g_out = mk_group.call('Gout')    # どのプロジェクトのメンバーでもないグループ
+  g_out.users << hidden
+  cf_gated = IssueCustomField.create!(name: "CBS_Gated_#{sfx}", field_format: 'string', visible: false, role_ids: [other_role.id])
+  made_cfs << cf_gated
+  { limited: User.find(limited.id), hidden: hidden, g_in: g_in, g_out: g_out, cf_gated: cf_gated }
+}
+begin
+  User.current = User.find(1)
+  d = mk_restricted.call
+  u = d[:limited]
+  User.current = u
   controller = CacheBundlesController.new
   result_ids = controller.send(:fetch_custom_fields).map { |h| h[:id] }.sort
-  expected_ids = CustomField.visible(non_admin).pluck(:id).sort
-  puts result_ids == expected_ids ? 'PASS' : "FAIL: got #{result_ids}, expected #{expected_ids}"
+  expected_ids = CustomField.visible(u).pluck(:id).sort
+  # 制限が実際に効いている（見えない CF がある）ことも確かめる
+  ok = result_ids == expected_ids && !result_ids.include?(d[:cf_gated].id) && expected_ids.size < CustomField.count
+  puts ok ? 'PASS' : "FAIL: got #{result_ids}, expected #{expected_ids}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -373,22 +555,66 @@ end
 ### [1-12] fetch_users は non-admin で User.visible に一致する
 
 非 admin は `User.visible`（自分＋可視プロジェクトのメンバー、または users_visibility='all' ロールで全 active）に絞る。
+見える範囲が限られた非 admin と、どのプロジェクトのメンバーでもない（その人から見えない）ユーザを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-total = User.where(type: 'User', status: User::STATUS_ACTIVE).count
-non_admin = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
-  User.visible(u).where(type: 'User').count < total
-end
-non_admin ||= User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).first
-unless non_admin
-  puts 'SKIP: no non-admin user available'
-else
-  User.current = non_admin
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+# 見える範囲が限られた非 admin（limited）と、その人から見えない物（hidden・g_out・cf_gated）を作る
+mk_restricted = -> {
+  role = mk_role.call('limited', [:view_issues], users_visibility: 'members_of_visible_projects')
+  other_role = mk_role.call('other', [:view_issues])
+  pr = mk_project.call('Lim')
+  limited = mk_user.call('limited')
+  Member.create!(principal: limited, project: pr, roles: [role])
+  hidden = mk_user.call('hidden')  # どのプロジェクトのメンバーでもない
+  g_in = mk_group.call('Gin')      # limited のプロジェクトのメンバーのグループ
+  g_in.users << limited
+  Member.create!(principal: g_in, project: pr, roles: [role])
+  g_out = mk_group.call('Gout')    # どのプロジェクトのメンバーでもないグループ
+  g_out.users << hidden
+  cf_gated = IssueCustomField.create!(name: "CBS_Gated_#{sfx}", field_format: 'string', visible: false, role_ids: [other_role.id])
+  made_cfs << cf_gated
+  { limited: User.find(limited.id), hidden: hidden, g_in: g_in, g_out: g_out, cf_gated: cf_gated }
+}
+begin
+  User.current = User.find(1)
+  d = mk_restricted.call
+  u = d[:limited]
+  User.current = u
   controller = CacheBundlesController.new
   result_ids = controller.send(:fetch_users).map { |h| h[:id] }.sort
-  expected_ids = User.visible(non_admin).where(type: 'User').pluck(:id).sort
-  puts result_ids == expected_ids ? 'PASS' : "FAIL: got #{result_ids.size} ids, expected #{expected_ids.size} (#{(expected_ids - result_ids).inspect} / #{(result_ids - expected_ids).inspect})"
+  expected_ids = User.visible(u).where(type: 'User').pluck(:id).sort
+  ok = result_ids == expected_ids && !result_ids.include?(d[:hidden].id)
+  puts ok ? 'PASS' : "FAIL: got #{result_ids.size} ids, expected #{expected_ids.size} (#{(expected_ids - result_ids).inspect} / #{(result_ids - expected_ids).inspect})"
+ensure
+  cleanup.call
 end
 ```
 
@@ -400,26 +626,70 @@ end
 ### [1-13] fetch_groups は non-admin で Group.givable.visible に一致する
 
 非 admin は `Group.givable.visible` に絞り、各グループのメンバーも可視ユーザ集合と交差する。
+見える範囲が限られた非 admin と、その人のプロジェクトのメンバーのグループ・どこのメンバーでもないグループを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-non_admin = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
-  Group.givable.visible(u).count < Group.givable.count
-end
-non_admin ||= User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).first
-unless non_admin
-  puts 'SKIP: no non-admin user available'
-else
-  User.current = non_admin
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+# 見える範囲が限られた非 admin（limited）と、その人から見えない物（hidden・g_out・cf_gated）を作る
+mk_restricted = -> {
+  role = mk_role.call('limited', [:view_issues], users_visibility: 'members_of_visible_projects')
+  other_role = mk_role.call('other', [:view_issues])
+  pr = mk_project.call('Lim')
+  limited = mk_user.call('limited')
+  Member.create!(principal: limited, project: pr, roles: [role])
+  hidden = mk_user.call('hidden')  # どのプロジェクトのメンバーでもない
+  g_in = mk_group.call('Gin')      # limited のプロジェクトのメンバーのグループ
+  g_in.users << limited
+  Member.create!(principal: g_in, project: pr, roles: [role])
+  g_out = mk_group.call('Gout')    # どのプロジェクトのメンバーでもないグループ
+  g_out.users << hidden
+  cf_gated = IssueCustomField.create!(name: "CBS_Gated_#{sfx}", field_format: 'string', visible: false, role_ids: [other_role.id])
+  made_cfs << cf_gated
+  { limited: User.find(limited.id), hidden: hidden, g_in: g_in, g_out: g_out, cf_gated: cf_gated }
+}
+begin
+  User.current = User.find(1)
+  d = mk_restricted.call
+  u = d[:limited]
+  User.current = u
   controller = CacheBundlesController.new
   result = controller.send(:fetch_groups)
   result_ids = result.map { |h| h[:id] }.sort
-  expected_ids = Group.givable.visible(non_admin).pluck(:id).sort
+  expected_ids = Group.givable.visible(u).pluck(:id).sort
   # メンバーが可視ユーザ集合の部分集合であること（不可視ユーザを漏らさない）
-  visible_uids = User.visible(non_admin).where(type: 'User').pluck(:id).to_set
-  leaked = result.flat_map { |h| h[:users].map { |u| u[:id] } }.reject { |id| visible_uids.include?(id) }
-  ok = result_ids == expected_ids && leaked.empty?
+  visible_uids = User.visible(u).where(type: 'User').pluck(:id).to_set
+  leaked = result.flat_map { |h| h[:users].map { |x| x[:id] } }.reject { |id| visible_uids.include?(id) }
+  ok = result_ids == expected_ids && leaked.empty? && result_ids.include?(d[:g_in].id) && !result_ids.include?(d[:g_out].id)
   puts ok ? 'PASS' : "FAIL: ids got #{result_ids}/exp #{expected_ids}, leaked_members=#{leaked.inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -431,41 +701,110 @@ end
 ### [1-13-2] fetch_groups はビルトイングループを除外する
 
 個別 API (GET /groups.json) は builtin=1 指定時以外ビルトイングループ（Anonymous / Non member）を除外する。
-cache_bundle も `Group.givable` に揃える。
+cache_bundle も `Group.givable` に揃える。ふつうのグループを 1 つ、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-User.current = User.where(admin: true).first
-controller = CacheBundlesController.new
-result = controller.send(:fetch_groups)
-ids = result.map { |g| g[:id] }
-builtin_ids = Group.where.not(type: 'Group').pluck(:id)
-overlap = ids & builtin_ids
-puts overlap.empty? ? 'PASS' : "FAIL: builtin group(s) included: #{overlap}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  g = mk_group.call('Plain')
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_groups)
+  ids = result.map { |x| x[:id] }
+  builtin_ids = Group.where.not(type: 'Group').pluck(:id)
+  overlap = ids & builtin_ids
+  ok = overlap.empty? && builtin_ids.any? && ids.include?(g.id)
+  puts ok ? 'PASS' : "FAIL: builtin=#{builtin_ids} overlap=#{overlap} plain_included=#{ids.include?(g.id)}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- 返却されるグループにビルトイングループ（type != 'Group'）が含まれない
+- `PASS`（返却されるグループにビルトイングループ（type != 'Group'）が含まれず、作ったふつうのグループは含まれる）
 
 ---
 
 ### [1-14] fetch_roles の permissions が文字列配列である
 
+permissions を持つロールを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-controller = CacheBundlesController.new
-result = controller.send(:fetch_roles)
-sample = result.find { |r| r[:permissions].is_a?(Array) && r[:permissions].any? }
-if sample.nil?
-  puts 'FAIL: No role with permissions found'
-else
-  all_strings = sample[:permissions].all? { |p| p.is_a?(String) }
-  puts all_strings ? 'PASS' : "FAIL: permissions contain non-string values: #{sample[:permissions].map(&:class).uniq.inspect}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  r = mk_role.call('Perm', [:view_issues, :add_issues])
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_roles)
+  sample = result.find { |x| x[:id] == r.id }
+  if sample.nil?
+    puts 'FAIL: created role not found'
+  else
+    all_strings = sample[:permissions].is_a?(Array) && sample[:permissions].all? { |x| x.is_a?(String) }
+    ok = all_strings && sample[:permissions].sort == %w[add_issues view_issues]
+    puts ok ? 'PASS' : "FAIL: permissions=#{sample[:permissions].inspect}"
+  end
+ensure
+  cleanup.call
 end
 ```
 
 **期待結果:**
-- permissions を含むロールが存在し、各 permission が文字列（例: `"view_issues"`）である（本体 roles/:id API と同じ形式）
+- `PASS`（作ったロールの permissions が文字列の配列 `["view_issues", "add_issues"]` である。本体 roles/:id API と同じ形式）
 
 ---
 
@@ -491,40 +830,118 @@ puts overlap.empty? ? 'PASS' : "FAIL: builtin role(s) included: #{overlap}"
 
 ### [1-15] visible_project_ids が user の membership を返す
 
+2 つのプロジェクトのメンバーのユーザーを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-user = User.find(1)
-controller = CacheBundlesController.new
-result = controller.send(:visible_project_ids, user)
-expected = user.memberships.map(&:project_id).uniq
-puts result.sort == expected.sort ? 'PASS' : "FAIL: Got #{result}, expected #{expected}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  u = mk_user.call('member')
+  role = mk_role.call('Member', [:view_issues])
+  projects = [mk_project.call('MemA'), mk_project.call('MemB')]
+  projects.each { |pr| Member.create!(principal: u, project: pr, roles: [role]) }
+  user = User.find(u.id)
+  controller = CacheBundlesController.new
+  result = controller.send(:visible_project_ids, user)
+  expected = projects.map(&:id)
+  puts result.sort == expected.sort ? 'PASS' : "FAIL: Got #{result}, expected #{expected}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- user の memberships から取れる project_id の一覧と一致
+- `PASS`（user の memberships から取れる project_id の一覧＝作った 2 つのプロジェクトと一致）
 
 ---
 
 ### [1-16] fetch_per_project_memberships がロックユーザを除外する
 
+ふつうのメンバーとロックしたメンバーがいるプロジェクトを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-# 任意のプロジェクトを admin で取得し、構造のみ確認（ロックユーザがあっても無くても落ちないこと）
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-controller.instance_variable_set(:@errors, [])
-result = controller.send(:fetch_per_project_memberships, admin)
-ok = result.is_a?(Hash) && result.values.all? do |members|
-  members.is_a?(Array) && members.none? do |m|
-    m.key?(:user) && User.find_by(id: m[:user][:id])&.status == User::STATUS_LOCKED
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  pr = mk_project.call('Lock')
+  role = mk_role.call('Lock', [:view_issues])
+  active = mk_user.call('active')
+  locked = mk_user.call('locked')
+  [active, locked].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  locked.update_column(:status, User::STATUS_LOCKED)
+  target = User.find(active.id)
+  controller = CacheBundlesController.new
+  controller.instance_variable_set(:@errors, [])
+  result = controller.send(:fetch_per_project_memberships, target)
+  no_locked = result.is_a?(Hash) && result.values.all? do |members|
+    members.is_a?(Array) && members.none? do |m|
+      m.key?(:user) && User.find_by(id: m[:user][:id])&.status == User::STATUS_LOCKED
+    end
   end
+  ids = (result[pr.id.to_s] || []).map { |m| m[:user] && m[:user][:id] }
+  ok = no_locked && ids.include?(active.id) && !ids.include?(locked.id)
+  puts ok ? 'PASS' : "FAIL: members=#{ids.inspect} (active=#{active.id}, locked=#{locked.id})"
+ensure
+  cleanup.call
 end
-puts ok ? 'PASS' : 'FAIL: locked users found in memberships'
 ```
 
 **期待結果:**
-- 返ってきた membership の `user` にロックユーザが含まれない
+- `PASS`（返ってきた membership の `user` にロックユーザが含まれず、ふつうのメンバーは含まれる）
 
 ---
 
@@ -537,7 +954,7 @@ cache_bundle でも対象ユーザが権限を持たないプロジェクトは�
 **確認方法:**
 ```ruby
 sfx = SecureRandom.hex(3)
-made_users, made_roles, made_projects, made_cfs = [], [], [], []
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
 mk_user = ->(name) {
   u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
   u.password = u.password_confirmation = 'password123'
@@ -545,20 +962,23 @@ mk_user = ->(name) {
   made_users << u
   u
 }
-mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
-mk_project = ->(name) {
-  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
-  pr.enabled_module_names = %w[issue_tracking]
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
   pr.save!
   made_projects << pr
   pr
 }
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
 cleanup = -> {
   User.current = User.find(1)
-  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
-  made_users.each { |u| u.destroy if u.persisted? }
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
   made_roles.each { |r| r.destroy if Role.exists?(r.id) }
-  made_cfs.each { |f| f.destroy if f.persisted? }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
 }
 begin
   User.current = User.find(1)
@@ -595,7 +1015,7 @@ Version のカスタムフィールド値を返す。cache_bundle でも同じ�
 **確認方法:**
 ```ruby
 sfx = SecureRandom.hex(3)
-made_users, made_roles, made_projects, made_cfs = [], [], [], []
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
 mk_user = ->(name) {
   u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
   u.password = u.password_confirmation = 'password123'
@@ -603,20 +1023,23 @@ mk_user = ->(name) {
   made_users << u
   u
 }
-mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
-mk_project = ->(name) {
-  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
-  pr.enabled_module_names = %w[issue_tracking]
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
   pr.save!
   made_projects << pr
   pr
 }
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
 cleanup = -> {
   User.current = User.find(1)
-  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
-  made_users.each { |u| u.destroy if u.persisted? }
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
   made_roles.each { |r| r.destroy if Role.exists?(r.id) }
-  made_cfs.each { |f| f.destroy if f.persisted? }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
 }
 begin
   User.current = User.find(1)
@@ -650,28 +1073,56 @@ end
 
 個別 API (projects/index.api.rsb) は `parent.visible?` のときだけ `parent` を出力する。
 cache_bundle でも対象ユーザに不可視な親（private な親等）の名前を漏らさないよう可視性でゲートする。
+非公開の親・公開の子と、親が見えるメンバー・見えないメンバーを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-controller = CacheBundlesController.new
-
-# 親が「見えるユーザ」と「見えないユーザ」で出し分くプロジェクトを探す
-target = nil
-Project.where.not(parent_id: nil).each do |c|
-  members = c.members.map(&:user).select { |m| m.is_a?(User) }
-  seer   = members.find { |m|  c.parent.visible?(m) }
-  hidden = members.find { |m| !c.parent.visible?(m) }
-  (target = [c, seer, hidden]; break) if seer && hidden
-end
-
-if target.nil?
-  puts 'SKIP: 親可視性が分かれる member を持つ子プロジェクトが無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
-else
-  c, seer, hidden = target
-  row_seer   = controller.send(:fetch_projects, seer).find   { |r| r[:id] == c.id }
-  row_hidden = controller.send(:fetch_projects, hidden).find { |r| r[:id] == c.id }
-  ok = row_seer[:parent].present? && !row_hidden.key?(:parent)
-  puts ok ? 'PASS' : "FAIL: seer=#{row_seer[:parent].inspect} hidden=#{row_hidden[:parent].inspect}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  controller = CacheBundlesController.new
+  # 非公開の親の下に公開の子。親と子のメンバー（seer）と、子だけのメンバー（hidden）
+  parent = mk_project.call('Par')
+  child = mk_project.call('Chi', { is_public: true, parent_id: parent.id })
+  role = mk_role.call('par', [:view_issues])
+  seer = mk_user.call('seer')
+  hidden = mk_user.call('hidden')
+  Member.create!(principal: seer, project: parent, roles: [role])
+  Member.create!(principal: seer, project: child, roles: [role])
+  Member.create!(principal: hidden, project: child, roles: [role])
+  c = Project.find(child.id)
+  row_seer   = controller.send(:fetch_projects, User.find(seer.id)).find   { |r| r[:id] == c.id }
+  row_hidden = controller.send(:fetch_projects, User.find(hidden.id)).find { |r| r[:id] == c.id }
+  ok = c.parent_id == parent.id && row_seer[:parent].present? && !row_hidden.key?(:parent)
+  puts ok ? 'PASS' : "FAIL: seer=#{row_seer&.dig(:parent).inspect} hidden=#{row_hidden&.dig(:parent).inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -683,20 +1134,65 @@ end
 
 ### [1-17] fetch_per_project_issue_categories は Active プロジェクトのみが対象
 
+同じユーザーがメンバーの、Active・Closed・Archived のプロジェクトを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-controller.instance_variable_set(:@errors, [])
-result = controller.send(:fetch_per_project_issue_categories, admin)
-non_active_ids = Project.where.not(status: Project::STATUS_ACTIVE).pluck(:id).map(&:to_s)
-intersect = result.keys & non_active_ids
-puts intersect.empty? ? 'PASS' : "FAIL: non-active project IDs found: #{intersect}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  role = mk_role.call('Cat', [:view_issues, :manage_categories])
+  u = mk_user.call('cat')
+  act = mk_project.call('CatAct')
+  closed = mk_project.call('CatClosed')
+  archived = mk_project.call('CatArch')
+  [act, closed, archived].each do |pr|
+    Member.create!(principal: u, project: pr, roles: [role])
+    IssueCategory.create!(project: pr, name: "CBS_Cat_#{sfx}")
+  end
+  closed.update_column(:status, Project::STATUS_CLOSED)
+  archived.update_column(:status, Project::STATUS_ARCHIVED)
+  target = User.find(u.id)
+  controller = CacheBundlesController.new
+  controller.instance_variable_set(:@errors, [])
+  result = controller.send(:fetch_per_project_issue_categories, target)
+  non_active_ids = Project.where.not(status: Project::STATUS_ACTIVE).pluck(:id).map(&:to_s)
+  intersect = result.keys & non_active_ids
+  ok = intersect.empty? && result.key?(act.id.to_s)
+  puts ok ? 'PASS' : "FAIL: non-active project IDs found: #{intersect}, active included=#{result.key?(act.id.to_s)}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- Active 以外のプロジェクト ID は project_issue_categories のキーに含まれない
+- `PASS`（Active 以外のプロジェクト ID は project_issue_categories のキーに含まれず、Active のプロジェクトは含まれる）
 
 ---
 
@@ -709,7 +1205,7 @@ cache_bundle でも対象ユーザが権限を持たないプロジェクトは�
 **確認方法:**
 ```ruby
 sfx = SecureRandom.hex(3)
-made_users, made_roles, made_projects, made_cfs = [], [], [], []
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
 mk_user = ->(name) {
   u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
   u.password = u.password_confirmation = 'password123'
@@ -717,20 +1213,23 @@ mk_user = ->(name) {
   made_users << u
   u
 }
-mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
-mk_project = ->(name) {
-  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
-  pr.enabled_module_names = %w[issue_tracking]
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
   pr.save!
   made_projects << pr
   pr
 }
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
 cleanup = -> {
   User.current = User.find(1)
-  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
-  made_users.each { |u| u.destroy if u.persisted? }
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
   made_roles.each { |r| r.destroy if Role.exists?(r.id) }
-  made_cfs.each { |f| f.destroy if f.persisted? }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
 }
 begin
   User.current = User.find(1)
@@ -791,23 +1290,49 @@ puts result.nil? ? 'PASS' : "FAIL: Expected nil, got #{result.inspect}"
 
 ### [1-20] fetch_projects で Archived プロジェクトが含まれない
 
+Archived のプロジェクトを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-# Archived プロジェクトが 1 件以上あることを前提にテスト。無ければテスト用に 1 件作る。
-archived = Project.where(status: Project::STATUS_ARCHIVED).first
-unless archived
-  p = Project.new(name: 'CacheBundle_1-20_Archived', identifier: "cbtest_1_20_#{Time.now.to_i}")
-  p.save(validate: false)
-  p.update_column(:status, Project::STATUS_ARCHIVED)
-  archived = p
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  archived = mk_project.call('Arch20', { is_public: true })
+  archived.update_column(:status, Project::STATUS_ARCHIVED)
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_projects, User.find(1))
+  archived_ids_in_result = result.map { |h| h[:id] } & Project.where(status: Project::STATUS_ARCHIVED).pluck(:id)
+  ok = archived_ids_in_result.empty? && result.none? { |h| h[:id] == archived.id }
+  puts ok ? 'PASS' : "FAIL: Archived project IDs found: #{archived_ids_in_result}"
+ensure
+  cleanup.call
 end
-
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_projects, admin)
-archived_ids_in_result = result.map { |h| h[:id] } & Project.where(status: Project::STATUS_ARCHIVED).pluck(:id)
-puts archived_ids_in_result.empty? ? 'PASS' : "FAIL: Archived project IDs found: #{archived_ids_in_result}"
 ```
 
 **期待結果:**
@@ -862,50 +1387,121 @@ puts sample.key?(:active) ? 'PASS' : "FAIL: :active key missing. keys=#{sample.k
 
 ### [1-24] fetch_queries の is_public は VISIBILITY_PUBLIC のみ true
 
+公開・ロール限定・非公開のクエリを 1 つずつ、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_queries, admin)
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  admin = User.find(1)
+  role = mk_role.call('Query', [:view_issues, :save_queries])
+  made_queries = []
+  begin
+    # 公開・ロール限定・非公開のクエリを 1 つずつ作る
+    { 'pub' => IssueQuery::VISIBILITY_PUBLIC, 'roles' => IssueQuery::VISIBILITY_ROLES, 'priv' => IssueQuery::VISIBILITY_PRIVATE }.each do |k, vis|
+      q = IssueQuery.new(name: "CBS_Q_#{k}_#{sfx}", user: admin, visibility: vis)
+      q.role_ids = [role.id] if vis == IssueQuery::VISIBILITY_ROLES
+      q.save!
+      made_queries << q
+    end
+    controller = CacheBundlesController.new
+    result = controller.send(:fetch_queries, admin)
 
-# 期待: 元 IssueQuery.visible の各 query について、visibility == PUBLIC のときのみ is_public=true
-mismatches = []
-IssueQuery.visible(admin).each do |q|
-  h = result.find { |x| x[:id] == q.id }
-  next unless h
-  expected = (q.visibility == IssueQuery::VISIBILITY_PUBLIC)
-  actual = h[:is_public]
-  mismatches << { id: q.id, name: q.name, visibility: q.visibility, expected: expected, actual: actual } if expected != actual
+    # 期待: 元 IssueQuery.visible の各 query について、visibility == PUBLIC のときのみ is_public=true
+    mismatches = []
+    IssueQuery.visible(admin).each do |q|
+      h = result.find { |x| x[:id] == q.id }
+      next unless h
+      expected = (q.visibility == IssueQuery::VISIBILITY_PUBLIC)
+      actual = h[:is_public]
+      mismatches << { id: q.id, name: q.name, visibility: q.visibility, expected: expected, actual: actual } if expected != actual
+    end
+    # 作った 3 つが結果に入っていて、公開だけが is_public=true
+    mine = made_queries.map { |q| result.find { |x| x[:id] == q.id }&.dig(:is_public) }
+    ok = mismatches.empty? && mine == [true, false, false]
+    puts ok ? 'PASS' : "FAIL: is_public mismatch: #{mismatches.inspect} mine=#{mine.inspect}"
+  ensure
+    made_queries.each { |q| q.destroy if IssueQuery.exists?(q.id) }
+  end
+ensure
+  cleanup.call
 end
-puts mismatches.empty? ? 'PASS' : "FAIL: is_public mismatch: #{mismatches.inspect}"
 ```
 
 **期待結果:**
-- 全 query について `is_public == (visibility == VISIBILITY_PUBLIC)`（VISIBILITY_ROLES / PRIVATE は false）
+- `PASS`（全 query について `is_public == (visibility == VISIBILITY_PUBLIC)`。作った 3 つは公開だけが true で、VISIBILITY_ROLES / PRIVATE は false）
 
 ---
 
 ### [1-25] fetch_custom_fields の min_length / max_length が nil を保持する
 
+min_length / max_length を決めていないカスタムフィールドを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_custom_fields)
-
-# テスト対象: min_length と max_length が nil のカスタムフィールド
-nil_length_cfs = CustomField.where(min_length: nil, max_length: nil).limit(3).to_a
-if nil_length_cfs.empty?
-  puts 'SKIP: no custom field with nil min_length/max_length'
-else
-  problems = []
-  nil_length_cfs.each do |cf|
-    h = result.find { |x| x[:id] == cf.id }
-    problems << { id: cf.id, min_length: h[:min_length], max_length: h[:max_length] } if h && (h[:min_length] != nil || h[:max_length] != nil)
-  end
-  puts problems.empty? ? 'PASS' : "FAIL: nil should be preserved (not 0): #{problems.inspect}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  cf = IssueCustomField.create!(name: "CBS_Len_#{sfx}", field_format: 'string', min_length: nil, max_length: nil, is_for_all: true)
+  made_cfs << cf
+  h = CacheBundlesController.new.send(:fetch_custom_fields).find { |x| x[:id] == cf.id }
+  ok = h && h.key?(:min_length) && h.key?(:max_length) && h[:min_length].nil? && h[:max_length].nil?
+  puts ok ? 'PASS' : "FAIL: nil should be preserved (not 0): #{h.inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -916,21 +1512,47 @@ end
 
 ### [1-26] fetch_custom_fields の possible_values に value と label が含まれる
 
+選択肢を持つカスタムフィールドを、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_custom_fields)
-
-# possible_values を持つ CF の最初の 1 件で確認
-cf_with_values = result.find { |h| h[:possible_values].is_a?(Array) && h[:possible_values].any? }
-if cf_with_values.nil?
-  puts 'SKIP: no custom field with possible_values'
-else
-  sample = cf_with_values[:possible_values].first
-  ok = sample.key?(:value) && sample.key?(:label)
-  puts ok ? 'PASS' : "FAIL: possible_values entry missing :value or :label. sample=#{sample.inspect}"
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  cf = IssueCustomField.create!(name: "CBS_List_#{sfx}", field_format: 'list', possible_values: %w[alpha beta], is_for_all: true)
+  made_cfs << cf
+  h = CacheBundlesController.new.send(:fetch_custom_fields).find { |x| x[:id] == cf.id }
+  pv = h && h[:possible_values]
+  ok = pv.is_a?(Array) && pv.map { |x| x[:value] } == %w[alpha beta] && pv.all? { |x| x.key?(:value) && x.key?(:label) }
+  puts ok ? 'PASS' : "FAIL: possible_values entry missing :value or :label. got=#{pv.inspect}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -941,22 +1563,60 @@ end
 
 ### [1-27] fetch_users は active なユーザのみを返す
 
+Active・Locked・Registered のユーザーを 1 人ずつ、その場で作る（終わったら消す）。
+
 **確認方法:**
 ```ruby
-admin = User.find(1)
-User.current = admin
-controller = CacheBundlesController.new
-result = controller.send(:fetch_users)
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  active = mk_user.call('active27')
+  locked = mk_user.call('locked27')
+  registered = mk_user.call('reg27')
+  locked.update_column(:status, User::STATUS_LOCKED)
+  registered.update_column(:status, User::STATUS_REGISTERED)
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_users)
 
-# Locked (status=3) や Registered (status=2) のユーザが含まれないこと
-non_active_ids = User.where(type: 'User').where.not(status: User::STATUS_ACTIVE).pluck(:id)
-result_ids = result.map { |u| u[:id] }
-leaked = result_ids & non_active_ids
-puts leaked.empty? ? 'PASS' : "FAIL: non-active user IDs leaked: #{leaked}"
+  # Locked (status=3) や Registered (status=2) のユーザが含まれないこと
+  non_active_ids = User.where(type: 'User').where.not(status: User::STATUS_ACTIVE).pluck(:id)
+  result_ids = result.map { |u| u[:id] }
+  leaked = result_ids & non_active_ids
+  ok = leaked.empty? && result_ids.include?(active.id) && !result_ids.include?(locked.id) && !result_ids.include?(registered.id)
+  puts ok ? 'PASS' : "FAIL: non-active user IDs leaked: #{leaked}, active included=#{result_ids.include?(active.id)}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- レスポンスに含まれる user がすべて active（status=1）である（個別 users API の既定挙動と同じ）
+- `PASS`（レスポンスに含まれる user がすべて active（status=1）で、作った Active の人は含まれる。個別 users API の既定挙動と同じ）
 
 ---
 
@@ -981,32 +1641,67 @@ puts bad_roles.empty? ? 'PASS' : "FAIL: bad permissions in roles: #{bad_roles.ma
 
 `CustomField.visible` は「visible=true」または「そのユーザのロールに紐づく role 限定 CF」のみ返す。
 admin は全件。visible=false かつ特定ロール限定の CF が、保持しない非 admin には出ず、admin には出ることを確認する。
+その CF と、そのロールを持たない非 admin を、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-# visible=false かつ role 限定の CF を対象にする（無ければ SKIP）
-gated_cf = CustomField.where(visible: false).detect { |cf| cf.roles.any? }
-if gated_cf.nil?
-  puts 'SKIP: visible=false かつ role 限定の CF が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
-else
-  gated_role_ids = gated_cf.roles.map(&:id)
-  # その CF のロールを保持しない非 admin を探す
-  non_holder = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
-    (u.memberships.flat_map { |m| m.roles.map(&:id) } & gated_role_ids).empty?
-  end
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+# 見える範囲が限られた非 admin（limited）と、その人から見えない物（hidden・g_out・cf_gated）を作る
+mk_restricted = -> {
+  role = mk_role.call('limited', [:view_issues], users_visibility: 'members_of_visible_projects')
+  other_role = mk_role.call('other', [:view_issues])
+  pr = mk_project.call('Lim')
+  limited = mk_user.call('limited')
+  Member.create!(principal: limited, project: pr, roles: [role])
+  hidden = mk_user.call('hidden')  # どのプロジェクトのメンバーでもない
+  g_in = mk_group.call('Gin')      # limited のプロジェクトのメンバーのグループ
+  g_in.users << limited
+  Member.create!(principal: g_in, project: pr, roles: [role])
+  g_out = mk_group.call('Gout')    # どのプロジェクトのメンバーでもないグループ
+  g_out.users << hidden
+  cf_gated = IssueCustomField.create!(name: "CBS_Gated_#{sfx}", field_format: 'string', visible: false, role_ids: [other_role.id])
+  made_cfs << cf_gated
+  { limited: User.find(limited.id), hidden: hidden, g_in: g_in, g_out: g_out, cf_gated: cf_gated }
+}
+begin
+  User.current = User.find(1)
+  d = mk_restricted.call
+  gated = d[:cf_gated]
   controller = CacheBundlesController.new
-
-  User.current = User.where(admin: true).first
-  admin_has = controller.send(:fetch_custom_fields).any? { |h| h[:id] == gated_cf.id }
-
-  if non_holder.nil?
-    puts admin_has ? 'PASS (admin only; 非保持ユーザ不在で SKIP)' : "FAIL: admin should see gated CF #{gated_cf.id}"
-  else
-    User.current = non_holder
-    non_holder_has = CacheBundlesController.new.send(:fetch_custom_fields).any? { |h| h[:id] == gated_cf.id }
-    ok = admin_has && !non_holder_has
-    puts ok ? 'PASS' : "FAIL: admin_has=#{admin_has}, non_holder(#{non_holder.login})_has=#{non_holder_has}"
-  end
+  User.current = User.find(1)
+  admin_has = controller.send(:fetch_custom_fields).any? { |h| h[:id] == gated.id }
+  User.current = d[:limited]
+  non_holder_has = CacheBundlesController.new.send(:fetch_custom_fields).any? { |h| h[:id] == gated.id }
+  ok = admin_has && !non_holder_has
+  puts ok ? 'PASS' : "FAIL: admin_has=#{admin_has}, non_holder_has=#{non_holder_has}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -1020,16 +1715,58 @@ end
 
 `users_visibility='all'` ロールを持たない非 admin に対し、`User.visible` は「自分＋可視プロジェクトのメンバー」に絞る。
 その非 admin と共有プロジェクトを持たないユーザが fetch_users に出ないことを確認する。
+見える範囲が限られた非 admin と、どのプロジェクトのメンバーでもないユーザを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-total = User.where(type: 'User', status: User::STATUS_ACTIVE).count
-restricted = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
-  User.visible(u).where(type: 'User').count < total
-end
-if restricted.nil?
-  puts 'SKIP: 可視性が制限された非 admin が無い（全員 users_visibility=all）'
-else
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+# 見える範囲が限られた非 admin（limited）と、その人から見えない物（hidden・g_out・cf_gated）を作る
+mk_restricted = -> {
+  role = mk_role.call('limited', [:view_issues], users_visibility: 'members_of_visible_projects')
+  other_role = mk_role.call('other', [:view_issues])
+  pr = mk_project.call('Lim')
+  limited = mk_user.call('limited')
+  Member.create!(principal: limited, project: pr, roles: [role])
+  hidden = mk_user.call('hidden')  # どのプロジェクトのメンバーでもない
+  g_in = mk_group.call('Gin')      # limited のプロジェクトのメンバーのグループ
+  g_in.users << limited
+  Member.create!(principal: g_in, project: pr, roles: [role])
+  g_out = mk_group.call('Gout')    # どのプロジェクトのメンバーでもないグループ
+  g_out.users << hidden
+  cf_gated = IssueCustomField.create!(name: "CBS_Gated_#{sfx}", field_format: 'string', visible: false, role_ids: [other_role.id])
+  made_cfs << cf_gated
+  { limited: User.find(limited.id), hidden: hidden, g_in: g_in, g_out: g_out, cf_gated: cf_gated }
+}
+begin
+  User.current = User.find(1)
+  d = mk_restricted.call
+  restricted = d[:limited]
   User.current = restricted
   result_ids = CacheBundlesController.new.send(:fetch_users).map { |h| h[:id] }.to_set
   # コアの可視集合の外にいる active ユーザ（本来見えないはず）
@@ -1037,8 +1774,10 @@ else
   leaked = hidden.select { |id| result_ids.include?(id) }
   # 自分は必ず含まれる（self 参照のフォールバック安全性）
   self_ok = result_ids.include?(restricted.id)
-  ok = leaked.empty? && self_ok && hidden.any?
-  puts ok ? "PASS (restricted=#{restricted.login}, hidden #{hidden.size} 件を非表示)" : "FAIL: leaked=#{leaked.inspect}, self_ok=#{self_ok}, hidden=#{hidden.size}"
+  ok = leaked.empty? && self_ok && hidden.include?(d[:hidden].id)
+  puts ok ? "PASS (hidden #{hidden.size} 件を非表示)" : "FAIL: leaked=#{leaked.inspect}, self_ok=#{self_ok}, hidden=#{hidden.size}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -1052,25 +1791,62 @@ end
 
 roles は `preload(:roles)`、trackers は issue CF の id→trackers 辞書で一括取得するため、
 CF 件数 N に対して発行クエリが `O(1)`（`1 + 2N` にならない）ことを確認する。
+trackers と roles を持つ CF を 5 つ、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-User.current = User.where(admin: true).first
-controller = CacheBundlesController.new
-cf_count = CustomField.count
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  # trackers と roles を持つ CF を 5 つ作る（CF が 0 件だと比例するかが分からないため）
+  role = mk_role.call('Cf31', [:view_issues])
+  5.times do |i|
+    made_cfs << IssueCustomField.create!(name: "CBS_Cf31_#{i}_#{sfx}", field_format: 'string', visible: false, role_ids: [role.id], tracker_ids: Tracker.pluck(:id))
+  end
+  controller = CacheBundlesController.new
+  cf_count = CustomField.count
 
-sql_count = 0
-counter = ->(_name, _start, _finish, _id, payload) do
-  sql_count += 1 unless payload[:name] =~ /SCHEMA|TRANSACTION/ || payload[:sql] =~ /^\s*(BEGIN|COMMIT|RELEASE|SAVEPOINT)/i
-end
-ActiveSupport::Notifications.subscribed(counter, 'sql.active_record') do
-  controller.send(:fetch_custom_fields)
-end
+  sql_count = 0
+  counter = ->(_name, _start, _finish, _id, payload) do
+    sql_count += 1 unless payload[:name] =~ /SCHEMA|TRANSACTION/ || payload[:sql] =~ /^\s*(BEGIN|COMMIT|RELEASE|SAVEPOINT)/i
+  end
+  ActiveSupport::Notifications.subscribed(counter, 'sql.active_record') do
+    controller.send(:fetch_custom_fields)
+  end
 
-# 上限は「本体集合1 + roles preload1 + issue CF別読み1 + trackers preload1 + enumeration系の余裕」を見て固定値に。
-# CF 件数比例（1 + 2N）なら cf_count=10 で 20 本超になるため、それを大きく下回ることを確認。
-threshold = 10
-puts sql_count <= threshold ? "PASS (queries=#{sql_count} for #{cf_count} CFs)" : "FAIL: queries=#{sql_count} > #{threshold} (CF件数比例の疑い)"
+  # 上限は「本体集合1 + roles preload1 + issue CF別読み1 + trackers preload1 + enumeration系の余裕」を見て固定値に。
+  # CF 件数比例（1 + 2N）なら作った 5 件だけで 11 本になるため、それを下回ることを確認。
+  threshold = 10
+  puts sql_count <= threshold ? "PASS (queries=#{sql_count} for #{cf_count} CFs)" : "FAIL: queries=#{sql_count} > #{threshold} (CF件数比例の疑い)"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -1081,34 +1857,62 @@ puts sql_count <= threshold ? "PASS (queries=#{sql_count} for #{cf_count} CFs)" 
 ### [1-32] fetch_custom_fields は admin で全件＋trackers/roles を返す（回帰）
 
 スコープ化後も admin 経路は全 CF を返し、trackers（issue CF）と roles を正しく直列化することを確認する。
+trackers を持つ issue CF と、roles を持つ CF を、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-User.current = User.where(admin: true).first
-controller = CacheBundlesController.new
-result = controller.send(:fetch_custom_fields)
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  # trackers を持つ issue CF と、roles を持つ CF を作る
+  role = mk_role.call('Cf32', [:view_issues])
+  icf = IssueCustomField.create!(name: "CBS_Cf32Tr_#{sfx}", field_format: 'string', tracker_ids: Tracker.pluck(:id).first(2))
+  made_cfs << icf
+  rcf = UserCustomField.create!(name: "CBS_Cf32Role_#{sfx}", field_format: 'string', visible: false, role_ids: [role.id])
+  made_cfs << rcf
+  controller = CacheBundlesController.new
+  result = controller.send(:fetch_custom_fields)
 
-count_ok = result.size == CustomField.count
+  count_ok = result.size == CustomField.count
 
-# trackers: issue CF で trackers を持つものが正しく出るか
-icf = IssueCustomField.joins(:trackers).first
-tr_ok = if icf
+  # trackers: issue CF で trackers を持つものが正しく出るか
   row = result.find { |h| h[:id] == icf.id }
-  row && row[:trackers].map { |t| t[:id] }.sort == icf.trackers.map(&:id).sort
-else
-  true
-end
+  tr_ok = row && (row[:trackers] || []).map { |x| x[:id] }.sort == IssueCustomField.find(icf.id).trackers.map(&:id).sort && row[:trackers].any?
 
-# roles: role を持つ CF が正しく出るか
-rcf = CustomField.joins(:roles).first
-role_ok = if rcf
+  # roles: role を持つ CF が正しく出るか
   row = result.find { |h| h[:id] == rcf.id }
-  row && row[:roles].map { |r| r[:id] }.sort == rcf.roles.map(&:id).sort
-else
-  true
-end
+  role_ok = row && (row[:roles] || []).map { |x| x[:id] }.sort == [role.id]
 
-puts (count_ok && tr_ok && role_ok) ? 'PASS' : "FAIL: count_ok=#{count_ok}(#{result.size}/#{CustomField.count}) tr_ok=#{tr_ok} role_ok=#{role_ok}"
+  puts (count_ok && tr_ok && role_ok) ? 'PASS' : "FAIL: count_ok=#{count_ok}(#{result.size}/#{CustomField.count}) tr_ok=#{tr_ok} role_ok=#{role_ok}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -1120,22 +1924,56 @@ puts (count_ok && tr_ok && role_ok) ? 'PASS' : "FAIL: count_ok=#{count_ok}(#{res
 
 admin 経路は users=全 active User、groups=全 givable Group（各グループのメンバーは交差せず全件）、
 custom_fields=全 CustomField を返す。非 admin のスコープ絞り込みが admin に漏れていないことを、
-件数の完全一致で固定する（[1-27]/[1-32] の補完）。
+件数の完全一致で固定する（[1-27]/[1-32] の補完）。メンバーが 2 人いるグループを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-User.current = User.where(admin: true).first
-c = CacheBundlesController.new
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  g = mk_group.call('Members')
+  members = [mk_user.call('gm1'), mk_user.call('gm2')]
+  g.users << members
+  c = CacheBundlesController.new
 
-users_full  = c.send(:fetch_users).map { |h| h[:id] }.sort == User.where(type: 'User', status: User::STATUS_ACTIVE).pluck(:id).sort
-groups_full = c.send(:fetch_groups).map { |g| g[:id] }.sort == Group.givable.pluck(:id).sort
-cf_full     = c.send(:fetch_custom_fields).size == CustomField.count
+  users_full  = c.send(:fetch_users).map { |h| h[:id] }.sort == User.where(type: 'User', status: User::STATUS_ACTIVE).pluck(:id).sort
+  groups_full = c.send(:fetch_groups).map { |x| x[:id] }.sort == Group.givable.pluck(:id).sort
+  cf_full     = c.send(:fetch_custom_fields).size == CustomField.count
 
-# admin の各グループのメンバーは交差せず全件（g.users と一致）
-g = Group.givable.detect { |x| x.users.any? }
-members_full = g.nil? || (c.send(:fetch_groups).find { |h| h[:id] == g.id }[:users].map { |u| u[:id] }.sort == g.users.map(&:id).sort)
+  # admin の各グループのメンバーは交差せず全件（作ったグループの 2 人と一致）
+  row = c.send(:fetch_groups).find { |h| h[:id] == g.id }
+  members_full = row && row[:users].map { |u| u[:id] }.sort == members.map(&:id).sort
 
-puts (users_full && groups_full && cf_full && members_full) ? 'PASS' : "FAIL: users=#{users_full} groups=#{groups_full} cf=#{cf_full} members=#{members_full}"
+  puts (users_full && groups_full && cf_full && members_full) ? 'PASS' : "FAIL: users=#{users_full} groups=#{groups_full} cf=#{cf_full} members=#{members_full}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -1148,26 +1986,71 @@ puts (users_full && groups_full && cf_full && members_full) ? 'PASS' : "FAIL: us
 管理者キーで別ユーザ（`user_id=N`）のバンドルを作る運用（モード①）では、users / custom_fields / groups は
 **要求者（admin）の権限で全件**返る（`target_user` にスコープしない）。この契約を固定し、将来 `fetch_*` を
 `target_user` 基準へ変えたら赤くなるようにする。
+見える範囲が限られた非 admin を、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-admin = User.where(admin: true).first
-# 可視性が制限された非 admin を target にする（target 基準にスコープしていたら件数が減るはず）
-total = User.where(type: 'User', status: User::STATUS_ACTIVE).count
-target = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect do |u|
-  User.visible(u).where(type: 'User').count < total
-end
-if target.nil?
-  puts 'SKIP: 可視性が制限された非 admin が無い'
-else
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+# 見える範囲が限られた非 admin（limited）と、その人から見えない物（hidden・g_out・cf_gated）を作る
+mk_restricted = -> {
+  role = mk_role.call('limited', [:view_issues], users_visibility: 'members_of_visible_projects')
+  other_role = mk_role.call('other', [:view_issues])
+  pr = mk_project.call('Lim')
+  limited = mk_user.call('limited')
+  Member.create!(principal: limited, project: pr, roles: [role])
+  hidden = mk_user.call('hidden')  # どのプロジェクトのメンバーでもない
+  g_in = mk_group.call('Gin')      # limited のプロジェクトのメンバーのグループ
+  g_in.users << limited
+  Member.create!(principal: g_in, project: pr, roles: [role])
+  g_out = mk_group.call('Gout')    # どのプロジェクトのメンバーでもないグループ
+  g_out.users << hidden
+  cf_gated = IssueCustomField.create!(name: "CBS_Gated_#{sfx}", field_format: 'string', visible: false, role_ids: [other_role.id])
+  made_cfs << cf_gated
+  { limited: User.find(limited.id), hidden: hidden, g_in: g_in, g_out: g_out, cf_gated: cf_gated }
+}
+begin
+  User.current = User.find(1)
+  d = mk_restricted.call
+  admin = User.find(1)
+  total = User.where(type: 'User', status: User::STATUS_ACTIVE).count
+  # 制限が効いている（target 基準にスコープしていたら件数が減る）ことを確かめておく
+  restricted_ok = User.visible(d[:limited]).where(type: 'User').count < total
   # show と同じ経路: 認証済み=admin（User.current）、target_user=制限ユーザ
   User.current = admin
   c = CacheBundlesController.new
   users_cnt  = c.send(:fetch_users).size
   cf_cnt     = c.send(:fetch_custom_fields).size
   groups_cnt = c.send(:fetch_groups).size
-  ok = users_cnt == total && cf_cnt == CustomField.count && groups_cnt == Group.givable.count
-  puts ok ? "PASS (admin 基準で全件: users=#{users_cnt} cf=#{cf_cnt} groups=#{groups_cnt})" : "FAIL: users=#{users_cnt}/#{total} cf=#{cf_cnt}/#{CustomField.count} groups=#{groups_cnt}/#{Group.givable.count}"
+  ok = restricted_ok && users_cnt == total && cf_cnt == CustomField.count && groups_cnt == Group.givable.count
+  puts ok ? "PASS (admin 基準で全件: users=#{users_cnt} cf=#{cf_cnt} groups=#{groups_cnt})" : "FAIL: restricted_ok=#{restricted_ok} users=#{users_cnt}/#{total} cf=#{cf_cnt}/#{CustomField.count} groups=#{groups_cnt}/#{Group.givable.count}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -1183,58 +2066,112 @@ projects の埋め込み（activities / issue_custom_fields / parent）と per-p
 per-pid の `Member`・`Project#shared_versions`・`IssueCategory` ＋各ハッシュ生成ヘルパ）と**完全一致**することを、同一 DB で突き合わせる。
 版の正解は、個別 API（`GET /projects/:id/versions.json`）と同じ `Project#shared_versions`（ほかのプロジェクトから共有された版を含む）で作る。
 共有のそれぞれの場合を必ず通す確認は [1-35-3]。
-コア側の仕様変更で赤くなる契約テスト（#2797 規律）。
+コア側の仕様変更で赤くなる契約テスト。
+複数プロジェクト（親が見える子・親が見えない子を含む）のメンバーの非 admin と、版・カテゴリを、その場で作る（終わったら消す）。
 
 **確認方法:**
 ```ruby
-# admin と、複数プロジェクトの member 非 admin を対象にする
-targets = [User.find(1)]
-mu = User.where(admin: false, type: 'User', status: User::STATUS_ACTIVE).detect { |u| u.memberships.map(&:project_id).uniq.size >= 2 }
-targets << mu if mu
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
+  User.current = User.find(1)
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  # 複数プロジェクトの member 非 admin（親子のプロジェクト・版・カテゴリ付き）を作る
+  role = mk_role.call('Batch35', [:view_issues, :view_time_entries, :manage_categories])
+  mu = mk_user.call('batch35')
+  parent = mk_project.call('B35Parent', {}, %w[issue_tracking time_tracking])
+  child = mk_project.call('B35Child', { parent_id: parent.id }, %w[issue_tracking time_tracking])
+  hidden_parent = mk_project.call('B35Hidden')
+  orphan = mk_project.call('B35Orphan', { parent_id: hidden_parent.id }, %w[issue_tracking time_tracking])
+  [parent, child, orphan].each do |pr|
+    Member.create!(principal: mu, project: pr, roles: [role])
+    Version.create!(project: pr, name: "CBS_V35_#{sfx}")
+    IssueCategory.create!(project: pr, name: "CBS_C35_#{sfx}")
+  end
+  targets = [User.find(1), User.find(mu.id)]
 
-gate = Redmine::VERSION::MAJOR >= 7 # 7.0 以降のみコアが projects の include を権限でゲートする
-bad = []
-targets.each do |user|
-  User.current = user
-  c = CacheBundlesController.new
-  c.instance_variable_set(:@errors, [])
+  gate = Redmine::VERSION::MAJOR >= 7 # 7.0 以降のみコアが projects の include を権限でゲートする
+  bad = []
+  checked = Hash.new(0)
+  targets.each do |user|
+    User.current = user
+    c = CacheBundlesController.new
+    c.instance_variable_set(:@errors, [])
 
-  # projects: activities / issue_custom_fields / parent の等価
-  batched = c.send(:fetch_projects, user)
-  Project.visible(user).sorted.each do |p|
-    row = batched.find { |h| h[:id] == p.id }
-    act = row[:time_entry_activities].map { |x| x[:id] }.sort
-    cf  = row[:issue_custom_fields].map { |x| x[:id] }.sort
-    par = row[:parent] && row[:parent][:id]
-    exp_par = (p.parent && p.parent.visible?(user)) ? p.parent.id : nil
-    # 7.0 以降はコアが activities/custom_fields を権限でゲートするため期待値も同じゲートを掛ける
-    exp_act = (gate && !user.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
-    exp_cf  = (gate && !user.allowed_to?(:view_issues, p)) ? [] : p.all_issue_custom_fields.map(&:id).sort
-    bad << "proj p=#{p.id}(#{user.login})" if act != exp_act || cf != exp_cf || par != exp_par
-  end
+    # projects: activities / issue_custom_fields / parent の等価
+    batched = c.send(:fetch_projects, user)
+    Project.visible(user).sorted.each do |p|
+      row = batched.find { |h| h[:id] == p.id }
+      next bad << "proj p=#{p.id}(#{user.login}) missing" if row.nil?
+      act = row[:time_entry_activities].map { |x| x[:id] }.sort
+      cf  = row[:issue_custom_fields].map { |x| x[:id] }.sort
+      par = row[:parent] && row[:parent][:id]
+      exp_par = (p.parent && p.parent.visible?(user)) ? p.parent.id : nil
+      # 7.0 以降はコアが activities/custom_fields を権限でゲートするため期待値も同じゲートを掛ける
+      exp_act = (gate && !user.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
+      exp_cf  = (gate && !user.allowed_to?(:view_issues, p)) ? [] : p.all_issue_custom_fields.map(&:id).sort
+      bad << "proj p=#{p.id}(#{user.login})" if act != exp_act || cf != exp_cf || par != exp_par
+      checked[:proj] += 1
+    end
 
-  # memberships / versions / issue_categories: バッチ vs per-pid（同一ハッシュ生成ヘルパで突き合わせ）
-  pids = c.send(:visible_project_ids, user)
-  mb = c.send(:fetch_per_project_memberships, user)
-  pids.each do |pid|
-    ref = Member.where(project_id: pid).preload(:user, :principal, :roles, :member_roles, :project).map { |m| c.send(:membership_to_hash, m) }.compact
-    bad << "memb pid=#{pid}(#{user.login})" if mb[pid.to_s] != ref
+    # memberships / versions / issue_categories: バッチ vs per-pid（同一ハッシュ生成ヘルパで突き合わせ）
+    pids = c.send(:visible_project_ids, user)
+    mb = c.send(:fetch_per_project_memberships, user)
+    pids.each do |pid|
+      ref = Member.where(project_id: pid).preload(:user, :principal, :roles, :member_roles, :project).map { |m| c.send(:membership_to_hash, m) }.compact
+      bad << "memb pid=#{pid}(#{user.login})" if mb[pid.to_s] != ref
+      checked[:memb] += 1
+    end
+    # versions はコアの個別 API と同じ Project#shared_versions（共有された版を含む）が正解。コアは並び順を決めないので id 順で比べる
+    vb = c.send(:fetch_per_project_versions, user)
+    Project.where(id: pids).each do |pr|
+      next unless user.allowed_to?(:view_issues, pr)
+      ref = pr.shared_versions.preload(:custom_values).to_a.sort_by(&:id).map { |v| c.send(:version_to_hash, v, user) }
+      bad << "vers pid=#{pr.id}(#{user.login})" if vb[pr.id.to_s].sort_by { |h| h[:id] } != ref
+      checked[:vers] += 1
+    end
+    cb = c.send(:fetch_per_project_issue_categories, user)
+    Project.where(id: pids, status: Project::STATUS_ACTIVE).each do |pr|
+      next unless user.allowed_to?(:manage_categories, pr)
+      ref = IssueCategory.where(project_id: pr.id).preload(:assigned_to, :project).map { |cat| c.send(:category_to_hash, cat) }
+      bad << "cats pid=#{pr.id}(#{user.login})" if cb[pr.id.to_s] != ref
+      checked[:cats] += 1
+    end
   end
-  # versions はコアの個別 API と同じ Project#shared_versions（共有された版を含む）が正解。コアは並び順を決めないので id 順で比べる
-  vb = c.send(:fetch_per_project_versions, user)
-  Project.where(id: pids).each do |pr|
-    next unless user.allowed_to?(:view_issues, pr)
-    ref = pr.shared_versions.preload(:custom_values).to_a.sort_by(&:id).map { |v| c.send(:version_to_hash, v, user) }
-    bad << "vers pid=#{pr.id}(#{user.login})" if vb[pr.id.to_s].sort_by { |h| h[:id] } != ref
-  end
-  cb = c.send(:fetch_per_project_issue_categories, user)
-  Project.where(id: pids, status: Project::STATUS_ACTIVE).each do |pr|
-    next unless user.allowed_to?(:manage_categories, pr)
-    ref = IssueCategory.where(project_id: pr.id).preload(:assigned_to, :project).map { |cat| c.send(:category_to_hash, cat) }
-    bad << "cats pid=#{pr.id}(#{user.login})" if cb[pr.id.to_s] != ref
-  end
+  # 非 admin では、親が見える子（parent あり）と、親が見えない子（parent なし）の両方を通している
+  User.current = User.find(1)
+  rows = CacheBundlesController.new.send(:fetch_projects, User.find(mu.id))
+  par_ok = rows.find { |h| h[:id] == child.id }&.dig(:parent, :id) == parent.id && rows.find { |h| h[:id] == orphan.id }&.key?(:parent) == false
+  bad << 'parent gate not exercised' unless par_ok
+  bad << "too few checks #{checked}" if checked[:memb] < 3 || checked[:vers] < 3 || checked[:cats] < 3
+  puts bad.empty? ? 'PASS' : "FAIL: #{bad.first(8).inspect}"
+ensure
+  cleanup.call
 end
-puts bad.empty? ? 'PASS' : "FAIL: #{bad.first(8).inspect}"
 ```
 
 **期待結果:**
@@ -1251,7 +2188,7 @@ CF 値を持つ版と、版が見えるメンバーを、その場で作る（�
 **確認方法:**
 ```ruby
 sfx = SecureRandom.hex(3)
-made_users, made_roles, made_projects, made_cfs = [], [], [], []
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
 mk_user = ->(name) {
   u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
   u.password = u.password_confirmation = 'password123'
@@ -1259,20 +2196,23 @@ mk_user = ->(name) {
   made_users << u
   u
 }
-mk_role = ->(name, perms) { r = Role.create!(name: "CBS_#{name}_#{sfx}", permissions: perms); made_roles << r; r }
-mk_project = ->(name) {
-  pr = Project.create!(name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false)
-  pr.enabled_module_names = %w[issue_tracking]
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
   pr.save!
   made_projects << pr
   pr
 }
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
 cleanup = -> {
   User.current = User.find(1)
-  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
-  made_users.each { |u| u.destroy if u.persisted? }
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
   made_roles.each { |r| r.destroy if Role.exists?(r.id) }
-  made_cfs.each { |f| f.destroy if f.persisted? }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
 }
 begin
   User.current = User.find(1)
@@ -1326,9 +2266,10 @@ v = {
   arch_sys: ver.call(archived, 'arch_sys', 'system')
 }
 user = nil
+role = nil
 begin
   archived.update_column(:status, Project::STATUS_ARCHIVED)
-  role = Role.givable.detect { |r| r.has_permission?(:view_issues) }
+  role = Role.create!(name: "SV_#{sfx}", permissions: [:view_issues])
   user = User.new(login: "sv_#{sfx}", firstname: 'SV', lastname: 'User', mail: "sv_#{sfx}@example.com", status: 1)
   user.password = user.password_confirmation = 'password123'
   user.save!
@@ -1357,6 +2298,7 @@ ensure
   User.current = User.find(1)
   user.destroy if user&.persisted?
   [leaf, mid, side, root, other, archived].each { |p| Project.find_by(id: p.id)&.destroy }
+  role.destroy if role&.persisted?
 end
 ```
 
@@ -1433,32 +2375,58 @@ end
 
 `build_project_activities` は、コア `Project#activities` の「プロジェクト個別の上書き活動があるとき、上書き元の
 システム活動を除外する」ロジックを Ruby で再現した**唯一の箇所**。上書きが 0 件だとバッチ版もコア版も
-システム活動だけの空一致になり、除外分岐が素通りする（#2779 の空リスト盲点）。上書きデータ
-（`setup_cache_bundle_equiv_testdata.rb` が perm-test-2779 に active/inactive の上書きを投入）で
+システム活動だけの空一致になり、除外分岐が素通りする。上書きデータ
+（システムの活動を「使わない」に上書きしたプロジェクトを、その場で作る。終わったら消す）で
 **分岐が実際に発火し、かつコアと一致**することを確認する。
 
 **確認方法:**
 ```ruby
-overridden_pids = TimeEntryActivity.where.not(project_id: nil).pluck(:project_id).uniq
-if overridden_pids.empty?
-  puts 'SKIP: 活動上書きが無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
-else
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
   User.current = User.find(1)
-  c = CacheBundlesController.new
-  batched = c.send(:fetch_projects, User.find(1))
-  sys_ids = TimeEntryActivity.where(project_id: nil).active.pluck(:id).sort
-  bad = []; fired = false
-  overridden_pids.each do |pid|
-    p = Project.find(pid)
-    row = batched.find { |h| h[:id] == pid }
-    next if row.nil?
-    got = row[:time_entry_activities].map { |x| x[:id] }.sort
-    # 7.0 以降はコアが view_time_entries でゲートするため期待値も揃える（上書き PJ はモジュール有効で admin は許可）
-    exp = (Redmine::VERSION::MAJOR >= 7 && !User.current.allowed_to?(:view_time_entries, p)) ? [] : p.activities.map(&:id).sort
-    bad << "pid=#{pid} got=#{got} exp=#{exp}" if got != exp
-    fired = true if got != sys_ids  # system 活動そのままではない＝上書き分岐が効いている
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  sys = TimeEntryActivity.where(project_id: nil).active.order(:position).first
+  unless sys
+    sys = TimeEntryActivity.create!(name: "CBS_Act_#{sfx}", active: true)
+    made_activities << sys
   end
-  puts (bad.empty? && fired) ? "PASS (上書き分岐が発火しコア一致: pids=#{overridden_pids.inspect})" : "FAIL: bad=#{bad.inspect} fired=#{fired}"
+  pr = mk_project.call('Act', {}, %w[issue_tracking time_tracking])
+  # プロジェクトでシステムの活動を「使わない」に上書きする（コアのプロジェクト設定と同じ形）
+  TimeEntryActivity.create!(name: sys.name, parent_id: sys.id, project_id: pr.id, active: false)
+  p = Project.find(pr.id)
+  row = CacheBundlesController.new.send(:fetch_projects, User.find(1)).find { |h| h[:id] == p.id }
+  got = row[:time_entry_activities].map { |x| x[:id] }.sort
+  sys_ids = TimeEntryActivity.where(project_id: nil).active.pluck(:id).sort
+  exp = p.activities.map(&:id).sort
+  fired = got != sys_ids && !got.include?(sys.id)  # system 活動そのままではない＝上書き分岐が効いている
+  puts (got == exp && fired) ? 'PASS (上書き分岐が発火しコア一致)' : "FAIL: got=#{got} exp=#{exp} fired=#{fired}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -1470,32 +2438,50 @@ end
 ### [1-38] issue_custom_fields のバッチ化が「for_all＋プロジェクト明示紐付け」の結合を正しく畳む（merge_issue_custom_fields）
 
 `merge_issue_custom_fields` は for_all の CF とプロジェクト明示紐付けの CF を結合する。全 CF が is_for_all だと
-結合相手が空で union が素通りする。プロジェクト専用 CF（`setup_cache_bundle_equiv_testdata.rb` が perm-test-2779 に
-`is_for_all=false` の CF を投入）で**結合が実際に発火し、かつコア `Project#all_issue_custom_fields` と一致**することを確認する。
+結合相手が空で union が素通りする。プロジェクト専用 CF（`is_for_all=false` の CF と、それを紐付けたプロジェクトを、その場で作る。終わったら消す）で**結合が実際に発火し、かつコア `Project#all_issue_custom_fields` と一致**することを確認する。
 
 **確認方法:**
 ```ruby
-proj_only = IssueCustomField.where(is_for_all: false).select { |cf| cf.project_ids.any? }
-if proj_only.empty?
-  puts 'SKIP: プロジェクト専用 issue CF が無い（setup_cache_bundle_equiv_testdata.rb 未投入）'
-else
+sfx = SecureRandom.hex(3)
+made_users, made_roles, made_projects, made_cfs, made_groups, made_activities = [], [], [], [], [], []
+mk_user = ->(name) {
+  u = User.new(login: "cbs_#{name}_#{sfx}", firstname: 'CBS', lastname: name, mail: "cbs_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  made_users << u
+  u
+}
+mk_role = ->(name, perms, attrs = {}) { r = Role.create!({ name: "CBS_#{name}_#{sfx}", permissions: perms }.merge(attrs)); made_roles << r; r }
+mk_project = ->(name, attrs = {}, modules = %w[issue_tracking]) {
+  pr = Project.new({ name: "CBS_#{name}_#{sfx}", identifier: "cbs-#{name.downcase}-#{sfx}", is_public: false }.merge(attrs))
+  pr.enabled_module_names = modules
+  pr.save!
+  made_projects << pr
+  pr
+}
+mk_group = ->(name) { g = Group.create!(lastname: "CBS_#{name}_#{sfx}"); made_groups << g; g }
+cleanup = -> {
   User.current = User.find(1)
-  c = CacheBundlesController.new
-  batched = c.send(:fetch_projects, User.find(1))
-  bad = []; fired = false
-  proj_only.each do |cf|
-    cf.project_ids.each do |pid|
-      row = batched.find { |h| h[:id] == pid }
-      next if row.nil?
-      got = row[:issue_custom_fields].map { |x| x[:id] }.sort
-      # 7.0 以降はコアが view_issues でゲートするため期待値も揃える（対象 PJ は admin が view_issues 許可）
-      pr = Project.find(pid)
-      exp = (Redmine::VERSION::MAJOR >= 7 && !User.current.allowed_to?(:view_issues, pr)) ? [] : pr.all_issue_custom_fields.map(&:id).sort
-      bad << "pid=#{pid} got=#{got} exp=#{exp}" if got != exp
-      fired = true if got.include?(cf.id)  # for_all でない CF が結合されている
-    end
-  end
-  puts (bad.empty? && fired) ? 'PASS (union 分岐が発火しコア一致)' : "FAIL: bad=#{bad.inspect} fired=#{fired}"
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_groups.each { |g| g.destroy if Group.exists?(g.id) }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+  made_cfs.each { |f| f.destroy if CustomField.exists?(f.id) }
+  made_activities.each { |a| a.destroy if TimeEntryActivity.exists?(a.id) }
+}
+begin
+  User.current = User.find(1)
+  pr = mk_project.call('Icf')
+  cf = IssueCustomField.create!(name: "CBS_ProjOnly_#{sfx}", field_format: 'string', is_for_all: false, project_ids: [pr.id])
+  made_cfs << cf
+  p = Project.find(pr.id)
+  row = CacheBundlesController.new.send(:fetch_projects, User.find(1)).find { |h| h[:id] == p.id }
+  got = row[:issue_custom_fields].map { |x| x[:id] }.sort
+  exp = p.all_issue_custom_fields.map(&:id).sort
+  fired = got.include?(cf.id)  # for_all でない CF が結合されている
+  puts (got == exp && fired) ? 'PASS (union 分岐が発火しコア一致)' : "FAIL: got=#{got} exp=#{exp} fired=#{fired}"
+ensure
+  cleanup.call
 end
 ```
 
@@ -1515,7 +2501,7 @@ end
 ```ruby
 sfx = SecureRandom.hex(3)
 gravatar_was = Setting.gravatar_enabled
-shown = hidden = target = viewer = nil
+shown = hidden = target = viewer = pr = role = nil
 mk_user = ->(name) {
   u = User.new(login: "cb_#{name}_#{sfx}", firstname: 'CB', lastname: name, mail: "cb_#{name}_#{sfx}@example.com", status: 1)
   u.password = u.password_confirmation = 'password123'
@@ -1530,8 +2516,9 @@ begin
   viewer = mk_user.call('viewer')
   target.custom_field_values = { shown.id.to_s => 'shown value', hidden.id.to_s => 'hidden value' }
   target.save!
-  role = Role.givable.first
-  [target, viewer].each { |u| Member.create!(principal: u, project: Project.first, roles: [role]) }
+  role = Role.create!(name: "CB_#{sfx}", permissions: [:view_issues])
+  pr = Project.create!(name: "CB_#{sfx}", identifier: "cb-#{sfx}", is_public: false)
+  [target, viewer].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
   User.current = User.find(1)
   c = CacheBundlesController.new
   c.instance_variable_set(:@errors, [])
@@ -1551,7 +2538,9 @@ begin
   puts "non_admin_viewer_no_admin_false: #{!row2.nil? && !row2.key?(:admin)}"
 ensure
   User.current = User.find(1)
+  Project.find_by(id: pr.id)&.destroy if pr
   [target, viewer].each { |u| u.destroy if u&.persisted? }
+  role.destroy if role&.persisted?
   [shown, hidden].each { |f| f.destroy if f&.persisted? }
   Setting.gravatar_enabled = gravatar_was
 end
@@ -1569,6 +2558,46 @@ end
 
 **実行方法:**
 PowerShell で各エンドポイントにリクエストを送信する。API キー認証が必要。
+
+**用意（HTTP テストの前に 1 回）:**
+バンドルの中身を確かめるためのデータを Runner で作る（前回の残りがあれば先に消す）。
+プロジェクト（版・カテゴリ付き）と、そこのメンバーの非管理のユーザー（API キー付き）を作り、管理者もメンバーにする。全プロジェクト共通のチケットのカスタムフィールドも 1 つ作る。
+最後の行の `ProjectId`・`UserId`・`UserApiKey` を、各試験の `{ProjectId}`・`{UserId}`・`{UserApiKey}` に入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+Project.where('identifier LIKE ?', 'cbhttp-%').each(&:destroy)
+User.where('login LIKE ?', 'cbhttp%').each(&:destroy)
+Role.where('name LIKE ?', 'CBHTTP_%').each(&:destroy)
+CustomField.where('name LIKE ?', 'CBHTTP_%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+pr = Project.new(name: "CBHTTP_#{sfx}", identifier: "cbhttp-#{sfx}", is_public: false)
+pr.enabled_module_names = %w[issue_tracking time_tracking]
+pr.save!
+role = Role.create!(name: "CBHTTP_#{sfx}", permissions: [:view_issues, :view_time_entries, :manage_categories])
+u = User.new(login: "cbhttp#{sfx}", firstname: 'CBHTTP', lastname: 'User', mail: "cbhttp#{sfx}@example.com", status: 1)
+u.password = u.password_confirmation = 'password123'
+u.save!
+[u, admin].each { |x| Member.create!(principal: x, project: pr, roles: [role]) }
+Version.create!(project: pr, name: "CBHTTP_V_#{sfx}")
+IssueCategory.create!(project: pr, name: "CBHTTP_C_#{sfx}")
+IssueCustomField.create!(name: "CBHTTP_#{sfx}", field_format: 'string', is_for_all: true, tracker_ids: pr.tracker_ids)
+key = Token.create!(user: u, action: 'api').value
+puts({ ProjectId: pr.id, UserId: u.id, UserApiKey: key }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+Project.where('identifier LIKE ?', 'cbhttp-%').each(&:destroy)
+User.where('login LIKE ?', 'cbhttp%').each(&:destroy)
+Role.where('name LIKE ?', 'CBHTTP_%').each(&:destroy)
+CustomField.where('name LIKE ?', 'CBHTTP_%').each(&:destroy)
+puts 'cleaned'
+```
 
 ### 共通
 
@@ -1688,12 +2717,12 @@ $response.cache_bundle.projects.Count -gt 0
 **確認方法:**
 ```powershell
 $response = Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
-$p = $response.cache_bundle.projects[0]
+$p = $response.cache_bundle.projects | Where-Object id -eq {ProjectId}
 $p.id -ne $null -and $p.name -ne $null -and $p.identifier -ne $null -and $p.trackers -ne $null -and $p.enabled_modules -ne $null
 ```
 
 **期待結果:**
-- projects[0] に id/name/identifier/trackers/enabled_modules が存在する
+- `True`（用意で作ったプロジェクトの要素に id/name/identifier/trackers/enabled_modules が存在する）
 
 ---
 
@@ -1806,11 +2835,11 @@ if ($null -eq $withPerms) { $false } else {
 $response = Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $mems = $response.cache_bundle.project_memberships
 $keysAreInt = $mems.PSObject.Properties.Name | ForEach-Object { [int]::TryParse($_, [ref]$null) }
-($keysAreInt -notcontains $false)
+($keysAreInt -notcontains $false) -and ($mems.PSObject.Properties.Name -contains '{ProjectId}')
 ```
 
 **期待結果:**
-- すべてのキーが整数文字列としてパース可能
+- `True`（すべてのキーが整数文字列としてパース可能で、用意で作ったプロジェクトの ID がキーにある）
 
 ---
 
@@ -1821,11 +2850,11 @@ $keysAreInt = $mems.PSObject.Properties.Name | ForEach-Object { [int]::TryParse(
 $response = Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $vers = $response.cache_bundle.project_versions
 $keysAreInt = $vers.PSObject.Properties.Name | ForEach-Object { [int]::TryParse($_, [ref]$null) }
-($keysAreInt -notcontains $false)
+($keysAreInt -notcontains $false) -and ($vers.PSObject.Properties.Name -contains '{ProjectId}')
 ```
 
 **期待結果:**
-- すべてのキーが整数文字列としてパース可能
+- `True`（すべてのキーが整数文字列としてパース可能で、用意で作ったプロジェクトの ID がキーにある）
 
 ---
 
@@ -1836,11 +2865,11 @@ $keysAreInt = $vers.PSObject.Properties.Name | ForEach-Object { [int]::TryParse(
 $response = Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $cats = $response.cache_bundle.project_issue_categories
 $keysAreInt = $cats.PSObject.Properties.Name | ForEach-Object { [int]::TryParse($_, [ref]$null) }
-($keysAreInt -notcontains $false)
+($keysAreInt -notcontains $false) -and ($cats.PSObject.Properties.Name -contains '{ProjectId}')
 ```
 
 **期待結果:**
-- すべてのキーが整数文字列としてパース可能
+- `True`（すべてのキーが整数文字列としてパース可能で、用意で作ったプロジェクトの ID がキーにある）
 
 ---
 
@@ -1884,11 +2913,11 @@ try {
 
 ### [2-18] 非 admin が他ユーザの user_id を指定すると 422 を返す
 
-**前提条件:** admin 以外のユーザ（例: id=2）が存在し、その API キーが取得できること。
+用意で作った非管理のユーザーの API キーを使う。
 
 **確認方法:**
 ```powershell
-$nonAdminKey = '{UserApiKey}'  # admin 以外のユーザの API キー
+$nonAdminKey = '{UserApiKey}'  # 用意で作った非管理のユーザーの API キー
 try {
     Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id=1' -Headers @{'X-Redmine-API-Key'=$nonAdminKey}
 } catch {
@@ -1898,9 +2927,6 @@ try {
 
 **期待結果:**
 - ステータスコード 422 Unprocessable Entity
-
-**スキップ条件:**
-- 非 admin ユーザの API キーが取得できない場合
 
 ---
 
@@ -1924,7 +2950,7 @@ $response.StatusCode
 `groups` は要求者（admin）の権限で全件返る（`target_user` にスコープしない）。自分（`user_id=1`）と他ユーザで
 件数が一致することで、スコープ基準が `User.current` であることを固定する。
 
-**前提条件:** admin 以外のユーザ（`{UserId}`）が存在すること。
+別ユーザには、用意で作った非管理のユーザー（`{UserId}`）を使う。
 
 **確認方法:**
 ```powershell
@@ -1938,9 +2964,6 @@ $other = (Invoke-RestMethod -Uri '{BaseUrl}/cache_bundle.json?user_id={UserId}' 
 **期待結果:**
 - admin キーで requester=admin である限り、target を変えても users / custom_fields / groups の件数は変わらない（全件）
 - 一方 `project_memberships` / `project_versions` / `project_issue_categories` は target ユーザにスコープされる（別テスト [1-16 系] で担保）
-
-**スキップ条件:**
-- 非 admin ユーザが存在しない場合
 
 ---
 

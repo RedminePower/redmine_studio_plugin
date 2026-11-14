@@ -56,7 +56,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 ### フェーズ 2: 機能テスト（バッチ 2〜3）
 
-日付独立機能の動作を確認する。テストデータをセットアップ後、以下のバッチ単位で実行する。
+日付独立機能の動作を確認する。「2. 機能テスト」の「テストデータ」のセットアップを流し、出た JSON の値を各テストの `{ParentNewId}` などに入れてから、以下のバッチ単位で実行する。バッチ 3 のあとに後片付けを流す。
 
 **バッチ 2: needs_derived メソッドテスト（[2-A] 〜 [2-B]）**
 - [2-A] 基本動作テスト
@@ -67,7 +67,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 ### フェーズ 3: HTTP テスト
 
-[3-1] の前に、date-independent-test-1 を対象にした有効なルールを 1 件作り、その id を `$id` に入れてから [3-1] を実行する。コンテナの再起動は要らない。Runner テストで変えるのは DB の中身（ルールと `Setting.parent_issue_dates`）だけで、Puma はリクエストのたびに DB を読む。
+「3. HTTP テスト」の用意を流し、出た JSON の値を [3-1] の `{RuleId}` に入れてから [3-1] を実行し、最後に後片付けを流す。コンテナの再起動は要らない。Runner テストで変えるのは DB の中身（ルールと `Setting.parent_issue_dates`）だけで、Puma はリクエストのたびに DB を読む。
 
 ---
 
@@ -192,7 +192,7 @@ puts en_ok
 - date-independent-test-1 に、子チケットを 1 つ持つ親チケットを 3 つ（ステータス「新規」「進行中」「終了」）と、子チケットのないチケットを 1 つ
 - date-independent-test-2 に、子チケットを 1 つ持つ親チケットを 1 つ（ステータス「新規」）
 - 親チケットは「新規」で作り、子チケットを付けてから、親のステータスを変える（終了扱いの親には、終了していない子を付けられない）
-- 各テストの「親チケットID」は、特に書いていなければ date-independent-test-1 の「新規」の親チケット
+- 各テストの `{ParentNewId}` などは、下のセットアップが出す JSON の値（`{ParentNewId}` は date-independent-test-1 の「新規」の親チケット）
 
 **ステータス:**
 - 既存のステータスを使う。英語で作った環境でも同じに流せるように、名前では探さず、並び順で選ぶ。この仕様書の「新規」「進行中」「終了」は、次の 3 つを指す（判定はステータスの ID だけを見るので、名前が違っても結果は同じ）
@@ -205,8 +205,74 @@ status_closed = IssueStatus.where(is_closed: true).sorted.first        # 「終�
 
 **前提条件:**
 - Redmine の初期データ（既定の設定）を読み込み済みであること（言語は問わない）
-- Redmine の設定「子チケットの値から算出」が有効であること
-  - `Setting.parent_issue_dates = 'derived'`
+- Redmine の設定「子チケットの値から算出」は、各テストで `Setting.parent_issue_dates` を変えて決める（セットアップで今の値を控え、後片付けで戻す）
+
+**セットアップ（バッチ 2 の前に 1 回）:**
+
+前回の残りを消してから作る。最後の行の JSON の値を、各テストの `{Project1Id}`・`{ParentNewId}` などに入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+identifiers = %w[date-independent-test-1 date-independent-test-2]
+# 前回の残り（テスト用プロジェクトを対象にしたルールとプロジェクト）を消す
+old_ids = Project.where(identifier: identifiers).pluck(:id)
+DateIndependent.all.select { |r| (r.project_ids & old_ids).any? }.each(&:destroy)
+Project.where(id: old_ids).order(lft: :desc).each(&:destroy)
+
+status_new = IssueStatus.where(is_closed: false).sorted.first
+status_in_progress = IssueStatus.where(is_closed: false).sorted.second
+status_closed = IssueStatus.where(is_closed: true).sorted.first
+tracker = Tracker.sorted.first
+priority = IssuePriority.default || IssuePriority.active.first
+mk_project = ->(identifier) {
+  pr = Project.new(name: identifier, identifier: identifier, is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  pr
+}
+mk_issue = ->(pr, subject, parent = nil) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status_new,
+                priority: priority, parent_issue_id: parent&.id)
+}
+# 親を「新規」で作り、子を付けてから、親のステータスを変える
+mk_parent = ->(pr, subject, status) {
+  parent = mk_issue.call(pr, subject)
+  mk_issue.call(pr, "#{subject} の子", parent)
+  parent.reload
+  if status != status_new
+    parent.status = status
+    parent.save!
+  end
+  parent
+}
+p1 = mk_project.call(identifiers[0])
+p2 = mk_project.call(identifiers[1])
+parent_new = mk_parent.call(p1, '親（新規）', status_new)
+parent_in_progress = mk_parent.call(p1, '親（進行中）', status_in_progress)
+parent_closed = mk_parent.call(p1, '親（終了）', status_closed)
+leaf = mk_issue.call(p1, '子チケットなし')
+p2_parent = mk_parent.call(p2, '親（新規）', status_new)
+puts({ Project1Id: p1.id, Project2Id: p2.id, ParentNewId: parent_new.id, ParentInProgressId: parent_in_progress.id,
+       ParentClosedId: parent_closed.id, LeafId: leaf.id, Project2ParentId: p2_parent.id,
+       ParentIssueDates: Setting.parent_issue_dates }.to_json)
+```
+
+**後片付け（バッチ 3 のあとに 1 回）:**
+
+テスト用プロジェクトを対象にしたルールとプロジェクト（チケットも一緒に消える）を消し、`Setting.parent_issue_dates` をセットアップの前の値（JSON の `{ParentIssueDates}`）に戻す。
+
+```ruby
+User.current = User.find(1)
+ids = Project.where(identifier: %w[date-independent-test-1 date-independent-test-2]).pluck(:id)
+DateIndependent.all.select { |r| (r.project_ids & ids).any? }.each(&:destroy)
+Project.where(id: ids).order(lft: :desc).each(&:destroy)
+Setting.parent_issue_dates = '{ParentIssueDates}'
+puts Project.where(id: ids).none? && Setting.parent_issue_dates == '{ParentIssueDates}'
+```
+
+**期待結果:** `true` が出力される
 
 ---
 
@@ -221,7 +287,7 @@ status_closed = IssueStatus.where(is_closed: true).sorted.first        # 「終�
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'independent'
-issue = Issue.find(親チケットID)
+issue = Issue.find({ParentNewId})
 puts issue.send(:needs_derived)
 ```
 
@@ -237,8 +303,8 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
-DateIndependent.where(is_enabled: true).destroy_all
-issue = Issue.find(親チケットID)
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
+issue = Issue.find({ParentNewId})
 puts issue.send(:needs_derived)
 ```
 
@@ -255,6 +321,7 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project = Project.find_by(identifier: 'date-independent-test-1')
 rule = DateIndependent.create(
   title: 'Test Rule',
@@ -262,7 +329,7 @@ rule = DateIndependent.create(
   project_ids: [project.id],
   calculate_status_ids: []
 )
-issue = Issue.find(親チケットID)  # project = date-independent-test-1
+issue = Issue.find({ParentNewId})  # project = date-independent-test-1
 puts issue.send(:needs_derived)
 ```
 
@@ -278,6 +345,7 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project = Project.find_by(identifier: 'date-independent-test-1')
 rule = DateIndependent.create(
   title: 'Disabled Rule',
@@ -285,7 +353,7 @@ rule = DateIndependent.create(
   project_ids: [project.id],
   calculate_status_ids: []
 )
-issue = Issue.find(親チケットID)
+issue = Issue.find({ParentNewId})
 puts issue.send(:needs_derived)
 ```
 
@@ -301,6 +369,7 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project1 = Project.find_by(identifier: 'date-independent-test-1')
 project2 = Project.find_by(identifier: 'date-independent-test-2')
 rule = DateIndependent.create(
@@ -309,7 +378,7 @@ rule = DateIndependent.create(
   project_ids: [project1.id],  # プロジェクト1のみ
   calculate_status_ids: []
 )
-issue = Issue.find(親チケットID)  # project = date-independent-test-2
+issue = Issue.find({Project2ParentId})  # project = date-independent-test-2
 puts issue.send(:needs_derived)
 ```
 
@@ -325,6 +394,7 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project1 = Project.find_by(identifier: 'date-independent-test-1')
 project2 = Project.find_by(identifier: 'date-independent-test-2')
 rule = DateIndependent.create(
@@ -333,8 +403,8 @@ rule = DateIndependent.create(
   project_ids: [project1.id, project2.id],  # 両方のプロジェクト
   calculate_status_ids: []
 )
-issue1 = Issue.find(プロジェクト1の親チケットID)
-issue2 = Issue.find(プロジェクト2の親チケットID)
+issue1 = Issue.find({ParentNewId})
+issue2 = Issue.find({Project2ParentId})
 puts issue1.send(:needs_derived)
 puts issue2.send(:needs_derived)
 ```
@@ -354,6 +424,7 @@ puts issue2.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project = Project.find_by(identifier: 'date-independent-test-1')
 status_new = IssueStatus.where(is_closed: false).sorted.first
 rule = DateIndependent.create(
@@ -362,7 +433,7 @@ rule = DateIndependent.create(
   project_ids: [project.id],
   calculate_status_ids: [status_new.id]
 )
-issue = Issue.find(親チケットID)  # status = 新規
+issue = Issue.find({ParentNewId})  # status = 新規
 puts issue.send(:needs_derived)
 ```
 
@@ -377,6 +448,7 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project = Project.find_by(identifier: 'date-independent-test-1')
 status_new = IssueStatus.where(is_closed: false).sorted.first
 status_in_progress = IssueStatus.where(is_closed: false).sorted.second
@@ -386,7 +458,7 @@ rule = DateIndependent.create(
   project_ids: [project.id],
   calculate_status_ids: [status_new.id]  # 新規のみ
 )
-issue = Issue.find(親チケットID)  # status = 進行中
+issue = Issue.find({ParentInProgressId})  # status = 進行中
 puts issue.send(:needs_derived)
 ```
 
@@ -402,6 +474,7 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project = Project.find_by(identifier: 'date-independent-test-1')
 status_new = IssueStatus.where(is_closed: false).sorted.first
 status_in_progress = IssueStatus.where(is_closed: false).sorted.second
@@ -418,7 +491,7 @@ rule2 = DateIndependent.create(
   project_ids: [project.id],
   calculate_status_ids: [status_in_progress.id]
 )
-issue = Issue.find(親チケットID)  # status = 進行中
+issue = Issue.find({ParentInProgressId})  # status = 進行中
 puts issue.send(:needs_derived)
 ```
 
@@ -434,6 +507,7 @@ puts issue.send(:needs_derived)
 **確認方法:**
 ```ruby
 Setting.parent_issue_dates = 'derived'
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
 project = Project.find_by(identifier: 'date-independent-test-1')
 status_new = IssueStatus.where(is_closed: false).sorted.first
 status_in_progress = IssueStatus.where(is_closed: false).sorted.second
@@ -446,9 +520,9 @@ rule = DateIndependent.create(
   calculate_status_ids: [status_new.id, status_in_progress.id]  # 新規と進行中
 )
 
-issue_new = Issue.find(ステータス新規の親チケットID)
-issue_in_progress = Issue.find(ステータス進行中の親チケットID)
-issue_closed = Issue.find(ステータス終了の親チケットID)
+issue_new = Issue.find({ParentNewId})
+issue_in_progress = Issue.find({ParentInProgressId})
+issue_closed = Issue.find({ParentClosedId})
 
 puts issue_new.send(:needs_derived)
 puts issue_in_progress.send(:needs_derived)
@@ -471,7 +545,7 @@ puts issue_closed.send(:needs_derived)
 
 **確認方法:**
 ```ruby
-leaf_issue = Issue.find(子チケットなしのチケットID)
+leaf_issue = Issue.find({LeafId})
 puts leaf_issue.leaf?
 puts leaf_issue.dates_derived?
 ```
@@ -487,7 +561,8 @@ puts leaf_issue.dates_derived?
 
 **確認方法:**
 ```ruby
-parent_issue = Issue.find(親チケットID)
+DateIndependent.all.select { |r| (r.project_ids & [{Project1Id}, {Project2Id}]).any? }.each(&:destroy)  # 前のテストのルールを消す
+parent_issue = Issue.find({ParentNewId})
 puts parent_issue.leaf?
 puts parent_issue.dates_derived?
 puts parent_issue.send(:needs_derived)
@@ -504,7 +579,7 @@ puts parent_issue.dates_derived? == parent_issue.send(:needs_derived)
 
 **確認方法:**
 ```ruby
-di = DateIndependent.new(title: nil, project_ids: [1])
+di = DateIndependent.new(title: nil, project_ids: [{Project1Id}])
 puts di.valid?
 puts di.errors[:title].present?
 ```
@@ -533,6 +608,37 @@ puts di.errors[:project_ids].present?
 > **注記:** 標準的な CRUD 操作のテストは実施しない（標準的な Rails の実装であり、プラグイン固有のロジックには影響しないため）。
 > コントローラ独自の整形処理に関わる [3-1] のみ実施する。
 
+**実行方法:** 用意を流し、[3-1] を実行し、後片付けを流す。
+
+**用意（HTTP テストの前に 1 回）:**
+
+テスト用のプロジェクトと、それを対象にした有効なルールを作る（前回の残りがあれば先に消す）。最後の行の値を [3-1] の `{RuleId}` に入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+DateIndependent.where('title LIKE ?', 'DI-HTTP-%').each(&:destroy)
+Project.where('identifier LIKE ?', 'di-http-%').order(lft: :desc).each(&:destroy)
+sfx = SecureRandom.hex(3)
+pr = Project.new(name: "DI-HTTP-#{sfx}", identifier: "di-http-#{sfx}", is_public: false)
+pr.enabled_module_names = %w[issue_tracking]
+pr.save!
+rule = DateIndependent.create!(title: "DI-HTTP-#{sfx}", is_enabled: true, project_ids: [pr.id], calculate_status_ids: [])
+puts({ RuleId: rule.id }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+# [3-1] の update は失敗するのでタイトルは変わらないが、念のため対象プロジェクトでも探す
+ids = Project.where('identifier LIKE ?', 'di-http-%').pluck(:id)
+DateIndependent.all.select { |r| r.title.to_s.start_with?('DI-HTTP-') || (r.project_ids & ids).any? }.each(&:destroy)
+Project.where(id: ids).order(lft: :desc).each(&:destroy)
+puts DateIndependent.where('title LIKE ?', 'DI-HTTP-%').none? && Project.where('identifier LIKE ?', 'di-http-%').none?
+```
+
 ### [3-1] 配列パラメータ欠落時に 500 にならない
 
 コントローラの create / update は `project_ids` / `calculate_status_ids` の配列パラメータを整形してモデルに渡す。
@@ -544,18 +650,30 @@ puts di.errors[:project_ids].present?
 admin でログインしたセッションで、`authenticity_token` のみ付与し配列パラメータを含まないボディを送る。
 
 ```powershell
+$s = $null
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$t = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $s -UseBasicParsing `
+  -Body @{ authenticity_token = $t; username = '{Username}'; password = '{Password}' } | Out-Null
+$page = Invoke-WebRequest -Uri '{BaseUrl}/date_independents/new' -WebSession $s -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="csrf-token" content="([^"]+)"').Groups[1].Value)
+
 # create（title 空・project_ids / calculate_status_ids 無し）
-Invoke-WebRequest -Uri "$base/date_independents" -Method Post -WebSession $sess -SkipHttpErrorCheck `
+$c = Invoke-WebRequest -Uri '{BaseUrl}/date_independents' -Method Post -WebSession $s -SkipHttpErrorCheck -UseBasicParsing `
   -Body @{ authenticity_token = $token; 'date_independent[title]' = '' }
 
 # update（既存ルールに対し title のみ送信）
-Invoke-WebRequest -Uri "$base/date_independents/$id" -Method Post -WebSession $sess -SkipHttpErrorCheck `
+$u = Invoke-WebRequest -Uri '{BaseUrl}/date_independents/{RuleId}' -Method Post -WebSession $s -SkipHttpErrorCheck -UseBasicParsing `
   -Body @{ authenticity_token = $token; '_method' = 'patch'; 'date_independent[title]' = 'updated' }
+
+$err = { param($r) ([regex]::Match($r.Content, "(?s)<div id=[`"']errorExplanation[`"']>(.*?)</div>").Groups[1].Value -replace '<[^>]+>', ' ' -replace '\s+', ' ').Trim() }
+"create: $($c.StatusCode) $(& $err $c)"
+"update: $($u.StatusCode) $(& $err $u)"
 ```
 
 **期待結果:**
 - どちらもステータス 200（500 にならない）
-- レスポンスにバリデーションエラー（タイトル必須 / 対象プロジェクト必須）が表示される
+- レスポンスにバリデーションエラー（create はタイトル必須と対象プロジェクト必須、update は対象プロジェクト必須）が表示される
 
 ### 確認可能な項目（参考・未実施）
 
@@ -598,10 +716,9 @@ Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを�
 
 ### テストデータの管理
 
-- テストデータ（「2. 機能テスト」の「テストデータ」に挙げたプロジェクトとチケット）は、セットアップの最初に前回の残りを消してから作り、HTTP テストのあとに消す。何度流しても同じ結果になるようにするため
-- ルールは、[2-A-2] 以降の各テストの最初と、HTTP テストのあとに、すべて消す（`DateIndependent.destroy_all`）。前のテストのルールが残っていると、結果が変わる（たとえば [2-A-3] のルールが残ると [2-A-4] が `false` になる）
-- `Setting.parent_issue_dates` は、セットアップの前の値を控えておき、HTTP テストのあとに戻す（[2-A-1] で `independent` に、[2-A-2] 以降で `derived` に変える）
-- ルールをすべて消すので、もとからあるルールも消える。テスト用の環境で流す
+- テストデータ（「2. 機能テスト」の「テストデータ」に挙げたプロジェクトとチケット）は、セットアップの最初に前回の残りを消してから作り、バッチ 3 のあとの後片付けで消す。HTTP テストのデータは、HTTP テストの用意で作り、後片付けで消す。何度流しても同じ結果になるようにするため
+- ルールは、[2-A-2] 以降の各テストの最初と後片付けで、テスト用プロジェクトを対象にしたものだけを消す。前のテストのルールが残っていると、結果が変わる（たとえば [2-A-3] のルールが残ると [2-A-4] が `false` になる）。判定はチケットのプロジェクトを対象にしたルールだけを見るので、もとからあるルールは結果に関わらず、消さない
+- `Setting.parent_issue_dates` は、セットアップで前の値を控え（JSON の `ParentIssueDates`）、後片付けで戻す（[2-A-1] で `independent` に、[2-A-2] 以降で `derived` に変える）。全体の設定なので、途中で止めたときも後片付けは必ず流す
 - 既存のトラッカー・ステータスは使うだけで、変えない
 
 ### Runner テスト実行時の注意事項

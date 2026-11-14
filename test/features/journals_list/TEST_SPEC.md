@@ -30,6 +30,8 @@
 
 ## 1. Runner テスト
 
+チケットなどが要る試験は、試験の中でプロジェクト・チケット・ユーザーを作り、終わったら消す。
+
 ### [1-1] カラムクラス定義確認
 
 **確認方法:**
@@ -138,17 +140,28 @@ puts "label_journals_list_hide_all: #{I18n.t(:label_journals_list_hide_all)}"
 
 **確認方法:**
 ```ruby
-project = Project.first
-issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-9_Test', author: User.find(1))
-Journal.create(journalized: issue, user: User.find(1), notes: 'Test comment 1')
-Journal.create(journalized: issue, user: User.find(1), notes: 'Test comment 2')
-Journal.create(journalized: issue, user: User.find(1), notes: '')
+# 試験のデータをその場で作る（終わったら消す）
+admin = User.find(1)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+begin
+  issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-9_Test', author: admin)
+  Journal.create!(journalized: issue, user: admin, notes: 'Test comment 1')
+  Journal.create!(journalized: issue, user: admin, notes: 'Test comment 2')
+  Journal.create(journalized: issue, user: admin, notes: '')
 
-User.current = User.find(1)
-journals = issue.visible_journals_with_notes
-puts "count: #{journals.size}"
-puts "all_have_notes: #{journals.all? { |j| j.notes.present? }}"
-puts "note_numbers_set: #{journals.all? { |j| j.instance_variable_get(:@note_number).is_a?(Integer) }}"
+  journals = Issue.find(issue.id).visible_journals_with_notes
+  puts "count: #{journals.size}"
+  puts "all_have_notes: #{journals.all? { |j| j.notes.present? }}"
+  puts "note_numbers_set: #{journals.all? { |j| j.instance_variable_get(:@note_number).is_a?(Integer) }}"
+ensure
+  User.current = admin
+  project.destroy
+end
 ```
 
 **期待結果:**
@@ -160,43 +173,79 @@ puts "note_numbers_set: #{journals.all? { |j| j.instance_variable_get(:@note_num
 
 **確認方法:**
 ```ruby
-project = Project.first
-issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-10_PrivateTest', author: User.find(1))
-Journal.create(journalized: issue, user: User.find(1), notes: 'Public comment')
-Journal.create(journalized: issue, user: User.find(1), notes: 'Private comment', private_notes: true)
+# 試験のデータをその場で作る（終わったら消す）
+admin = User.find(1)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+role = user = nil
+mk_user = ->(name) {
+  u = User.new(login: "jl_#{name}_#{sfx}", firstname: 'JL', lastname: name, mail: "jl_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  u
+}
+begin
+  issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-10_PrivateTest', author: admin)
+  Journal.create!(journalized: issue, user: admin, notes: 'Public comment')
+  Journal.create!(journalized: issue, user: admin, notes: 'Private comment', private_notes: true)
 
-User.current = User.find(1)
-admin_journals = issue.visible_journals_with_notes
-puts "admin_count: #{admin_journals.size}"
+  admin_journals = Issue.find(issue.id).visible_journals_with_notes
+  puts "admin_count: #{admin_journals.size}"
 
-user = User.where(admin: false).where(status: 1).first
-User.current = user
-role = Role.find_by(name: 'Manager') || Role.first
-Member.create(user: user, project: project, roles: [role]) unless Member.where(user: user, project: project).exists?
-user_journals = issue.visible_journals_with_notes
-puts "user_count: #{user_journals.size}"
-
-User.current = User.find(1)
+  # プライベートコメントを見る権限（:view_private_notes）の無いロールのメンバー
+  role = Role.create!(name: "JL_#{sfx}", permissions: [:view_issues])
+  user = mk_user.call('member')
+  Member.create!(principal: user, project: project, roles: [role])
+  User.current = user
+  user_journals = Issue.find(issue.id).visible_journals_with_notes
+  puts "user_count: #{user_journals.size}"
+ensure
+  User.current = admin
+  project.destroy
+  user&.destroy
+  role&.destroy
+end
 ```
 
 **期待結果:**
 - `admin_count: 2`（パブリック + プライベート）
-- `user_count:` ユーザーの `:view_private_notes` 権限に応じた数値
+- `user_count: 1`（`:view_private_notes` の無いユーザーにはパブリックだけ）
 
 ### [1-11] 一括プリロード（N+1 対策）確認
 
 **確認方法:**
 ```ruby
-q = IssueQuery.new(name: 'test', filters: {})
-q.column_names = [:id, :subject, :journals_list]
-issues = q.issues(limit: 5)
-preloaded = issues.select { |i| i.instance_variable_defined?(:@visible_journals_with_notes) }
-puts "preloaded_count: #{preloaded.size}"
-puts "total_issues: #{issues.size}"
+# 試験のデータをその場で作る（終わったら消す）
+admin = User.find(1)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+begin
+  2.times do |n|
+    i = Issue.create!(project: project, tracker: project.trackers.first, subject: "JL_1-11_#{n}", author: admin)
+    Journal.create!(journalized: i, user: admin, notes: "Comment #{n}")
+  end
+  q = IssueQuery.new(name: 'test', filters: {}, project: project)
+  q.column_names = [:id, :subject, :journals_list]
+  issues = q.issues(limit: 5)
+  preloaded = issues.select { |i| i.instance_variable_defined?(:@visible_journals_with_notes) }
+  puts "preloaded_count: #{preloaded.size}"
+  puts "total_issues: #{issues.size}"
+ensure
+  User.current = admin
+  project.destroy
+end
 ```
 
 **期待結果:**
-- `preloaded_count` と `total_issues` が同じ値
+- `preloaded_count: 2`・`total_issues: 2`（作った 2 件がすべてプリロードされる）
 
 ### [1-12] ルーティング確認
 
@@ -219,64 +268,95 @@ puts "show_id: #{show_route[:id]}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-conn = ActiveRecord::Base.connection
-status_1 = IssueStatus.first
-status_2 = IssueStatus.second
+# 試験のデータをその場で作る（終わったら消す）
+admin = User.find(1)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+begin
+  conn = ActiveRecord::Base.connection
+  status_1 = IssueStatus.first
+  status_2 = IssueStatus.second
 
-issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-13_Status', author: User.find(1), status: status_1)
-issue.update_columns(status_id: status_1.id)
+  issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-13_Status', author: admin, status: status_1)
+  issue.update_columns(status_id: status_1.id)
 
-# コメント1
-j1 = Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 1')
+  # コメント1
+  j1 = Journal.create!(journalized: issue, user: admin, notes: 'Comment 1')
 
-# コメントなしでステータス変更
-j2_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', 1, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
-conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j2_id}, 'attr', 'status_id', '#{status_1.id}', '#{status_2.id}')")
+  # コメントなしでステータス変更
+  j2_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', 1, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
+  conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j2_id}, 'attr', 'status_id', '#{status_1.id}', '#{status_2.id}')")
 
-# コメント2
-j3 = Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 2')
+  # コメント2
+  j3 = Journal.create!(journalized: issue, user: admin, notes: 'Comment 2')
 
-issue.update_columns(status_id: status_2.id)
-journals = Issue.find(issue.id).visible_journals_with_notes
-puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
-puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
+  issue.update_columns(status_id: status_2.id)
+  journals = Issue.find(issue.id).visible_journals_with_notes
+  puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
+  puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
+  puts "expected: #{status_2.name}"
+ensure
+  User.current = admin
+  project.destroy
+end
 ```
 
 **期待結果:**
-- `j1_status`: ステータス2の名前（次のコメント直前にステータス変更が反映される）
-- `j2_status`: ステータス2の名前（最後のコメントなので現在値）
+- `j1_status`: ステータス2の名前（`expected` と一致。次のコメント直前にステータス変更が反映される）
+- `j2_status`: ステータス2の名前（`expected` と一致。最後のコメントなので現在値）
 
 ### [1-14] 累積担当者の計算確認（次のコメント直前の値）
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-conn = ActiveRecord::Base.connection
-user_a = User.find(1)
-user_b = User.where(status: 1).where.not(id: 1).first
+# 試験のデータをその場で作る（終わったら消す）
+admin = User.find(1)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+user_b = nil
+mk_user = ->(name) {
+  u = User.new(login: "jl_#{name}_#{sfx}", firstname: 'JL', lastname: name, mail: "jl_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  u
+}
+begin
+  conn = ActiveRecord::Base.connection
+  user_a = admin
+  user_b = mk_user.call('assignee')
 
-issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-14_Assign', author: user_a)
-issue.update_columns(assigned_to_id: nil)
+  issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-14_Assign', author: user_a)
+  issue.update_columns(assigned_to_id: nil)
 
-# コメント1
-j1 = Journal.create(journalized: issue, user: user_a, notes: 'Comment 1')
+  # コメント1
+  j1 = Journal.create!(journalized: issue, user: user_a, notes: 'Comment 1')
 
-# コメントなしで担当者変更
-j2_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', #{user_a.id}, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
-conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j2_id}, 'attr', 'assigned_to_id', '', '#{user_b.id}')")
+  # コメントなしで担当者変更
+  j2_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', #{user_a.id}, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
+  conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j2_id}, 'attr', 'assigned_to_id', '', '#{user_b.id}')")
 
-# コメント2
-j3 = Journal.create(journalized: issue, user: user_a, notes: 'Comment 2')
+  # コメント2
+  j3 = Journal.create!(journalized: issue, user: user_a, notes: 'Comment 2')
 
-issue.update_columns(assigned_to_id: user_b.id)
-journals = Issue.find(issue.id).visible_journals_with_notes
-puts "j1_assigned: #{journals[0].instance_variable_get(:@cumulative_assigned_to_name)}"
-puts "j1_expected: #{user_b.name}"
-puts "j2_assigned: #{journals[1].instance_variable_get(:@cumulative_assigned_to_name)}"
-puts "j2_expected: #{user_b.name}"
+  issue.update_columns(assigned_to_id: user_b.id)
+  journals = Issue.find(issue.id).visible_journals_with_notes
+  puts "j1_assigned: #{journals[0].instance_variable_get(:@cumulative_assigned_to_name)}"
+  puts "j1_expected: #{user_b.name}"
+  puts "j2_assigned: #{journals[1].instance_variable_get(:@cumulative_assigned_to_name)}"
+  puts "j2_expected: #{user_b.name}"
+ensure
+  User.current = admin
+  project.destroy
+  user_b&.destroy
+end
 ```
 
 **期待結果:**
@@ -287,32 +367,43 @@ puts "j2_expected: #{user_b.name}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-conn = ActiveRecord::Base.connection
-status_1 = IssueStatus.first
-status_2 = IssueStatus.second
+# 試験のデータをその場で作る（終わったら消す）
+admin = User.find(1)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+begin
+  conn = ActiveRecord::Base.connection
+  status_1 = IssueStatus.first
+  status_2 = IssueStatus.second
 
-issue = Issue.create(project: project, tracker: project.trackers.first, subject: 'JL_1-15_NoNote', author: User.find(1), status: status_1)
-issue.update_columns(status_id: status_1.id)
+  issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-15_NoNote', author: admin, status: status_1)
+  issue.update_columns(status_id: status_1.id)
 
-# コメント1
-Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 1')
+  # コメント1
+  Journal.create!(journalized: issue, user: admin, notes: 'Comment 1')
 
-# 属性変更のみ（コメントなし）
-j_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', 1, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
-conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j_id}, 'attr', 'status_id', '#{status_1.id}', '#{status_2.id}')")
+  # 属性変更のみ（コメントなし）
+  j_id = conn.insert("INSERT INTO journals (journalized_id, journalized_type, user_id, notes, created_on) VALUES (#{issue.id}, 'Issue', 1, '', '#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}')")
+  conn.execute("INSERT INTO journal_details (journal_id, property, prop_key, old_value, value) VALUES (#{j_id}, 'attr', 'status_id', '#{status_1.id}', '#{status_2.id}')")
 
-# コメント2
-Journal.create(journalized: issue, user: User.find(1), notes: 'Comment 2')
+  # コメント2
+  Journal.create!(journalized: issue, user: admin, notes: 'Comment 2')
 
-issue.update_columns(status_id: status_2.id)
-journals = Issue.find(issue.id).visible_journals_with_notes
-puts "count: #{journals.size}"
-puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
-puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
-puts "j1_expected: #{status_2.name}"
-puts "j2_expected: #{status_2.name}"
+  issue.update_columns(status_id: status_2.id)
+  journals = Issue.find(issue.id).visible_journals_with_notes
+  puts "count: #{journals.size}"
+  puts "j1_status: #{journals[0].instance_variable_get(:@cumulative_status_name)}"
+  puts "j2_status: #{journals[1].instance_variable_get(:@cumulative_status_name)}"
+  puts "j1_expected: #{status_2.name}"
+  puts "j2_expected: #{status_2.name}"
+ensure
+  User.current = admin
+  project.destroy
+end
 ```
 
 **期待結果:**
@@ -328,10 +419,15 @@ puts "j2_expected: #{status_2.name}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
+# 試験のデータをその場で作る（終わったら消す）
 admin = User.find(1)
-suffix = SecureRandom.hex(3)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+suffix = sfx
 group = Group.create!(lastname: "JL_Group_#{suffix}")
 gone = Group.create!(lastname: "JL_Gone_#{suffix}")
 issue = Issue.create!(project: project, tracker: project.trackers.first, subject: 'JL_1-16_Principals', author: admin)
@@ -357,7 +453,8 @@ begin
   Issue.load_visible_journals_list([batch_issue], admin)
   puts "batch: #{describe.call(batch_issue.visible_journals_with_notes) == expected}"
 ensure
-  issue.destroy
+  User.current = admin
+  project.destroy
   group.destroy
   gone.destroy if Group.exists?(gone.id)
 end
@@ -375,10 +472,15 @@ end
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
+# 試験のデータをその場で作る（終わったら消す）
 admin = User.find(1)
-suffix = SecureRandom.hex(3)
+User.current = admin
+sfx = SecureRandom.hex(3)
+project = Project.new(name: "JL_#{sfx}", identifier: "jl-#{sfx}")
+project.enabled_module_names = %w[issue_tracking]
+project.trackers = [Tracker.first]
+project.save!
+suffix = sfx
 group = Group.create!(lastname: "JL_Group_#{suffix}")
 locked = User.new(login: "jl_lock_#{suffix}", firstname: 'Locked', lastname: 'User', mail: "jl_lock_#{suffix}@example.com", status: 1)
 locked.password = locked.password_confirmation = 'password123'
@@ -408,7 +510,7 @@ begin
   puts "locked_admin_link: #{admin_author_cell.include?("/users/#{locked.id}\"")}"
 ensure
   User.current = admin
-  issue.destroy
+  project.destroy
   locked.destroy
   group.destroy
 end
@@ -422,6 +524,41 @@ end
 ---
 
 ## 2. HTTP テスト
+
+**実行方法:** 各ブロックを PowerShell で流す。`{Username}` / `{Password}` は管理者。
+
+**用意（HTTP テストの前に 1 回）:**
+コメントのあるチケットと、コメントのないチケットを Runner で作る（前回の残りがあれば先に消す）。
+コメントのあるチケットは、管理者がコメントを 2 つ書き（1 つ目は Wiki 記法の太字を含む）、担当者は管理者。
+最後の行の `IssueId`・`NoCommentId`・`JournalId`・`JournalId2`・`MissingJournalId`（存在しないジャーナル ID）を、各試験の `{IssueId}` などに入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+Project.where('identifier LIKE ?', 'jl-http-%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+pr = Project.new(name: "JL_HTTP_#{sfx}", identifier: "jl-http-#{sfx}")
+pr.enabled_module_names = %w[issue_tracking]
+pr.trackers = [Tracker.first]
+pr.save!
+issue = Issue.create!(project: pr, tracker: pr.trackers.first, subject: "JL_HTTP_comment_#{sfx}", author: admin)
+j1 = Journal.create!(journalized: issue, user: admin, notes: 'JL **bold** comment 1')
+j2 = Journal.create!(journalized: issue, user: admin, notes: 'JL comment 2')
+issue.update_columns(assigned_to_id: admin.id)
+none = Issue.create!(project: pr, tracker: pr.trackers.first, subject: "JL_HTTP_none_#{sfx}", author: admin)
+puts({ IssueId: issue.id, NoCommentId: none.id, JournalId: j1.id, JournalId2: j2.id, MissingJournalId: Journal.maximum(:id) + 100000 }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+Project.where('identifier LIKE ?', 'jl-http-%').each(&:destroy)
+puts Project.where('identifier LIKE ?', 'jl-http-%').count
+```
+
+**期待結果（後片付け）:** `0`
 
 ### チケット一覧の HTML 出力
 
@@ -439,13 +576,12 @@ $response.StatusCode
 
 ### [2-2] コメント付きチケットで journals-list テーブルが出力される
 
-**前提条件:**
-- コメント付きジャーナルを持つチケットが存在すること（チケットID を `{ISSUE_ID}` とする）
+用意で作ったコメントのあるチケット（`{IssueId}`）を表示する。
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={ISSUE_ID}' `
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'journals-list'
 ```
@@ -457,6 +593,9 @@ $response.Content -match 'journals-list'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'class="jl-note"'
 $response.Content -match 'class="jl-author"'
 $response.Content -match 'class="jl-date"'
@@ -470,13 +609,12 @@ $response.Content -match 'class="jl-toggle"'
 
 ### [2-4] コメントなしチケットでは journals-list が出力されない
 
-**前提条件:**
-- コメントなしのチケットが存在すること（チケットID を `{NO_COMMENT_ID}` とする）
+用意で作ったコメントのないチケット（`{NoCommentId}`）を表示する。
 
 **確認方法:**
 ```powershell
 $cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={NO_COMMENT_ID}' `
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={NoCommentId}' `
   -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'journals-list'
 ```
@@ -488,6 +626,9 @@ $response.Content -match 'journals-list'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'journals_list block_column'
 ```
 
@@ -510,7 +651,10 @@ $response.Content -match 'journals_list'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
-$response.Content -match 'href="/issues/{ISSUE_ID}#note-'
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
+$response.Content -match 'href="[^"]*/issues/{IssueId}#note-'
 ```
 
 **期待結果:** `True`
@@ -520,7 +664,10 @@ $response.Content -match 'href="/issues/{ISSUE_ID}#note-'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
-$response.Content -match 'jl-author.*href="/users/\d+"'
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
+$response.Content -match 'jl-author.*href="[^"]*/users/\d+"'
 ```
 
 **期待結果:** `True`
@@ -530,6 +677,9 @@ $response.Content -match 'jl-author.*href="/users/\d+"'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'jl-expand-btn'
 $response.Content -match 'jl-collapse-btn'
 $response.Content -match 'data-journal-id'
@@ -542,6 +692,9 @@ $response.Content -match 'data-journal-id'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'data-sort-col'
 $response.Content -match 'data-sort-keys'
 ```
@@ -553,6 +706,9 @@ $response.Content -match 'data-sort-keys'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'table\.journals-list'
 $response.Content -match 'jl-context-menu'
 $response.Content -match 'expandJournal'
@@ -566,6 +722,9 @@ $response.Content -match 'dblclick'
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'th.*jl-status.*jl-sortable'
 $response.Content -match 'td.*class="jl-status"'
 ```
@@ -574,30 +733,35 @@ $response.Content -match 'td.*class="jl-status"'
 
 ### [2-13] 担当者列がリンク付きで出力される
 
-**前提条件:**
-- 担当者が設定されたコメントを持つチケットが存在すること
+用意で作ったチケットは担当者が管理者なので、最後のコメントの担当者の列がユーザーのページへのリンクになる。
 
 **確認方法:**
 ```powershell
 # [2-2] と同じリクエスト
+$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=journals_list&f[]=issue_id&op[issue_id]==&v[issue_id][]={IssueId}' `
+  -Credential $cred -AllowUnencryptedAuthentication
 $response.Content -match 'th.*jl-assigned-to.*jl-sortable'
-$response.Content -match 'jl-assigned-to.*href="/users/\d+"'
+$response.Content -match 'jl-assigned-to.*href="[^"]*/users/\d+"'
 ```
 
 **期待結果:** 両方 `True`
 
 ### AJAX エンドポイント
 
+ブラウザ UI 補助のエンドポイントなので、Basic 認証は効かない。[2-14]〜[2-17] は、ログイン画面から管理者でログインしたセッション（`$session`）で送る。
+
 ### [2-14] JournalsListController#show - 単一ジャーナル取得
 
-**前提条件:**
-- コメント付きジャーナルが存在すること（ジャーナル ID を `{JOURNAL_ID}` とする）
+用意で作ったコメント（`{JournalId}`）を取得する。
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/journals_list/{JOURNAL_ID}' `
-  -Credential $cred -AllowUnencryptedAuthentication
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{Username}'; password = '{Password}' } | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/journals_list/{JournalId}' -WebSession $session -UseBasicParsing
 $response.StatusCode
 $response.Headers['Content-Type']
 ```
@@ -608,46 +772,56 @@ $response.Headers['Content-Type']
 
 ### [2-15] JournalsListController#show - Wiki レンダリング確認
 
-**前提条件:**
-- Wiki 記法を含むコメントを持つジャーナルが存在すること
+用意で作ったコメント（`{JournalId}`）は Wiki 記法の太字を含む。
 
 **確認方法:**
 ```powershell
 # [2-14] と同じリクエスト
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{Username}'; password = '{Password}' } | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/journals_list/{JournalId}' -WebSession $session -UseBasicParsing
 $response.Content.Length -gt 0
+$response.Content -match '<(strong|b)>bold</(strong|b)>'
 ```
 
-**期待結果:** `True`（空でないレスポンス）
+**期待結果:** 両方 `True`（空でないレスポンスで、太字がレンダリングされている）
 
 ### [2-16] JournalsListController#show_all - 複数ジャーナル一括取得
 
-**前提条件:**
-- 複数のコメント付きジャーナルが存在すること（ID を `{JID1}`, `{JID2}` とする）
+用意で作った 2 つのコメント（`{JournalId}`・`{JournalId2}`）を一括で取得する。
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/journals_list/show_all?ids[]={JID1}&ids[]={JID2}' `
-  -Credential $cred -AllowUnencryptedAuthentication
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{Username}'; password = '{Password}' } | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/journals_list/show_all?ids[]={JournalId}&ids[]={JournalId2}' -WebSession $session -UseBasicParsing
 $response.StatusCode
 $response.Headers['Content-Type']
 $json = $response.Content | ConvertFrom-Json
-$json.PSObject.Properties.Name
+($json.PSObject.Properties.Name -contains '{JournalId}') -and ($json.PSObject.Properties.Name -contains '{JournalId2}')
 ```
 
 **期待結果:**
 - ステータスコード: `200`
 - Content-Type: `application/json` を含む
-- JSON のキーに `{JID1}`, `{JID2}` が含まれる
+- `True`（JSON のキーに `{JournalId}`, `{JournalId2}` が含まれる）
 
 ### [2-17] JournalsListController#show - 存在しない ID で 404 エラー
 
+存在しない ID は、用意で今ある最大のジャーナル ID より大きい値（`{MissingJournalId}`）を選ぶ。
+
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{Username}'; password = '{Password}' } | Out-Null
 try {
-  Invoke-WebRequest -Uri '{BaseUrl}/journals_list/999999' `
-    -Credential $cred -AllowUnencryptedAuthentication
+  Invoke-WebRequest -Uri '{BaseUrl}/journals_list/{MissingJournalId}' -WebSession $session -UseBasicParsing
 } catch {
   $_.Exception.Response.StatusCode.Value__
 }
