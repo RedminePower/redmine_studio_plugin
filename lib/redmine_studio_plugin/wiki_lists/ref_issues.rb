@@ -223,7 +223,8 @@ TEXT
                 if issue.attributes.has_key?(atr)
                   word = issue.attributes[atr].to_s
                 else
-                  issue.custom_field_values.each do |cf|
+                  # 見ている人が見られないカスタムフィールドは、無い項目と同じに扱う（本体の一覧の列と同じ）
+                  issue.visible_custom_field_values(User.current).each do |cf|
                     if 'cf_'+cf.custom_field.id.to_s == atr || cf.custom_field.name == atr
                       word = cf.value
                     end

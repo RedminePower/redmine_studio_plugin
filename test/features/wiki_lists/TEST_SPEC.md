@@ -1670,10 +1670,25 @@ Version.create!(project: secret, name: "WM_SharedVer_#{sfx}", sharing: 'system')
 Version.create!(project: pub, name: "WM_PubVer_#{sfx}")
 IssueCategory.create!(project: secret, name: "WM_SecretCat_#{sfx}")
 IssueCategory.create!(project: pub, name: "WM_PubCat_#{sfx}")
+# カスタムフィールド: hidden は viewer のロールに見せない（WM_CFRole だけに見せる）、shown はだれにでも見せる。
+# hidden の値は WM_PubIssue の題名にする（[cf_N] で題名を探したとき、値が読めたかどうかが件数で分かるように）
+cf_role = Role.create!(name: "WM_CFRole_#{sfx}", permissions: [:view_issues])
+hidden_cf = IssueCustomField.create!(name: "WM_HiddenCF_#{sfx}", field_format: 'string', visible: false, role_ids: [cf_role.id], is_for_all: false, project_ids: [pub.id], tracker_ids: [tracker.id])
+shown_cf = IssueCustomField.create!(name: "WM_ShownCF_#{sfx}", field_format: 'string', visible: true, is_for_all: false, project_ids: [pub.id], tracker_ids: [tracker.id])
+pub_issue.reload
+pub_issue.custom_field_values = { hidden_cf.id.to_s => "WM_PubIssue_#{sfx}", shown_cf.id.to_s => "WM_ShownVal_#{sfx}" }
+pub_issue.save!
+# 説明に [cf_N] を使う ref_issues を書いたチケット（チケットのページを開いたときに動く）
+cf_issue = Issue.create!(project: pub, tracker: tracker, subject: "WM_CFIssue_#{sfx}", author: admin,
+                         description: "{{ref_issues(-p=#{pub.identifier},-s=[cf_#{hidden_cf.id}],-c)}}")
+cf_issue.reload
+cf_issue.custom_field_values = { hidden_cf.id.to_s => "WM_PubIssue_#{sfx}" }
+cf_issue.save!
 api_key = viewer.api_key
-puts({ suffix: sfx, key: api_key, pub_id: pub.id, pub_ident: pub.identifier, pub_name: pub.name, pub_issue: pub_issue.id,
+puts({ suffix: sfx, key: api_key, admin_key: admin.api_key, pub_id: pub.id, pub_ident: pub.identifier, pub_name: pub.name, pub_issue: pub_issue.id,
        secret_id: secret.id, secret_ident: secret.identifier, secret_name: secret.name, secret_only: secret_only.login,
-       secret_only_id: secret_only.id, locked: locked.login, locked_id: locked.id, tracker: tracker.name }.to_json)
+       secret_only_id: secret_only.id, locked: locked.login, locked_id: locked.id, tracker: tracker.name,
+       hidden_cf: hidden_cf.id, shown_cf: shown_cf.id, cf_issue: cf_issue.id }.to_json)
 ```
 
 実行（PowerShell 7）：
@@ -1711,6 +1726,11 @@ try {
     "ref_issues -f:project: " + (Same "{{ref_issues(-f:project=$($d.secret_name))}}" "{{ref_issues(-f:project=WM_None_$s)}}" $d.secret_name "WM_None_$s" 'can not resolve &#39;KEY&#39;')
     "ref_issues -f:version: " + (Same "{{ref_issues(-f:version=WM_SecretVer_$s)}}" "{{ref_issues(-f:version=WM_NoVer_$s)}}" "WM_SecretVer_$s" "WM_NoVer_$s" 'can not resolve &#39;KEY&#39;')
     "ref_issues -f:category: " + (Same "{{ref_issues(-f:category=WM_SecretCat_$s)}}" "{{ref_issues(-f:category=WM_NoCat_$s)}}" "WM_SecretCat_$s" "WM_NoCat_$s" 'can not resolve &#39;KEY&#39;')
+    # 見られないカスタムフィールドは、無いカスタムフィールドと同じ（値が出ない）
+    $one = "-p=$($d.pub_ident),-f:id=$($d.pub_issue)"
+    "ref_issues -t=cf_N: " + (Same "{{ref_issues($one,-t=cf_$($d.hidden_cf))}}" "{{ref_issues($one,-t=cf_999999)}}" "cf_$($d.hidden_cf)" 'cf_999999' 'attributes:')
+    "ref_issues -t=CF name: " + (Same "{{ref_issues($one,-t=WM_HiddenCF_$s)}}" "{{ref_issues($one,-t=WM_NoCF_$s)}}" "WM_HiddenCF_$s" "WM_NoCF_$s" 'attributes:')
+    "ref_issues -l=cf_N: " + (Same "{{ref_issues($one,-l=cf_$($d.hidden_cf))}}" "{{ref_issues($one,-l=cf_999999)}}" "cf_$($d.hidden_cf)" 'cf_999999' 'attributes:')
     # 見られる物は使える
     "visible issue_name_link: " + ((Render "{{issue_name_link($($d.pub_ident):WM_PubIssue_$s)}}") -match "issues/$($d.pub_issue)")
     "visible ref_issues -p: " + (Works "{{ref_issues(-p=$($d.pub_ident),-c)}}")
@@ -1724,6 +1744,15 @@ try {
     # ロック中のメンバーは -f:treated でも使える（ログイン名・id）
     "visible -f:treated locked: " + (Works "{{ref_issues(-f:treated $($d.locked) [1days_ago]|[-1days_ago],-c)}}")
     "visible -f:treated locked id: " + (Works "{{ref_issues(-f:treated $($d.locked_id) [1days_ago]|[-1days_ago],-c)}}")
+    # 見られるカスタムフィールドの値は出る
+    "visible -t=cf_N: " + (Render "{{ref_issues($one,-t=cf_$($d.shown_cf))}}").Contains("WM_ShownVal_$s")
+    # チケットの説明の [cf_N]：見られない人には値が読めない（0 件）。見られる管理者には読める（1 件）
+    $descCount = {
+        param($key)
+        $page = (Invoke-WebRequest -Uri "$BaseUrl/issues/$($d.cf_issue)" -Headers @{ 'X-Redmine-API-Key' = $key }).Content
+        ([regex]::Match($page, '(?s)<div class="description".*?<div [^>]*class="wiki"[^>]*>(.*?)</div>').Groups[1].Value -replace '<[^>]+>', '').Trim()
+    }
+    "[cf_N] in description viewer/admin: " + (& $descCount $d.key) + '/' + (& $descCount $d.admin_key)
     # ロック中のメンバーが担当のチケットが 1 件だけ数えられる
     $lockedCount = Render "{{ref_issues(-f:assigned_to=$($d.locked),-c)}}"
     "locked member count: " + ($lockedCount -replace '<[^>]+>', '').Trim()
@@ -1735,15 +1764,16 @@ try {
 } finally {
     # 後片付け。suffix が 6 桁の 16 進でなければ止める（空のまま LIKE で探すと、ほかのプロジェクト・ユーザーに当たる）
     if ($d.suffix -notmatch '^[0-9a-f]{6}$') { throw "suffix が正しくない: '$($d.suffix)'" }
-    $cleanup = "sfx = '$($d.suffix)'; Project.where('identifier LIKE ?', ""wm-%-#{sfx}"").each(&:destroy); User.where('login LIKE ?', ""wm_%_#{sfx}"").each(&:destroy); Role.where(name: ""WM_Role_#{sfx}"").each(&:destroy); puts 'cleanup: ok'"
+    $cleanup = "sfx = '$($d.suffix)'; Project.where('identifier LIKE ?', ""wm-%-#{sfx}"").each(&:destroy); User.where('login LIKE ?', ""wm_%_#{sfx}"").each(&:destroy); IssueCustomField.where('name LIKE ?', ""WM_%CF_#{sfx}"").each(&:destroy); Role.where(name: [""WM_Role_#{sfx}"", ""WM_CFRole_#{sfx}""]).each(&:destroy); puts 'cleanup: ok'"
     docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $cleanup 2>$null | Select-Object -Last 1
 }
 ```
 
 **期待結果:**
 
-- 11 の組み合わせ（issue_name_link のプロジェクト・チケット、wiki_list の `-p=`、ref_issues の `-p=`〔識別子・数字の id〕・`-f:assigned_to`・`-f:treated`〔ログイン名・id〕・`-f:project`・`-f:version`・`-f:category`）がすべて `same`（見られない物と無い物で同じ表示で、期待するエラー文）
-- `visible issue_name_link` が `True`、`visible ...` の 9 つがすべて `works`（ほかのプロジェクトから system で共有された版も、`-p` で決めたプロジェクトで使える。ロック中のメンバーは `-f:treated` でも使える）
+- 14 の組み合わせ（issue_name_link のプロジェクト・チケット、wiki_list の `-p=`、ref_issues の `-p=`〔識別子・数字の id〕・`-f:assigned_to`・`-f:treated`〔ログイン名・id〕・`-f:project`・`-f:version`・`-f:category`・`-t=`〔cf_N・カスタムフィールドの名前〕・`-l=`）がすべて `same`（見られない物と無い物で同じ表示で、期待するエラー文）
+- `visible issue_name_link` と `visible -t=cf_N` が `True`、`visible ...` の 9 つがすべて `works`（ほかのプロジェクトから system で共有された版も、`-p` で決めたプロジェクトで使える。ロック中のメンバーは `-f:treated` でも使える）
+- `[cf_N] in description viewer/admin: 0/1`（チケットの説明の `[cf_N]` は、見られないカスタムフィールドの値を読まない。管理者は読める）
 - `locked member count: 1`（ロック中のメンバーが担当のチケットを数えられる）
 - `error line break: True`・`error text escaped: True`
 - `cleanup: ok`
