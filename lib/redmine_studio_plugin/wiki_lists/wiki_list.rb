@@ -41,7 +41,7 @@ module RedmineStudioPlugin
                   when 'w' # 表の横幅
                     if arg =~ /\A[^\=]+\=(.*)\z/ # 幅を取得
                       width = $1.strip
-                      table_width = 'width="' + width + '"'
+                      table_width = 'width="' + ERB::Util.h(width) + '"'
                     end
                   else
                     raise "- unknown option: #{arg}"
@@ -84,11 +84,12 @@ TEXT
           disp = "<table #{table_width}><tr>"
 
           # カラム名(最初の行)を作成
+          # 表は文字列でつないで最後に html_safe にするので、ユーザーが書いた文字・付けた名前は、必ずエスケープするか textilizable を通してから入れる
           column_names.each do |column_name|
             if column_name =~ /\A(.*)\|(.*)\z/ then
-              disp += '<th width="'+$2+'">' + $1 + '</th>'
+              disp += '<th width="' + ERB::Util.h($2) + '">' + ERB::Util.h($1) + '</th>'
             else
-              disp += "<th>#{column_name}</th>"
+              disp += "<th>#{ERB::Util.h(column_name)}</th>"
             end
           end
 
@@ -116,12 +117,12 @@ TEXT
 
                   redirects.each do |redirect|
                     html += '<br>' if html.present?
-                    html += redirect.title
+                    html += ERB::Util.h(redirect.title)
                   end
 
                   RedmineStudioPlugin::WikiLists::WikiList.set_lines(lines_by_page, column_num, html)
                 when '+project' # Wikiページのプロジェクト名
-                  RedmineStudioPlugin::WikiLists::WikiList.set_lines(lines_by_page, column_num, wiki_page.project.to_s)
+                  RedmineStudioPlugin::WikiLists::WikiList.set_lines(lines_by_page, column_num, ERB::Util.h(wiki_page.project.to_s))
                 else # それ以外はWikiページの中からキーワードで表示要素を抽出する
                   new_lines = [] # カラムキーワードが抽出される毎にこの変数に表示行を追加する
 

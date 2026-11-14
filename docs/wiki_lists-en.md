@@ -334,5 +334,6 @@ When used together with `-o`, the display count is counted from the top of the s
 
 Every macro shows content according to the permissions of the person viewing the page. Issues and wiki pages that the viewer cannot see are not shown.
 Projects, issues, users, versions, categories and other items named in a macro also give the same error as nonexistent ones when the viewer cannot see them (so that their existence cannot be inferred from the output).
+Text written in a macro (display names, widths and so on) and names shown in a list (project names, page aliases and so on) are not interpreted as HTML and are shown as plain text.
 
 These wiki macros can display lists of issues and other items using arbitrary search conditions chosen by the writer, and some conditions may put load on the server. **It is recommended to use them only in environments where only trusted users have access**.

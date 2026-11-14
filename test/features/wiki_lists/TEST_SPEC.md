@@ -232,10 +232,20 @@ r3 = mk_issue.call('RefIssuesTest3', t2, admin, st_closed)
 q = IssueQuery.new(name: "WikiListTestQuery_#{sfx}", project: prj, visibility: Query::VISIBILITY_PUBLIC, user: admin)
 q.filters = { 'status_id' => { operator: '=', values: [st_new.id.to_s] } }
 q.save!
+# [2-W-14] 用: 名前と別名に HTML を入れたプロジェクト
+xprj = Project.create!(name: "WL_Spec_<u>X</u>_#{sfx}", identifier: "wl-spec-x-#{sfx}", is_public: false)
+xprj.enabled_module_names = %w[wiki]
+xprj.save!
+Member.create!(principal: admin, project: xprj, roles: [role])
+xwiki = xprj.wiki || Wiki.create!(project: xprj, start_page: 'Wiki')
+xpage = WikiPage.new(wiki: xwiki, title: 'WLXss')
+xpage.content = WikiContent.new(page: xpage, text: 'x', author: admin)
+xpage.save!
+WikiRedirect.create!(wiki: xwiki, title: '<u>wla', redirects_to: 'WLXss')
 puts({ Sfx: sfx, ProjectIdent: prj.identifier, ProjectName: prj.name, UserLogin: user.login, UserName: user.name,
        QueryId: q.id, QueryName: q.name, Tracker1: t1.name, Tracker2: t2.name,
        StatusNewId: st_new.id, StatusNew: st_new.name, StatusClosedId: st_closed.id, AdminName: admin.name,
-       InlId: inl.id, R1Id: r1.id, R2Id: r2.id, R3Id: r3.id }.to_json)
+       InlId: inl.id, R1Id: r1.id, R2Id: r2.id, R3Id: r3.id, XssProjectIdent: xprj.identifier }.to_json)
 ```
 
 **後片付け（HTTP テストのあとに 1 回）:**
@@ -428,6 +438,32 @@ $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki 
 ```
 
 **期待結果:** `[2-W-13] PASS`（`unknown option: -x` エラー）
+
+### [2-W-14] 書いた文字・付けた名前は HTML として働かない
+
+**マクロ:** `{{wiki_list(-p, -w=1" onclick="x, +title, +project|<u>prj</u>, +alias|<u>col</u>|1" onclick="x, WLK:)}}`（用意の、名前と別名に HTML を入れたプロジェクトの Wiki に書く）
+
+表示名・列の幅・表の横幅（マクロを書いた人が書く）と、プロジェクトの名前・ページの別名・ページから抜き出した文字（ほかの人が書く）が、HTML として働かずに出ることを確かめる。
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{XssProjectIdent}/wiki/WLMacro'
+$macro = '{{wiki_list(-p, -w=1" onclick="x, +title, +project|<u>prj</u>, +alias|<u>col</u>|1" onclick="x, WLK:)}}'
+$body = @{ wiki_page = @{ text = $macro } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$checks = [ordered]@{
+  no_tag      = -not ($c -match '<u>|<script|onclick="x|onclick="y')
+  table_width = $c.Contains('<table width="1&quot; onclick=&quot;x">')
+  col_name    = $c.Contains('<th>&lt;u&gt;prj&lt;/u&gt;</th>')
+  col_width   = $c.Contains('<th width="1&quot; onclick=&quot;x">&lt;u&gt;col&lt;/u&gt;</th>')
+  project     = $c.Contains('WL_Spec_&lt;u&gt;X&lt;/u&gt;_{Sfx}')
+  alias       = $c.Contains('&lt;u&gt;wla')
+  keyword     = $c.Contains('&lt;script&gt;x')
+}
+"[2-W-14] " + $(if (-not ($checks.Values -contains $false)) { 'PASS' } else { "FAIL: $(($checks.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' ') $c" })
+```
+
+**期待結果:** `[2-W-14] PASS`（`<u>` や `onclick` が HTML として働かず、`&lt;u&gt;` などのエスケープした文字で出る）
 
 ---
 
