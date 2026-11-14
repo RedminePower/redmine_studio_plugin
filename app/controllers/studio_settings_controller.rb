@@ -118,20 +118,18 @@ class StudioSettingsController < ApplicationController
     @studio_setting.created_by = User.current
     @studio_setting.updated_by = User.current
 
-    # 本人の設定が既にある（2 台同時の初回保存など）なら、後の方を断り、今ある設定を返す
-    return render_existing_user_setting if @studio_setting.user_scope? && existing_user_setting
-
-    if save_with_history(@studio_setting, 'create')
+    case @studio_setting.create_with_history(User.current, comment: params[:studio_setting][:comment])
+    when :created
       respond_to do |format|
         format.api do
           render :action => 'show', :status => :created,
                  :location => studio_setting_url(@studio_setting)
         end
       end
+    when :exists
+      # 本人の設定が既にある（2 台同時の初回保存など）なら、後の方を断り、今ある設定を返す
+      render_existing_user_setting
     else
-      # 確かめた後に別の端末が先に作った（重複禁止の索引か、重複の検証で断られた）
-      return render_existing_user_setting if @studio_setting.user_scope? && existing_user_setting
-
       respond_to do |format|
         format.api { render_validation_errors(@studio_setting) }
       end
@@ -158,36 +156,16 @@ class StudioSettingsController < ApplicationController
       return render_api_errors('expected_version is required')
     end
 
-    saved = false
-    conflict = false
-    forbidden = false
-    StudioSetting.transaction do
-      # 版の確認と保存の間に別の書き込みが入らないよう、行を押さえてから比べる
-      @studio_setting.lock!
-      if !expected.nil? && @studio_setting.version != expected
-        conflict = true
-        raise ActiveRecord::Rollback
-      end
-
-      @studio_setting.attributes = attrs
-      # 範囲を変えられるのは管理者だけ（変えると、前の範囲の版の中身が新しい範囲の人に見えるため）
-      if @studio_setting.scope_reference_changed? && !User.current.admin?
-        forbidden = true
-        raise ActiveRecord::Rollback
-      end
-      @studio_setting.updated_by = User.current
-      saved = @studio_setting.save
-      # 履歴も同じ取引の中で作る（行を押さえている間に番号を決める）。
-      # Undelete is handled solely by the restore API (deleted_on is not permitted here).
-      @studio_setting.create_history('update', User.current, comment: params[:studio_setting][:comment]) if saved
-    end
-    return render_version_conflict if conflict
-    return render_403 if forbidden
-
-    if saved
+    case @studio_setting.update_with_history(attrs, User.current, expected_version: expected,
+                                                                  comment: params[:studio_setting][:comment])
+    when :saved
       respond_to do |format|
         format.api { render :action => 'show', :status => :ok }
       end
+    when :conflict
+      render_version_conflict
+    when :forbidden
+      render_403
     else
       respond_to do |format|
         format.api { render_validation_errors(@studio_setting) }
@@ -314,28 +292,9 @@ class StudioSettingsController < ApplicationController
     list.map { |v| v.to_s.strip }.select { |v| v =~ /\A\d+\z/ }.map(&:to_i).uniq
   end
 
-  def existing_user_setting
-    StudioSetting.find_user_setting(@studio_setting.scope_id, @studio_setting.schema_type)
-  end
-
-  # 保存と履歴の作成を 1 つの取引で行う。
-  # 本人の設定で、確かめた直後に別の端末が作った場合は、データベースの重複禁止で断られる（false を返し、呼ぶ側が今ある設定を返す）
-  def save_with_history(setting, change_type)
-    saved = false
-    StudioSetting.transaction do
-      saved = setting.save
-      setting.create_history(change_type, User.current, comment: params[:studio_setting][:comment]) if saved
-    end
-    saved
-  rescue ActiveRecord::RecordNotUnique
-    raise unless setting.user_scope?
-
-    false
-  end
-
   # 409：本人の設定は既にある。今ある設定（id・version・中身）を返す
   def render_existing_user_setting
-    @studio_setting = existing_user_setting
+    @studio_setting = @studio_setting.existing_user_setting
     respond_to do |format|
       format.api { render action: 'show', status: :conflict }
     end

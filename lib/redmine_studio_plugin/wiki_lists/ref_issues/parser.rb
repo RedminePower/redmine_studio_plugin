@@ -75,7 +75,13 @@ module RedmineStudioPlugin
                   raise "- no CustomQuery ID:#{arg}"
                 end
               when 'p'
-                @restrict_project = sep ? Project.find(words) : project
+                if sep
+                  # 見られないプロジェクトは、無いプロジェクトと同じエラーにする
+                  @restrict_project = RedmineStudioPlugin::WikiLists::VisibleLookup.project_by_identifier_or_id(words)
+                  raise "- project:#{words} is not found." unless @restrict_project
+                else
+                  @restrict_project = project
+                end
               when 'f'
                 if sep
                   filter = ''
@@ -282,7 +288,7 @@ module RedmineStudioPlugin
               if operator =~ /^\d+$/
                 user = operator
               else
-                user_obj = User.find_by_login(operator)
+                user_obj = RedmineStudioPlugin::WikiLists::VisibleLookup.user_by_login(operator)
                 raise "- can not find user <#{operator}>" if user_obj.nil?
                 user = user_obj.id.to_s
               end

@@ -140,6 +140,7 @@ Generates a link from an issue's subject. This is useful when you want to create
 - Issue subjects are searched by exact match
 - If multiple issues have the same subject, the link will point to the first one found
 - The project identifier can also be specified using the project name
+- Projects and issues that the viewer of the page cannot see give the same error as ones that do not exist
 
 ## ref_issues Macro
 
@@ -331,9 +332,7 @@ When used together with `-o`, the display count is counted from the top of the s
 
 ## Notes
 
-Since these wiki macros can display issue information using arbitrary search conditions, **it is recommended to use them only in environments where only trusted users have access**.
+Every macro shows content according to the permissions of the person viewing the page. Issues and wiki pages that the viewer cannot see are not shown.
+Projects, issues, users, versions, categories and other items named in a macro also give the same error as nonexistent ones when the viewer cannot see them (so that their existence cannot be inferred from the output).
 
-Users with wiki editing permissions may be able to access the following information:
-- Issue information from other projects
-- Wiki page content from other projects
-- Custom field values
+These wiki macros can display lists of issues and other items using arbitrary search conditions chosen by the writer, and some conditions may put load on the server. **It is recommended to use them only in environments where only trusted users have access**.

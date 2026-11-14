@@ -15,8 +15,8 @@ module RedmineStudioPlugin
             arg.strip!
 
             if arg =~ /\A([^:]*):([^:]*)\z/
-              prj = Project.find_by_identifier($1)
-              prj ||= Project.find_by_name($1)
+              # 見られないプロジェクト・チケットは、無い物と同じ表示にする
+              prj = RedmineStudioPlugin::WikiLists::VisibleLookup.project_by_identifier_or_name($1)
               raise "- project:#{$1} is not found." unless prj
               arg = $2
             else
@@ -31,12 +31,11 @@ module RedmineStudioPlugin
               disp = arg
             end
 
-            issue = Issue.where(project_id: prj.id, subject: name).first
+            issue = Issue.visible.where(project_id: prj.id, subject: name).first
             raise "- issue:#{name} is not found in prj:#{prj.to_s}" unless issue
-            Issue.find_by_subject(name)
             out += link_to("#{disp}", issue_path(issue))
           rescue => err_msg
-            raise <<-TEXT.html_safe
+            return RedmineStudioPlugin::WikiLists::MacroError.html(self, :issue_name_link, <<-TEXT)
 Parameter error: #{err_msg}<br>
 Usage: {{issue_name_link([project_name:]issue_subject[|description])}}
 TEXT

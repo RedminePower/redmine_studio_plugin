@@ -41,6 +41,44 @@ class StudioSettingAssignment < ActiveRecord::Base
   end
   private_class_method :assign_locked
 
+  # 割り当てを user_ids の人だけに置き換え、置き換えた後の割り当て（user_ids の順）を返す。
+  # user_ids に入っている、もう割り当て済みの人は、確かめ直さずにそのまま残す
+  # （今の一覧を読んで送り返すと、ロック中の人などがいるだけで全体が断られないように）。
+  # 新しく足す人が割り当てられない（検証で断られた）ときは、何も変えずに ActiveRecord::RecordInvalid を上げる。
+  # 設定の行を押さえてから読む（同時の置き換え・割り当てで、互いの結果が混ざらないように）。
+  # 押さえが効かない DB で、読んでから書くまでの間にほかの依頼が同じ人を先に書いたときは、1 度だけ読み直してやり直す。
+  # それでも重複で断られたときは ActiveRecord::RecordNotUnique をそのまま上げる
+  def self.replace(setting, user_ids, assigned_by)
+    retried = false
+    begin
+      replace_locked(setting, user_ids, assigned_by)
+    rescue ActiveRecord::RecordNotUnique
+      raise if retried
+
+      retried = true
+      setting.assignments.reset
+      retry
+    end
+  end
+
+  def self.replace_locked(setting, user_ids, assigned_by)
+    setting.with_lock do
+      # 列と同じ型にそろえて比べる（"5" と 5 を同じ人として扱う）
+      user_id_type = type_for_attribute(:user_id)
+      requested = user_ids.map { |user_id| user_id_type.cast(user_id) }
+      kept, to_remove = setting.assignments.reload.to_a.partition { |a| requested.include?(a.user_id) }
+      to_remove.each(&:destroy!)
+      kept_by_user = kept.index_by(&:user_id)
+
+      # 新しく足す人だけを作る（同じ人が 2 回あると、2 回目は重複で断る）
+      user_ids.map do |user_id|
+        kept_by_user.delete(user_id_type.cast(user_id)) ||
+          create!(setting: setting, user_id: user_id, assigned_by: assigned_by)
+      end
+    end
+  end
+  private_class_method :replace_locked
+
   private
 
   def set_assigned_on

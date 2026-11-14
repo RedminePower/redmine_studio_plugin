@@ -110,6 +110,60 @@ class StudioSetting < ActiveRecord::Base
     find_by(scope_type: SCOPE_USER, owner_id: owner_id, schema_type: schema_type)
   end
 
+  # 作る。保存と履歴の作成を 1 つの取引で行う。
+  # 戻り値は :created（作った）・:exists（本人の設定が既にある）・:invalid（検証で断られた。errors 付き）。
+  # 本人の設定は、先に今ある設定を確かめる（2 台同時の初回保存など）。
+  # 確かめた直後に別の端末が作った場合は、検証かデータベースの重複禁止の索引で断られるので、そのときも :exists にする
+  def create_with_history(user, comment: nil)
+    return :exists if user_scope? && existing_user_setting
+
+    saved = false
+    self.class.transaction do
+      saved = save
+      create_history('create', user, comment: comment) if saved
+    end
+    return :created if saved
+
+    user_scope? && existing_user_setting ? :exists : :invalid
+  rescue ActiveRecord::RecordNotUnique
+    raise unless user_scope?
+
+    :exists
+  end
+
+  # 同じ持ち主・同じ種類の、今ある本人の設定（無ければ nil）
+  def existing_user_setting
+    self.class.find_user_setting(scope_id, schema_type)
+  end
+
+  # 更新する。行を押さえてから attrs を当てて保存し、履歴も同じ取引の中で作る。
+  # expected_version を添えたときは、押さえた後で今の版と比べる（版の確認と保存の間に別の書き込みが入らないように）。
+  # 戻り値は :saved・:conflict（版が古い）・:forbidden（管理者でないのに範囲を変えようとした）・:invalid（検証で断られた。errors 付き）
+  def update_with_history(attrs, user, expected_version: nil, comment: nil)
+    result = :invalid
+    self.class.transaction do
+      lock!
+      if !expected_version.nil? && version != expected_version
+        result = :conflict
+        raise ActiveRecord::Rollback
+      end
+
+      self.attributes = attrs
+      # 範囲を変えられるのは管理者だけ（変えると、前の範囲の版の中身が新しい範囲の人に見えるため）
+      if scope_reference_changed? && !user.admin?
+        result = :forbidden
+        raise ActiveRecord::Rollback
+      end
+      self.updated_by = user
+      if save
+        # 削除の取り消しは復元の API だけで行う（attrs に deleted_on は入れない）
+        create_history('update', user, comment: comment)
+        result = :saved
+      end
+    end
+    result
+  end
+
   # 行を押さえてから書く（同時の更新と版の数がぶつからないように）。履歴も同じ取引の中で作る
   def soft_delete(user, comment: nil)
     saved = false

@@ -217,20 +217,85 @@ puts result ? 'PASS' : 'FAIL: accept_api_auth not set for :index'
 
 **確認方法:**
 ```ruby
-# #788: 現在の status_id=5(終了), journal#684 で 1→2 に変更 (04/07 01:25)
-issue = Issue.find(788)
-controller = ActivityInfosController.new
-journals = issue.journals.preload(:details).sort_by(&:created_on)
-target = Journal.find(684).created_on
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-restored = controller.send(:restore_status, issue, target, journals, status_lookup, principal_lookup)
-# target 時点では status_id=1→2 に変更される前なので、復元値は 1
-puts restored[:status_id] == 1 ? 'PASS' : "FAIL: Expected status_id=1, got #{restored[:status_id]}"
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  issue = d[:mid]
+  journals = issue.journals.preload(:details).sort_by(&:created_on)
+  restored = controller.send(:restore_status, issue, d[:j_status].created_on, journals, status_lookup, principal_lookup)
+  # ステータスを変える前の時点なので、変える前の値に戻る（今の値は s2）
+  ok = issue.status_id == d[:s2].id && restored[:status_id] == d[:s1].id
+  puts ok ? 'PASS' : "FAIL: Expected status_id=#{d[:s1].id}, got #{restored[:status_id]}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- `status_id` が `1`（新規）に復元される
+- `PASS`（ステータスを変える前の時点では、変える前のステータスに復元される）
 
 ---
 
@@ -238,20 +303,85 @@ puts restored[:status_id] == 1 ? 'PASS' : "FAIL: Expected status_id=1, got #{res
 
 **確認方法:**
 ```ruby
-# #785: 現在の assigned_to_id=22, journal#686 で 1→22 に変更 (04/10 11:53)
-issue = Issue.find(785)
-controller = ActivityInfosController.new
-journals = issue.journals.preload(:details).sort_by(&:created_on)
-target = Journal.find(686).created_on
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-restored = controller.send(:restore_status, issue, target, journals, status_lookup, principal_lookup)
-# target 時点では 1→22 に変更される前なので、復元値は 1
-puts restored[:assigned_to_id] == 1 ? 'PASS' : "FAIL: Expected assigned_to_id=1, got #{restored[:assigned_to_id]}"
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  issue = d[:mid]
+  journals = issue.journals.preload(:details).sort_by(&:created_on)
+  restored = controller.send(:restore_status, issue, d[:j_assign2].created_on, journals, status_lookup, principal_lookup)
+  # author → other に替える前の時点なので、author に戻る（今の値は other）
+  ok = issue.assigned_to_id == d[:other].id && restored[:assigned_to_id] == d[:author].id
+  puts ok ? 'PASS' : "FAIL: Expected assigned_to_id=#{d[:author].id}, got #{restored[:assigned_to_id]}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- `assigned_to_id` が `1` に復元される
+- `PASS`（担当者を替える前の時点では、替える前の担当者に復元される）
 
 ---
 
@@ -259,23 +389,87 @@ puts restored[:assigned_to_id] == 1 ? 'PASS' : "FAIL: Expected assigned_to_id=1,
 
 **確認方法:**
 ```ruby
-# #787(指摘) → #785(開催) → #790(機能)
-issue_ids = [787, 785, 790]
-issues_by_id = Issue.where(:id => issue_ids).index_by(&:id)
-journals_by_issue = {}
-issue_ids.each do |id|
-  journals_by_issue[id] = issues_by_id[id].journals.preload(:details).sort_by(&:created_on)
-end
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-controller = ActivityInfosController.new
-tree = controller.send(:build_ticket_tree, issues_by_id[787], issues_by_id[787].created_on, journals_by_issue, issues_by_id, {}, status_lookup, principal_lookup)
-ids = tree.map { |t| t[:id] }
-puts ids == [790, 785, 787] ? 'PASS' : "FAIL: Expected [790, 785, 787], got #{ids}"
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  ids = [d[:leaf].id, d[:mid].id, d[:root].id]
+  issues_by_id = Issue.where(id: ids).index_by(&:id)
+  journals_by_issue = ids.to_h { |id| [id, issues_by_id[id].journals.preload(:details).sort_by(&:created_on)] }
+  leaf = issues_by_id[d[:leaf].id]
+  tree = controller.send(:build_ticket_tree, leaf, leaf.created_on, journals_by_issue, issues_by_id, {}, status_lookup, principal_lookup)
+  got = tree.map { |x| x[:id] }
+  expect = [d[:root].id, d[:mid].id, d[:leaf].id]
+  puts got == expect ? 'PASS' : "FAIL: Expected #{expect}, got #{got}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- ticket_tree が `[790, 785, 787]`（ルートから順）
+- `PASS`（ticket_tree が root → mid → leaf の順＝ルートから順）
 
 ---
 
@@ -283,19 +477,83 @@ puts ids == [790, 785, 787] ? 'PASS' : "FAIL: Expected [790, 785, 787], got #{id
 
 **確認方法:**
 ```ruby
-issue_ids = [787, 785, 790]
-issues_by_id = Issue.where(:id => issue_ids).index_by(&:id)
-journals_by_issue = {}
-issue_ids.each do |id|
-  journals_by_issue[id] = issues_by_id[id].journals.preload(:details).sort_by(&:created_on)
-end
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-controller = ActivityInfosController.new
-cache = {}
-tree1 = controller.send(:build_ticket_tree, issues_by_id[787], issues_by_id[787].created_on, journals_by_issue, issues_by_id, cache, status_lookup, principal_lookup)
-tree2 = controller.send(:build_ticket_tree, issues_by_id[787], issues_by_id[787].created_on, journals_by_issue, issues_by_id, cache, status_lookup, principal_lookup)
-puts tree1.equal?(tree2) ? 'PASS' : 'FAIL: Cache not working (different object returned)'
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  ids = [d[:leaf].id, d[:mid].id, d[:root].id]
+  issues_by_id = Issue.where(id: ids).index_by(&:id)
+  journals_by_issue = ids.to_h { |id| [id, issues_by_id[id].journals.preload(:details).sort_by(&:created_on)] }
+  leaf = issues_by_id[d[:leaf].id]
+  cache = {}
+  tree1 = controller.send(:build_ticket_tree, leaf, leaf.created_on, journals_by_issue, issues_by_id, cache, status_lookup, principal_lookup)
+  tree2 = controller.send(:build_ticket_tree, leaf, leaf.created_on, journals_by_issue, issues_by_id, cache, status_lookup, principal_lookup)
+  puts tree1.equal?(tree2) ? 'PASS' : 'FAIL: Cache not working (different object returned)'
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -307,14 +565,80 @@ puts tree1.equal?(tree2) ? 'PASS' : 'FAIL: Cache not working (different object r
 
 **確認方法:**
 ```ruby
-issue = Issue.find(785)
-controller = ActivityInfosController.new
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-issues_by_id = Issue.where(:id => [785, 790]).index_by(&:id)
-info = controller.send(:build_from_issue, issue, {}, issues_by_id, {}, status_lookup, principal_lookup)
-result = info[:journal_id].nil? && info[:journal].nil?
-puts result ? 'PASS' : "FAIL: journal_id=#{info[:journal_id]}, journal=#{info[:journal]}"
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  issue = d[:mid]
+  issues_by_id = Issue.where(id: [d[:mid].id, d[:root].id]).index_by(&:id)
+  info = controller.send(:build_from_issue, issue, {}, issues_by_id, {}, status_lookup, principal_lookup)
+  result = info[:journal_id].nil? && info[:journal].nil?
+  puts result ? 'PASS' : "FAIL: journal_id=#{info[:journal_id]}, journal=#{info[:journal]}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -327,14 +651,80 @@ puts result ? 'PASS' : "FAIL: journal_id=#{info[:journal_id]}, journal=#{info[:j
 
 **確認方法:**
 ```ruby
-# journal#686 は notes="コメント付きで担当者を変更"
-journal = Journal.find(686)
-controller = ActivityInfosController.new
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-issues_by_id = Issue.where(:id => [785, 790]).index_by(&:id)
-info = controller.send(:build_from_journal, journal, {}, issues_by_id, {}, status_lookup, principal_lookup)
-puts info[:description] == journal.notes ? 'PASS' : "FAIL: Expected '#{journal.notes}', got '#{info[:description]}'"
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  journal = Journal.find(d[:j_assign2].id)
+  issues_by_id = Issue.where(id: [d[:mid].id, d[:root].id]).index_by(&:id)
+  info = controller.send(:build_from_journal, journal, {}, issues_by_id, {}, status_lookup, principal_lookup)
+  ok = journal.notes.present? && info[:description] == journal.notes
+  puts ok ? 'PASS' : "FAIL: Expected '#{journal.notes}', got '#{info[:description]}'"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -346,13 +736,80 @@ puts info[:description] == journal.notes ? 'PASS' : "FAIL: Expected '#{journal.n
 
 **確認方法:**
 ```ruby
-issue = Issue.find(785)
-controller = ActivityInfosController.new
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-issues_by_id = Issue.where(:id => [785, 790]).index_by(&:id)
-info = controller.send(:build_from_issue, issue, {}, issues_by_id, {}, status_lookup, principal_lookup)
-puts info[:description] == issue.description ? 'PASS' : "FAIL: Expected '#{issue.description}', got '#{info[:description]}'"
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  issue = d[:mid]
+  issues_by_id = Issue.where(id: [d[:mid].id, d[:root].id]).index_by(&:id)
+  info = controller.send(:build_from_issue, issue, {}, issues_by_id, {}, status_lookup, principal_lookup)
+  ok = issue.description.present? && info[:description] == issue.description
+  puts ok ? 'PASS' : "FAIL: Expected '#{issue.description}', got '#{info[:description]}'"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
@@ -364,25 +821,86 @@ puts info[:description] == issue.description ? 'PASS' : "FAIL: Expected '#{issue
 
 **確認方法:**
 ```ruby
-# #785: journal#685 で assigned_to nil→1 (11:53:12), journal#686 で assigned_to 1→22 (11:53:32)
-issue = Issue.find(785)
-controller = ActivityInfosController.new
-journals = issue.journals.preload(:details).sort_by(&:created_on)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+made_projects, made_users, made_roles = [], [], []
+cleanup = -> {
+  User.current = admin
+  made_projects.each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+}
+# 親子 3 段のチケット（root → mid → leaf）と、mid の履歴 3 つ（ステータス変更・担当者 なし→author・担当者 author→other）を作る
+build = -> {
+  s1 = IssueStatus.where(is_closed: false).order(:position).first
+  s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+  tracker = Tracker.first
+  role = Role.create!(name: "AIA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+  made_roles << role
+  pr = Project.new(name: "AIA_#{sfx}", identifier: "aia-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  mk_user = ->(name) {
+    u = User.new(login: "aia_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_#{name}_#{sfx}@example.com", status: 1)
+    u.password = u.password_confirmation = 'password123'
+    u.save!
+    made_users << u
+    u
+  }
+  author = mk_user.call('author')
+  other = mk_user.call('other')
+  [author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+  at = Time.utc(2020, 1, 7, 11)
+  mk_issue = ->(name, parent) {
+    i = Issue.new(project: pr, tracker: tracker, subject: "AIA_#{name}_#{sfx}", description: "AIA #{name} description",
+                  author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  root = mk_issue.call('root', nil)
+  mid = mk_issue.call('mid', root)
+  leaf = mk_issue.call('leaf', mid)
+  # 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+  Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+  change = ->(time, notes, attrs) {
+    i = Issue.find(mid.id)
+    i.init_journal(author, notes)
+    i.attributes = attrs
+    i.save!
+    j = i.journals.order(:id).last
+    j.update_columns(created_on: time)
+    j
+  }
+  j_status = change.call(at + 1.hour, nil, { status_id: s2.id })
+  j_assign1 = change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+  j_assign2 = change.call(at + 3.hours, 'AIA 担当者を替える', { assigned_to_id: other.id })
+  { s1: s1, s2: s2, author: author, other: other, root: Issue.find(root.id), mid: Issue.find(mid.id), leaf: Issue.find(leaf.id),
+    j_status: j_status, j_assign1: j_assign1, j_assign2: j_assign2 }
+}
 status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-target1 = Journal.find(685).created_on  # nil→1 の変更時点
-target2 = Journal.find(686).created_on  # 1→22 の変更時点
-restored1 = controller.send(:restore_status, issue, target1, journals, status_lookup, principal_lookup)
-restored2 = controller.send(:restore_status, issue, target2, journals, status_lookup, principal_lookup)
-# target1 時点では nil→1 と 1→22 の両方が逆適用されるので nil
-# target2 時点では 1→22 のみ逆適用されるので 1
-result = restored1[:assigned_to_id].nil? && restored2[:assigned_to_id] == 1
-puts result ? 'PASS' : "FAIL: target1=#{restored1[:assigned_to_id].inspect}, target2=#{restored2[:assigned_to_id].inspect}"
+begin
+  d = build.call
+  principal_lookup = Principal.all.index_by(&:id)
+  controller = ActivityInfosController.new
+  issue = d[:mid]
+  journals = issue.journals.preload(:details).sort_by(&:created_on)
+  restored1 = controller.send(:restore_status, issue, d[:j_assign1].created_on, journals, status_lookup, principal_lookup)
+  restored2 = controller.send(:restore_status, issue, d[:j_assign2].created_on, journals, status_lookup, principal_lookup)
+  # 1 回目（なし→author）の時点では 2 つとも戻すので「なし」、2 回目（author→other）の時点では 2 回目だけ戻すので author
+  result = restored1[:assigned_to_id].nil? && restored2[:assigned_to_id] == d[:author].id
+  puts result ? 'PASS' : "FAIL: target1=#{restored1[:assigned_to_id].inspect}, target2=#{restored2[:assigned_to_id].inspect}"
+ensure
+  cleanup.call
+end
 ```
 
 **期待結果:**
-- target1 時点の `assigned_to_id` が nil（両方の変更前）
-- target2 時点の `assigned_to_id` が `1`（2番目の変更前、1番目の変更後）
+- `PASS`（1 回目の変更の時点では担当者なし＝両方の変更前、2 回目の変更の時点では author＝1 回目の変更後・2 回目の変更前）
 
 ---
 
@@ -394,51 +912,51 @@ puts result ? 'PASS' : "FAIL: target1=#{restored1[:assigned_to_id].inspect}, tar
 ```ruby
 admin = User.find(1)
 User.current = admin
-# 非管理・非メンバーの閲覧ユーザ（公開プロジェクトの公開チケットのみ可視）
-u = User.find_by(login: 'p2891_viewer')
-if u.nil?
-  u = User.new(login: 'p2891_viewer', firstname: 'P2891', lastname: 'Viewer', mail: 'p2891_viewer@example.com')
-  u.password = 'password123'; u.password_confirmation = 'password123'; u.admin = false; u.save
-end
-pub = Project.find_by(identifier: 'p2891-pub')
-if pub.nil?
-  pub = Project.new(name: 'P2891 Pub', identifier: 'p2891-pub', is_public: true)
-  pub.enabled_module_names = ['issue_tracking']; pub.trackers = [Tracker.first]; pub.save
-end
-tracker = pub.trackers.first || Tracker.first
-parent = Issue.find_by(subject: 'P2891_Parent_Private')
-if parent.nil?
-  parent = Issue.new(project: pub, tracker: tracker, subject: 'P2891_Parent_Private', author: admin, status: IssueStatus.first, priority: IssuePriority.first)
-  parent.is_private = true; parent.save
-end
-child = Issue.find_by(subject: 'P2891_Child_Public')
-if child.nil?
-  child = Issue.new(project: pub, tracker: tracker, subject: 'P2891_Child_Public', author: admin, status: IssueStatus.first, priority: IssuePriority.first)
-  child.is_private = false; child.save
-end
-if child.parent_id != parent.id
-  child.parent_issue_id = parent.id
-  child.save  # parent_issue_id= は仮想セッターで dirty 判定に乗らないため無条件に保存する
-end
+sfx = SecureRandom.hex(3)
+pub = nil
+u = nil
+begin
+  # 非管理・非メンバーの閲覧ユーザ（公開プロジェクトの公開チケットのみ可視）
+  u = User.new(login: "aia13_viewer_#{sfx}", firstname: 'AIA13', lastname: 'Viewer', mail: "aia13_viewer_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  pub = Project.new(name: "AIA13_Pub_#{sfx}", identifier: "aia13-pub-#{sfx}", is_public: true)
+  pub.enabled_module_names = ['issue_tracking']
+  pub.trackers = [Tracker.first]
+  pub.save!
+  tracker = pub.trackers.first
+  mk = ->(subject, is_private, parent) {
+    i = Issue.new(project: pub, tracker: tracker, subject: "#{subject}_#{sfx}", author: admin, status: IssueStatus.first, priority: IssuePriority.default || IssuePriority.active.first)
+    i.is_private = is_private
+    i.parent_issue_id = parent.id if parent
+    i.save!
+    i
+  }
+  parent = mk.call('AIA13_Parent_Private', true, nil)
+  child = mk.call('AIA13_Child_Public', false, parent)
 
-User.current = u
-controller = ActivityInfosController.new
-ids = [child.id, parent.id]
-status_lookup = IssueStatus.all.index_by(&:id)
-principal_lookup = Principal.all.index_by(&:id)
-# 実装と同じく .visible を通す
-fixed = Issue.visible.where(:id => ids).index_by(&:id)
-tree_fixed = controller.send(:build_ticket_tree, child, child.created_on, {}, fixed, {}, status_lookup, principal_lookup).map { |t| t[:id] }
-# 対比: .visible なし（旧挙動）
-old = Issue.where(:id => ids).index_by(&:id)
-tree_old = controller.send(:build_ticket_tree, child, child.created_on, {}, old, {}, status_lookup, principal_lookup).map { |t| t[:id] }
-User.current = admin
-ok = ((tree_fixed.include?(parent.id) == false) && tree_fixed.include?(child.id) && tree_old.include?(parent.id))
-puts ok ? 'PASS' : "FAIL: fixed=#{tree_fixed.inspect} old=#{tree_old.inspect}"
+  User.current = u
+  controller = ActivityInfosController.new
+  ids = [child.id, parent.id]
+  status_lookup = IssueStatus.all.index_by(&:id)
+  principal_lookup = Principal.all.index_by(&:id)
+  # 実装と同じく .visible を通す
+  fixed = Issue.visible.where(:id => ids).index_by(&:id)
+  tree_fixed = controller.send(:build_ticket_tree, child, child.created_on, {}, fixed, {}, status_lookup, principal_lookup).map { |t| t[:id] }
+  # 対比: .visible なし（旧挙動）
+  old = Issue.where(:id => ids).index_by(&:id)
+  tree_old = controller.send(:build_ticket_tree, child, child.created_on, {}, old, {}, status_lookup, principal_lookup).map { |t| t[:id] }
+  ok = ((tree_fixed.include?(parent.id) == false) && tree_fixed.include?(child.id) && tree_old.include?(parent.id))
+  puts ok ? 'PASS' : "FAIL: fixed=#{tree_fixed.inspect} old=#{tree_old.inspect}"
+ensure
+  User.current = admin
+  Project.find_by(id: pub.id)&.destroy if pub&.id
+  u.destroy if u&.persisted?
+end
 ```
 
 **期待結果:**
-- `PASS`（修正後は不可視な親 `P2891_Parent_Private` が ticket_tree から除外され、子のみ残る。旧挙動では親が混入していたことも対比で確認）
+- `PASS`（修正後は不可視な親 `AIA13_Parent_Private_…` が ticket_tree から除外され、子のみ残る。旧挙動では親が混入していたことも対比で確認）
 
 ---
 
@@ -447,12 +965,81 @@ puts ok ? 'PASS' : "FAIL: fixed=#{tree_fixed.inspect} old=#{tree_old.inspect}"
 **実行方法:**
 PowerShell で各エンドポイントにリクエストを送信する。API キー認証が必要。
 
+**用意（HTTP テストの前に 1 回）:**
+活動を見るためのデータを Runner で作る（前回の残りがあれば先に消す）。
+活動する人（author）と、活動のない人（other）を作る。
+author は 2020-01-07 に、親子 3 段のチケット（root → mid → leaf）を作り、mid のステータスを変え、mid の担当者を自分にする。
+活動として数えられるのは、チケットの作成 3 件とステータスの変更 1 件の 4 件（本体の活動と同じく、コメントもステータスの変更も無い更新は数えない）。
+2020-01-10 に、コメントを付けて mid の担当者を other に替える（活動 1 件）。
+最後の行の `AuthorId`・`OtherId`・`MidId` を、各試験の `{AuthorId}`・`{OtherId}`・`{MidId}` に入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+Project.where('identifier LIKE ?', 'aia-http-%').each(&:destroy)
+User.where('login LIKE ?', 'aia_http_%').each(&:destroy)
+Role.where('name LIKE ?', 'AIA_HTTP_%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+s1 = IssueStatus.where(is_closed: false).order(:position).first
+s2 = IssueStatus.where(is_closed: false).where.not(id: s1.id).order(:position).first
+tracker = Tracker.first
+role = Role.create!(name: "AIA_HTTP_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues], assignable: true)
+pr = Project.new(name: "AIA_HTTP_#{sfx}", identifier: "aia-http-#{sfx}", is_public: false)
+pr.enabled_module_names = %w[issue_tracking]
+pr.trackers = [tracker]
+pr.save!
+mk_user = ->(name) {
+  u = User.new(login: "aia_http_#{name}_#{sfx}", firstname: 'AIA', lastname: name, mail: "aia_http_#{name}_#{sfx}@example.com", status: 1)
+  u.password = u.password_confirmation = 'password123'
+  u.save!
+  u
+}
+author = mk_user.call('author')
+other = mk_user.call('other')
+[author, other].each { |u| Member.create!(principal: u, project: pr, roles: [role]) }
+at = Time.utc(2020, 1, 7, 11)
+mk_issue = ->(name, parent) {
+  i = Issue.new(project: pr, tracker: tracker, subject: "AIA_HTTP_#{name}_#{sfx}", description: "AIA #{name} description",
+                author: author, status: s1, priority: IssuePriority.default || IssuePriority.active.first)
+  i.parent_issue_id = parent.id if parent
+  i.save!
+  i
+}
+root = mk_issue.call('root', nil)
+mid = mk_issue.call('mid', root)
+leaf = mk_issue.call('leaf', mid)
+# 子を作ると親も保存し直されるので、作成日時は 3 つ作ってからまとめて入れる
+Issue.where(id: [root.id, mid.id, leaf.id]).update_all(created_on: at, updated_on: at)
+change = ->(time, notes, attrs) {
+  i = Issue.find(mid.id)
+  i.init_journal(author, notes)
+  i.attributes = attrs
+  i.save!
+  i.journals.order(:id).last.update_columns(created_on: time)
+}
+change.call(at + 1.hour, nil, { status_id: s2.id })
+change.call(at + 2.hours, nil, { assigned_to_id: author.id })
+change.call(Time.utc(2020, 1, 10, 12), 'AIA 担当者を替える', { assigned_to_id: other.id })
+puts({ AuthorId: author.id, OtherId: other.id, MidId: mid.id }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+Project.where('identifier LIKE ?', 'aia-http-%').each(&:destroy)
+User.where('login LIKE ?', 'aia_http_%').each(&:destroy)
+Role.where('name LIKE ?', 'AIA_HTTP_%').each(&:destroy)
+puts 'cleaned'
+```
+
 ### [2-0a] 未認証（匿名）は 401 で拒否される（login_required 無効環境でも）
 
 **確認方法:**
 ```powershell
 try {
-  Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07'
+  Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07'
 } catch {
   $_.Exception.Response.StatusCode.Value__
 }
@@ -467,7 +1054,7 @@ try {
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.StatusCode
 ```
 
@@ -480,7 +1067,7 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.xml?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.xml?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.StatusCode
 ```
 
@@ -493,7 +1080,7 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.activity_infos -is [array]
 ```
 
@@ -506,14 +1093,14 @@ $response.activity_infos -is [array]
 
 **確認方法:**
 ```powershell
-$r1 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
-$r2 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-10&to=2026-04-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
-$r3 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
-$r1.activity_infos.Count + $r2.activity_infos.Count -eq $r3.activity_infos.Count
+$r1 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$r2 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-10&to=2020-01-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$r3 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$r1.activity_infos.Count -eq 4 -and $r2.activity_infos.Count -eq 1 -and $r3.activity_infos.Count -eq 5
 ```
 
 **期待結果:**
-- 4/7 の件数 + 4/10 の件数 = 4/7〜4/10 の件数
+- `True`（1/7 は 4 件、1/10 は 1 件、1/7〜1/10 は 5 件）
 
 ---
 
@@ -521,7 +1108,7 @@ $r1.activity_infos.Count + $r2.activity_infos.Count -eq $r3.activity_infos.Count
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-11&to=2026-04-12' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-11&to=2020-01-12' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.activity_infos.Count -eq 0
 ```
 
@@ -534,7 +1121,7 @@ $response.activity_infos.Count -eq 0
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $info = $response.activity_infos[0]
 $info.activity_datetime -ne $null -and $info.issue_id -ne $null -and $info.issue -ne $null -and $info.ticket_tree -ne $null
 ```
@@ -548,7 +1135,7 @@ $info.activity_datetime -ne $null -and $info.issue_id -ne $null -and $info.issue
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $issue = $response.activity_infos[0].issue
 $issue.id -ne $null -and $issue.subject -ne $null -and $issue.tracker -ne $null -and $issue.status -ne $null -and $issue.project -ne $null
 ```
@@ -562,7 +1149,7 @@ $issue.id -ne $null -and $issue.subject -ne $null -and $issue.tracker -ne $null 
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $withJournal = $response.activity_infos | Where-Object { $_.journal -ne $null } | Select-Object -First 1
 $withJournal.journal.details -is [array]
 ```
@@ -576,7 +1163,7 @@ $withJournal.journal.details -is [array]
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 # 親を持たないチケット（ルート）の活動を探す
 $withTree = $response.activity_infos | Where-Object { $_.ticket_tree.Count -ge 2 } | Select-Object -First 1
 $first = $withTree.ticket_tree[0]
@@ -592,15 +1179,15 @@ $first.parent -eq $null  # ルートは parent を持たない
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-10&to=2026-04-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
-# 4/10 の #785 の活動: journal#686 で assigned_to_id を 1→22 に変更
-$info = $response.activity_infos | Where-Object { $_.issue_id -eq 785 }
-# 活動時点（変更前）は assigned_to_id=1
-$info.issue.assigned_to.id -eq 1
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-10&to=2020-01-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+# 1/10 の mid の活動: 担当者を author → other に替えた
+$info = $response.activity_infos | Where-Object { $_.issue_id -eq {MidId} }
+# 活動時点（変更前）は author
+$info.issue.assigned_to.id -eq {AuthorId}
 ```
 
 **期待結果:**
-- `assigned_to.id` が `1`（変更前の値に復元されている）
+- `True`（`assigned_to.id` が author＝変更前の値に復元されている）
 
 ---
 
@@ -672,7 +1259,7 @@ try {
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $creation = $response.activity_infos | Where-Object { $_.journal_id -eq $null } | Select-Object -First 1
 $creation -ne $null -and $creation.journal -eq $null
 ```
@@ -686,7 +1273,7 @@ $creation -ne $null -and $creation.journal -eq $null
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 # assigned_to が null のチケットを探す
 $noAssignee = $response.activity_infos | Where-Object { $_.issue.assigned_to -eq $null } | Select-Object -First 1
 $noAssignee -ne $null
@@ -701,7 +1288,7 @@ $noAssignee -ne $null
 
 **確認方法:**
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $dates = $response.activity_infos | ForEach-Object { [datetime]$_.activity_datetime }
 $sorted = $true
 for ($i = 0; $i -lt $dates.Count - 1; $i++) {
@@ -719,10 +1306,10 @@ $sorted
 
 **確認方法:**
 ```powershell
-# user_id=1 (admin) の活動
-$r1 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=1&from=2026-04-07&to=2026-04-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
-# 活動がないユーザー（テスト環境に存在する別ユーザー）
-$r2 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id=5&from=2026-04-07&to=2026-04-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+# 用意で作った author の活動
+$r1 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+# 用意で作った、活動のない other
+$r2 = Invoke-RestMethod -Uri '{BaseUrl}/activity_infos.json?user_id={OtherId}&from=2020-01-07&to=2020-01-10' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $r1.activity_infos.Count -gt 0 -and $r1.activity_infos.Count -ne $r2.activity_infos.Count
 ```
 
@@ -735,7 +1322,7 @@ $r1.activity_infos.Count -gt 0 -and $r1.activity_infos.Count -ne $r2.activity_in
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.xml?user_id=1&from=2026-04-07&to=2026-04-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$response = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.xml?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
 $response.Content -match '<activity_infos'
 ```
 

@@ -1,3 +1,4 @@
 ja:
-  error_email_not_found: "ユーザーのメールアドレスの取得に失敗しました。"
+  error_email_not_found: "このユーザーのメールアドレスは取得できません。"
+  error_email_hidden: "このユーザーはメールアドレスを公開していないため、Teams チャットを開けません。"
   error_communication_failed: "ユーザーのメールアドレスの取得を試みましたが、サーバーとの通信に失敗しました。"

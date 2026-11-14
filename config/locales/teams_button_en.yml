@@ -1,3 +1,4 @@
 en:
-  error_email_not_found: "Failed to get user's email address."
+  error_email_not_found: "The email address of this user cannot be retrieved."
+  error_email_hidden: "This user does not make their email address public, so a Teams chat cannot be opened."
   error_communication_failed: "Attempted to get user's email address, but failed to communicate with server."

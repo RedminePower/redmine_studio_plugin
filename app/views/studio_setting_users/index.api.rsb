@@ -2,12 +2,6 @@
 
 api.array :studio_setting_assignments, api_meta(:total_count => @total_count, :offset => @offset, :limit => @limit) do
   @assignments.each do |assignment|
-    api.studio_setting_assignment do
-      api.id assignment.id
-      api.setting_id assignment.setting_id
-      api.assigned_on assignment.assigned_on
-      api_user_ref(api, :user, assignment.user)
-      api_user_ref(api, :assigned_by, assignment.assigned_by)
-    end
+    render_api_studio_setting_assignment(api, assignment)
   end
 end

@@ -13,6 +13,18 @@ module StudioSettingUserNamesHelper
     end
   end
 
+  # 割り当て 1 件を返事に書く。
+  # XML の要素名は studio_setting_assignment にそろえる。redmine-net-api は XmlRoot の要素名でデシリアライズするため
+  def render_api_studio_setting_assignment(api, assignment)
+    api.studio_setting_assignment do
+      api.id assignment.id
+      api.setting_id assignment.setting_id
+      api.assigned_on assignment.assigned_on
+      api_user_ref(api, :user, assignment.user)
+      api_user_ref(api, :assigned_by, assignment.assigned_by)
+    end
+  end
+
   private
 
   # 同じ人が何度出ても、1 回の返事の中では 1 回だけ引く

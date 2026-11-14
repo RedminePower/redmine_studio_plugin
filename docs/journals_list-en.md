@@ -43,10 +43,10 @@ The following information is displayed in a single row for each comment.
 | Item | Content |
 |------|---------|
 | # | Comment number (click to jump to the comment on the issue detail page) |
-| Author | Comment author name (click to jump to the user page) |
+| Author | Comment author name (click to jump to the user page; a locked user has no link except for administrators, a deleted user is shown as the anonymous user) |
 | Date | Comment timestamp |
 | Status | Issue status at the time of the comment |
-| Assignee | Issue assignee at the time of the comment (click to jump to the user page) |
+| Assignee | Issue assignee at the time of the comment (click to jump to the user page, or the group page for a group; a locked user has no link except for administrators, a deleted user is shown as the anonymous user, a deleted group is blank) |
 | Notes | First line of the comment (plain text, max 100 characters) |
 
 ### Status and Assignee Display Rules

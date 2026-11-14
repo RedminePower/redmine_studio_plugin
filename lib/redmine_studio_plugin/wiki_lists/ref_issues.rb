@@ -51,7 +51,7 @@ TEXT
             end
 
             msg += 'cf_* }<br/>'
-            raise msg.html_safe
+            return RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, msg)
           end
 
           begin
@@ -147,7 +147,8 @@ TEXT
                 unless values.nil?
                   tgt_objs = []
                   values.each do |value|
-                    tgt_obj = models[filter].find_by(attributes[filter]=>value)
+                    # 見られない物は、無い物と同じエラーにする
+                    tgt_obj = RedmineStudioPlugin::WikiLists::VisibleLookup.filter_value(filter, value, @query.project)
                     raise "- can not resolve '#{value}' in #{models[filter].to_s}.#{attributes[filter]} " if tgt_obj.nil?
                     tgt_objs << tgt_obj.id.to_s
                   end
@@ -278,7 +279,7 @@ TEXT
                 msg += "<br>#{backtrace}"
               end
             end
-            raise msg.html_safe
+            RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, msg)
           end
         ensure
           if incremented

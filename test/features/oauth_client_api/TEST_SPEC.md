@@ -115,7 +115,7 @@ Basic のユーザー名が「登録済み OAuth アプリの uid」でない場
 | 区分 | 対象ケース | 適用版 |
 |------|-----------|--------|
 | 全版共通 | [1-1]〜[1-5] / [1-9] / [2-0] / [2-1] | 全版 |
-| Doorkeeper 依存（登録・patch・トークン） | [1-6]〜[1-8] / [1-10]〜[1-14] / [2-2]〜[2-7] | **6.1 以上のみ**（6.1 未満は Doorkeeper 無しでスキップ） |
+| Doorkeeper 依存（登録・patch・トークン） | [1-6]〜[1-8]（[1-7-2]・[1-7-3] を含む） / [1-10]〜[1-14] / [2-2]〜[2-7] | **6.1 以上のみ**（6.1 未満は Doorkeeper 無しでスキップ） |
 | Doorkeeper なしの挙動（ロード・degradation） | [1-15]〜[1-16] / [2-8] | **6.1 未満のみ** |
 
 6.1 未満では、init.rb の Doorkeeper patch 適用が `defined?(Doorkeeper::OAuth::Client::Credentials)` でガードされ、
@@ -194,12 +194,23 @@ puts missing.empty? ? 'PASS' : "FAIL: missing scopes: #{missing.join(', ')}"
 
 ### [1-6] 自己修復登録が公開クライアントを作成する
 
+今あるサインイン用アプリは、消さずに名前を一時的に変えて「未登録」にし、最後に戻す（消すと発行済みのトークンも消え、client_id も変わる）。
+
 ```ruby
-Doorkeeper::Application.where(name: 'Redmine Studio').destroy_all
-RedmineStudioPlugin::OauthClient::AppRegistrar.ensure_registered
-app = Doorkeeper::Application.find_by(name: 'Redmine Studio')
-ok = app && app.confidential == false && app.redirect_uri == 'http://127.0.0.1/' && app.uid.present?
-puts ok ? 'PASS' : "FAIL: app=#{app.inspect}"
+reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+sfx = SecureRandom.hex(3)
+saved = reg.signin_applications.to_a
+begin
+  saved.each { |a| a.update_column(:name, "Redmine Studio saved #{sfx}") }
+  reg.ensure_registered
+  app = reg.registered_application
+  ok = app && saved.none? { |a| a.id == app.id } && app.confidential == false && app.redirect_uri == 'http://127.0.0.1/' && app.uid.present?
+  puts ok ? 'PASS' : "FAIL: app=#{app.inspect}"
+ensure
+  saved.each { |a| a.update_column(:name, 'Redmine Studio') }
+  # 試験で作ったアプリは、いちばん古い元のアプリへまとめて消す（元が無かったときは消すだけ）
+  saved.empty? ? reg.signin_applications.delete_all : reg.ensure_registered
+end
 ```
 
 **期待結果:** `confidential=false`（公開クライアント）・`redirect_uri=http://127.0.0.1/`・`uid` 付きで登録される
@@ -209,24 +220,126 @@ puts ok ? 'PASS' : "FAIL: app=#{app.inspect}"
 ### [1-7] 何度呼んでも重複登録しない（冪等）
 
 ```ruby
-3.times { RedmineStudioPlugin::OauthClient::AppRegistrar.ensure_registered }
-count = Doorkeeper::Application.where(name: 'Redmine Studio').count
-puts count == 1 ? 'PASS' : "FAIL: count=#{count}"
+reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+before = reg.signin_applications.pluck(:id)
+begin
+  3.times { reg.ensure_registered }
+  count = reg.signin_applications.count
+  puts count == 1 ? 'PASS' : "FAIL: count=#{count}"
+ensure
+  # 前に無かったときは、この試験で作ったアプリを消す
+  reg.signin_applications.delete_all if before.empty?
+end
 ```
 
 **期待結果:** 登録は常に 1 件（起動のたびに呼んでも増えない）
 
 ---
 
+### [1-7-2] 同じ名前のアプリが二重になっていたら、いちばん古いものにまとめる
+
+複数のプロセスが同時に起動すると、同じ名前のアプリが二重に登録されることがある。
+起動時の登録で、いちばん古いものを残し、ほかのアプリで発行したトークン・認可コードをそれへ付け替えてから、ほかを消す。
+まとめる前でも、`registered_application`（`/oauth_client` が返すアプリ）はいちばん古いものを選ぶ。
+
+```ruby
+R = RedmineStudioPlugin::OauthClient::AppRegistrar
+A = Doorkeeper::Application
+before = R.signin_applications.pluck(:id)
+begin
+  R.ensure_registered
+  orig = R.signin_applications.first
+  dup1 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+  dup2 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+  user = User.find(1)
+  tok = Doorkeeper::AccessToken.create!(application_id: dup2.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 7200, use_refresh_token: true)
+  grant = Doorkeeper::AccessGrant.create!(application_id: dup1.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 600, redirect_uri: 'http://127.0.0.1/')
+  picked = R.registered_application
+  R.ensure_registered
+  apps = A.where(name: 'Redmine Studio').to_a
+  ok = picked.id == orig.id && apps.map(&:id) == [orig.id] && tok.reload.application_id == orig.id && grant.reload.application_id == orig.id && R.registered_application.id == orig.id
+  puts ok ? 'PASS' : "FAIL: picked=#{picked.id} orig=#{orig.id} apps=#{apps.map(&:id)} tok=#{tok.reload.application_id} grant=#{grant.reload.application_id}"
+ensure
+  Doorkeeper::AccessToken.where(id: tok&.id).delete_all
+  Doorkeeper::AccessGrant.where(id: grant&.id).delete_all
+  # 途中で落ちても、二重のアプリを残さない（前に無かったときは、作ったアプリを消す）
+  R.ensure_registered
+  R.signin_applications.delete_all if before.empty?
+end
+```
+
+**期待結果:** まとめる前の `registered_application` がいちばん古いアプリ。まとめた後はそのアプリ 1 件だけが残り、トークン・認可コードがそれに付け替わっている
+
+---
+
+### [1-7-3] 作った直後にほかのプロセスも作っていたらまとめる・管理者が作った同じ名前のアプリは残す
+
+未登録のときに作った直後、同時に起動したほかのプロセスも同じアプリを作っていた場面を、`create!` の差し替えで作る（差し替えは印が立っている間だけ働く）。
+同じ名前でもリダイレクト先・confidential の違うアプリ（管理者が画面から作ったもの）は、消さず、正にもしない。
+今あるサインイン用アプリは、名前を一時的に変えて「未登録」にし、最後に戻す。
+
+```ruby
+R = RedmineStudioPlugin::OauthClient::AppRegistrar
+A = Doorkeeper::Application
+sfx = SecureRandom.hex(3)
+$oauth_173_dup = false
+module OAuth173Stub
+  def create!(*args, **kw, &blk)
+    app = super
+    if $oauth_173_dup
+      $oauth_173_dup = false
+      super(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+    end
+    app
+  end
+end
+A.singleton_class.prepend(OAuth173Stub)
+saved = R.signin_applications.to_a
+made = []
+begin
+  saved.each { |a| a.update_column(:name, "Redmine Studio saved #{sfx}") }
+  admin_app = A.create!(name: 'Redmine Studio', redirect_uri: "https://example.com/cb-#{sfx}", scopes: 'view_issues', confidential: true)
+  made << admin_app.id
+  $oauth_173_dup = true
+  R.ensure_registered
+  apps = R.signin_applications.to_a
+  made.concat(A.where(name: 'Redmine Studio').pluck(:id))
+  puts "dup_made: #{!$oauth_173_dup}"
+  puts "merged_to_one: #{apps.size == 1}"
+  puts "admin_app_kept: #{A.exists?(admin_app.id) && R.registered_application&.id != admin_app.id}"
+ensure
+  $oauth_173_dup = false
+  A.where(id: made.uniq).delete_all
+  saved.each { |a| a.update_column(:name, 'Redmine Studio') }
+  puts "restored: #{R.signin_applications.pluck(:id) == saved.map(&:id)}"
+end
+```
+
+**期待結果:**
+- `dup_made: true`（作った直後にもう 1 つ作られた）
+- `merged_to_one: true`（サインイン用アプリが 1 つにまとまった）
+- `admin_app_kept: true`（管理者が作った同じ名前のアプリは残り、正にはならない）
+- `restored: true`（今あるサインイン用アプリを元に戻した）
+
+---
+
 ### [1-8] スコープ定義のズレを追従する
 
 ```ruby
-app = Doorkeeper::Application.find_by(name: 'Redmine Studio')
-app.update!(scopes: 'view_issues')
-RedmineStudioPlugin::OauthClient::AppRegistrar.ensure_registered
-expected = RedmineStudioPlugin::OauthClient::ScopeProvider.scope_names.map(&:to_s).sort
-ok = app.reload.scopes.all.sort == expected
-puts ok ? 'PASS' : "FAIL: scopes=#{app.scopes.all.sort}"
+reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+before = reg.signin_applications.pluck(:id)
+begin
+  reg.ensure_registered
+  app = reg.registered_application
+  app.update!(scopes: 'view_issues')
+  reg.ensure_registered
+  expected = RedmineStudioPlugin::OauthClient::ScopeProvider.scope_names.map(&:to_s).sort
+  ok = app.reload.scopes.all.sort == expected
+  puts ok ? 'PASS' : "FAIL: scopes=#{app.scopes.all.sort}"
+ensure
+  reg.ensure_registered  # 途中で落ちても、スコープを定義どおりに戻す
+  reg.signin_applications.delete_all if before.empty?
+end
 ```
 
 **期待結果:** 登録済みアプリのスコープが定義と食い違っていたら定義に合わせて更新される
@@ -285,11 +398,18 @@ puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
 
 ```ruby
 require 'base64'
-app = Doorkeeper::Application.find_by(name: 'Redmine Studio')
-req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64("#{app.uid}:sek"))
-creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
-ok = creds && creds.first == app.uid
-puts ok ? 'PASS' : "FAIL: #{creds.inspect}"
+reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+before = reg.signin_applications.pluck(:id)
+begin
+  reg.ensure_registered
+  app = reg.registered_application
+  req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64("#{app.uid}:sek"))
+  creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
+  ok = creds && creds.first == app.uid
+  puts ok ? 'PASS' : "FAIL: #{creds.inspect}"
+ensure
+  reg.signin_applications.delete_all if before.empty?
+end
 ```
 
 **期待結果:** 登録済み uid の Basic は `nil` にせず、先頭要素が uid の資格情報を返す
@@ -345,6 +465,48 @@ end
 **実行方法:**
 PowerShell で各エンドポイントにリクエストを送信する。
 本 API は**匿名アクセス可**のため、API キーを付与せずに実行する。
+[2-6]・[2-9]〜[2-11] が使うデータ（プロジェクト・利用者・ロール・親チケット・カテゴリー・トークン）は、用意でその場で作る（終わったら消す）。
+
+**用意（HTTP テストの前に 1 回）:**
+```ruby
+# 6.1 未満（Doorkeeper なし）では Token・ClientId は空（[2-6]・[2-9]〜[2-11] はスキップ）
+admin = User.find(1)
+User.current = admin
+reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+# 前回の残りを消す
+olds = User.where('login LIKE ?', 'oca_user_%').to_a
+Doorkeeper::AccessToken.where(resource_owner_id: olds.map(&:id)).delete_all if defined?(Doorkeeper::AccessToken)
+Project.where('identifier LIKE ?', 'oca-%').each(&:destroy)
+olds.each(&:destroy)
+Role.where('name LIKE ?', 'OCA_Role_%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+role = Role.create!(name: "OCA_Role_#{sfx}", permissions: [:view_issues, :add_issues, :manage_subtasks, :manage_categories, :view_wiki_pages, :edit_wiki_pages])
+pr = Project.new(name: "OCA_#{sfx}", identifier: "oca-#{sfx}", is_public: false)
+pr.enabled_module_names = %w[issue_tracking wiki]
+pr.trackers = [Tracker.first]
+pr.save!
+u = User.new(login: "oca_user_#{sfx}", firstname: 'OCA', lastname: 'User', mail: "oca_user_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+u.password = u.password_confirmation = "Pw-#{sfx}-x9Z"
+u.save!
+Member.create!(principal: u, project: pr, roles: [role])
+parent = Issue.create!(project: pr, tracker: pr.trackers.first, author: admin, subject: "OCA parent #{sfx}", priority: IssuePriority.default || IssuePriority.first)
+cat = pr.issue_categories.create!(name: "oca-cat-#{sfx}")
+app = reg.registered_application
+token = app ? Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600).plaintext_token : ''
+puts({ ProjectId: pr.identifier, ParentIssueId: parent.id, CategoryName: cat.name, Token: token, ClientId: app&.uid.to_s }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+```ruby
+User.current = User.find(1)
+olds = User.where('login LIKE ?', 'oca_user_%').to_a
+Doorkeeper::AccessToken.where(resource_owner_id: olds.map(&:id)).delete_all if defined?(Doorkeeper::AccessToken)
+Project.where('identifier LIKE ?', 'oca-%').each(&:destroy)
+olds.each(&:destroy)
+Role.where('name LIKE ?', 'OCA_Role_%').each(&:destroy)
+left = Project.where('identifier LIKE ?', 'oca-%').count + User.where('login LIKE ?', 'oca_user_%').count + Role.where('name LIKE ?', 'OCA_Role_%').count
+puts left.zero? ? 'cleaned' : "left=#{left}"
+```
 
 ### [2-0] 匿名（認証情報なし）でアクセスできる
 
@@ -359,22 +521,24 @@ $response.StatusCode
 
 ### [2-1] `login_required` を有効にしても匿名で到達できる（唯一の匿名例外）
 
-**確認方法（Runner で ON にし、HTTP で確認し、Runner で元に戻す）:**
-```bash
-# 1) login_required を ON
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"Setting.login_required='1'\""
-```
+**確認方法（Runner で ON にし、HTTP で確認し、`finally` で必ず元の値に戻す）:**
 ```powershell
-# 2) 匿名で 200 になること（他の追加 API は 401 になる）
-Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get | Select-Object -Expand StatusCode   # 200 期待
-try { Invoke-WebRequest -Uri '{BaseUrl}/info.json' -Method Get } catch { $_.Exception.Response.StatusCode.Value__ }   # 401 期待
-```
-```bash
-# 3) login_required を元に戻す
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"Setting.login_required='0'\""
+$Container = '{Container}'
+function Rr($code) { docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1 }
+$orig = Rr 'puts Setting.login_required'
+if ($orig -notmatch '^[01]$') { throw "login_required の値が読めない: '$orig'" }
+try {
+  Rr "Setting.login_required = '1'; puts 'on'" | Out-Null
+  # 匿名で 200 になること（他の追加 API は 401 になる）
+  $a = (Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get).StatusCode
+  $b = try { (Invoke-WebRequest -Uri '{BaseUrl}/info.json' -Method Get).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ }
+  "oauth_client=$a info=$b"
+} finally {
+  Rr "Setting.login_required = '$orig'; puts 'restored=' + (Setting.login_required == '$orig').to_s"
+}
 ```
 
-**期待結果:** `login_required` の ON/OFF に関わらず `/oauth_client` は 200。対照として `/info` は ON で 401
+**期待結果:** `oauth_client=200 info=401`（`login_required` を ON にしても `/oauth_client` は 200。対照として `/info` は 401）。最後に `restored=true`
 
 ---
 
@@ -416,20 +580,26 @@ $response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.xml' -Method Get
 
 ### [2-5] 未登録時は 200 で空 `{}` を返す
 
-**確認方法（Runner で削除 → HTTP 確認 → Runner で自己修復）:**
-```bash
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"Doorkeeper::Application.where(name: 'Redmine Studio').destroy_all\""
-```
+**確認方法（Runner で名前を一時的に変えて未登録にする → HTTP 確認 → `finally` で必ず名前を戻す）:**
+消すと発行済みのトークンも消え、client_id も変わるので、消さずに名前を変える。
+rails runner は起動のたびに自己修復登録が走るため、戻すときに `ensure_registered` で元のアプリ（いちばん古いもの）へまとめる。
+
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get
-$response.StatusCode   # 200 期待
-$response.Content      # {"oauth_client":{}} 期待（client_id 無し）
-```
-```bash
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"RedmineStudioPlugin::OauthClient::AppRegistrar.ensure_registered\""
+$Container = '{Container}'
+function Rr($code) { docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1 }
+$sfx = -join (1..6 | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+$before = Rr 'puts RedmineStudioPlugin::OauthClient::AppRegistrar.signin_applications.pluck(:id).inspect'
+try {
+  Rr "RedmineStudioPlugin::OauthClient::AppRegistrar.signin_applications.update_all(name: 'Redmine Studio saved $sfx'); puts 'hidden'" | Out-Null
+  $response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get
+  "status=$($response.StatusCode) body=$($response.Content)"
+} finally {
+  $after = Rr "R = RedmineStudioPlugin::OauthClient::AppRegistrar; Doorkeeper::Application.where(name: 'Redmine Studio saved $sfx').update_all(name: 'Redmine Studio'); R.ensure_registered; puts R.signin_applications.pluck(:id).inspect"
+  "restored=$($after -eq $before)"
+}
 ```
 
-**期待結果:** 未登録（非対応相当）でも 404 ではなく 200 で空オブジェクトを返す。`client_id` は含まれない
+**期待結果:** `status=200 body={"oauth_client":{}}`（未登録〔非対応相当〕でも 404 ではなく 200 で空オブジェクト。`client_id` は含まれない）。最後に `restored=True`（元のアプリに戻った）
 
 ---
 
@@ -441,9 +611,8 @@ docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner
 クライアント認証が通ったことの証明になる。
 
 ```powershell
-# 登録済みアプリの uid を取得
-$uid = docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner `"puts Doorkeeper::Application.find_by(name: 'Redmine Studio').uid`"" | Select-Object -Last 1
-$uid = $uid.Trim()
+# 登録済みアプリの uid（用意の ClientId）
+$uid = '{ClientId}'
 
 $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('user:password'))
 $headers = @{ Authorization = "Basic $basic" }
@@ -510,77 +679,48 @@ $response.Content      # {"oauth_client":{}} 期待（client_id 無し）
 > 「アプリが実際に使う操作」が権限 AND で削られないことを検証する（トークンに無い権限は
 > ロールにあっても落とされるため、スコープ定義の不足はこの形でしか検知できない）。
 >
-> **前提データ**: `test-plugin` プロジェクトに親チケット #1 があり、`test_active_user` が
-> `add_issues` / `manage_subtasks` / `manage_categories` / `edit_wiki_pages` を持つロールで
-> メンバーであること（[2-11] はプロジェクトの Wiki モジュールが有効であることも前提）。
-> 無い場合はロール・メンバーシップを整備してから実行する（素通り防止のため、前提が無いときは
-> SKIP とし成功に数えない）。
-> トークンはハッシュ保存（`hash_token_secrets`）のため、Runner の出力（`plaintext_token`）を使う。
+> **データ**: 用意で、非公開プロジェクト（`{ProjectId}`・チケットと Wiki のモジュール有効）・親チケット（`{ParentIssueId}`）・
+> カテゴリー（`{CategoryName}`）と、`add_issues` / `manage_subtasks` / `manage_categories` / `edit_wiki_pages` を持つ
+> ロールでメンバーにした利用者を作り、その利用者にサインインと同じスコープのトークン（`{Token}`）を発行する。
+> トークンはハッシュ保存（`hash_token_secrets`）のため、用意で受け取った平文（`plaintext_token`）を使う。
 
 ### [2-9] スコープ契約: 親チケットを指定した作成が配下に入る
 
-```bash
-# 1) サインインと同じスコープのトークンを直作成
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"u=User.find_by(login: 'test_active_user'); app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); t=Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600); puts t.plaintext_token\""
-```
 ```powershell
-# 2) 親チケット #1 を指定して作成し、作成結果の parent を確認
-$token = '<上の出力>'
-$h = @{ Authorization = "Bearer $token" }
-$body = @{ issue = @{ project_id = 'test-plugin'; subject = 'scope contract: parent'; parent_issue_id = 1 } } | ConvertTo-Json
+# 親チケットを指定して作成し、作成結果の parent を確認（作ったチケットは後片付けでプロジェクトごと消える）
+$h = @{ Authorization = 'Bearer {Token}' }
+$body = @{ issue = @{ project_id = '{ProjectId}'; subject = 'scope contract: parent'; parent_issue_id = {ParentIssueId} } } | ConvertTo-Json
 $r = Invoke-RestMethod -Uri '{BaseUrl}/issues.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
-(Invoke-RestMethod -Uri "{BaseUrl}/issues/$($r.issue.id).json" -Headers $h).issue.parent.id   # 1 期待
-```
-```bash
-# 3) 掃除（作成チケットとテストトークンを削除）
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"Issue.where(subject: 'scope contract: parent').destroy_all; app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); u=User.find_by(login: 'test_active_user'); Doorkeeper::AccessToken.where(application_id: app.id, resource_owner_id: u.id).delete_all\""
+(Invoke-RestMethod -Uri "{BaseUrl}/issues/$($r.issue.id).json" -Headers $h).issue.parent.id -eq {ParentIssueId}   # True 期待
 ```
 
-**期待結果:** 作成されたチケットの `parent.id` が `1`（`manage_subtasks` がスコープに無いと、エラーにならず親なしで作成されてしまう）
+**期待結果:** `True`（作成されたチケットの `parent.id` が親チケットの番号。`manage_subtasks` がスコープに無いと、エラーにならず親なしで作成されてしまう）
 
 ---
 
 ### [2-10] スコープ契約: カテゴリー一覧が取得できる
 
-```bash
-# 1) 検証用カテゴリーを作成し、トークンを直作成
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"p=Project.find_by(identifier: 'test-plugin'); p.issue_categories.find_or_create_by!(name: 'scope-contract-cat'); u=User.find_by(login: 'test_active_user'); app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); t=Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600); puts t.plaintext_token\""
-```
 ```powershell
-# 2) カテゴリー一覧 API（コアが manage_categories を要求）を Bearer で取得
-$token = '<上の出力>'
-$r = Invoke-RestMethod -Uri '{BaseUrl}/projects/test-plugin/issue_categories.json' -Headers @{ Authorization = "Bearer $token" }
-$r.issue_categories.name -contains 'scope-contract-cat'   # True 期待（スコープ不足だと 403）
-```
-```bash
-# 3) 掃除（カテゴリーとテストトークンを削除）
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"p=Project.find_by(identifier: 'test-plugin'); p.issue_categories.where(name: 'scope-contract-cat').destroy_all; app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); u=User.find_by(login: 'test_active_user'); Doorkeeper::AccessToken.where(application_id: app.id, resource_owner_id: u.id).delete_all\""
+# カテゴリー一覧 API（コアが manage_categories を要求）を Bearer で取得
+$r = Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/issue_categories.json' -Headers @{ Authorization = 'Bearer {Token}' }
+$r.issue_categories.name -contains '{CategoryName}'   # True 期待（スコープ不足だと 403）
 ```
 
-**期待結果:** 200 で `scope-contract-cat` を含む一覧が返る（`manage_categories` がスコープに無いと 403 になり、cache_bundle でもカテゴリーが空になる）
+**期待結果:** `True`（200 で用意したカテゴリーを含む一覧が返る。`manage_categories` がスコープに無いと 403 になり、cache_bundle でもカテゴリーが空になる）
 
 ---
 
 ### [2-11] スコープ契約: Wiki ページの作成・編集ができる（先行確保）
 
-```bash
-# 1) トークンを直作成（[2-9] と同じ手順）
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"u=User.find_by(login: 'test_active_user'); app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); t=Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600); puts t.plaintext_token\""
-```
 ```powershell
-# 2) Wiki ページを Bearer で作成（PUT は新規作成と更新を兼ねる）し、取得して確認
-$token = '<上の出力>'
-$h = @{ Authorization = "Bearer $token" }
+# Wiki ページを Bearer で作成（PUT は新規作成と更新を兼ねる）し、取得して確認（ページは後片付けでプロジェクトごと消える）
+$h = @{ Authorization = 'Bearer {Token}' }
 $body = @{ wiki_page = @{ text = 'scope contract wiki text' } } | ConvertTo-Json
-Invoke-RestMethod -Uri '{BaseUrl}/projects/test-plugin/wiki/ScopeContractPage.json' -Method Put -Body $body -ContentType 'application/json' -Headers $h
-(Invoke-RestMethod -Uri '{BaseUrl}/projects/test-plugin/wiki/ScopeContractPage.json' -Headers $h).wiki_page.text   # 'scope contract wiki text' 期待
-```
-```bash
-# 3) 掃除（検証ページとテストトークンを削除）
-docker exec {Container} bash -c "cd /usr/src/redmine && bundle exec rails runner \"p=Project.find_by(identifier: 'test-plugin'); p.wiki.pages.where(title: 'ScopeContractPage').destroy_all; app=Doorkeeper::Application.find_by(name: 'Redmine Studio'); u=User.find_by(login: 'test_active_user'); Doorkeeper::AccessToken.where(application_id: app.id, resource_owner_id: u.id).delete_all\""
+Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/wiki/ScopeContractPage.json' -Method Put -Body $body -ContentType 'application/json' -Headers $h | Out-Null
+(Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/wiki/ScopeContractPage.json' -Headers $h).wiki_page.text -eq 'scope contract wiki text'   # True 期待
 ```
 
-**期待結果:** 作成が成功し、取得したページ本文が一致する（`edit_wiki_pages` がスコープに無いと 403。将来の Wiki 書き込み機能のための先行確保が効いていることの確認）
+**期待結果:** `True`（作成が成功し、取得したページ本文が一致する。`edit_wiki_pages` がスコープに無いと 403。将来の Wiki 書き込み機能のための先行確保が効いていることの確認）
 
 ---
 
