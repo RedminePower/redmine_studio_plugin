@@ -24,7 +24,7 @@
 | `/journals_list/:id` | GET | 単一ジャーナルの Wiki レンダリング結果を返す |
 | `/journals_list/show_all?ids[]=...` | GET | 複数ジャーナルの Wiki レンダリング結果を JSON で一括返す |
 
-**認証:** ログイン必須（本体の `login_required` 設定に関わらず一律）。`before_action :require_login` を付与。ブラウザ UI 補助の AJAX エンドポイントのため、認証はセッション（ログイン中ユーザ）で行う。未認証（匿名）はログイン画面へリダイレクト（302）され、ジャーナル本文は取得できない。各ジャーナルの可視性は従来どおり `journalized.visible? && journal.visible?` で個別に判定する。
+**認証:** ログイン必須（本体の `login_required` 設定に関わらず一律）。`before_action :require_login` を付与。ブラウザ UI 補助の AJAX エンドポイントのため、認証はセッション（ログイン中ユーザ）で行う。未認証（匿名）はログイン画面へリダイレクト（302）され、ジャーナル本文は取得できない。見せてよいジャーナルは、本体の `Journal.visible` で決める（チケットが見られることに加え、プライベートコメントを見る権限も見る）。
 
 ---
 
@@ -530,13 +530,16 @@ end
 **用意（HTTP テストの前に 1 回）:**
 コメントのあるチケットと、コメントのないチケットを Runner で作る（前回の残りがあれば先に消す）。
 コメントのあるチケットは、管理者がコメントを 2 つ書き（1 つ目は Wiki 記法の太字を含む）、担当者は管理者。
-最後の行の `IssueId`・`NoCommentId`・`JournalId`・`JournalId2`・`MissingJournalId`（存在しないジャーナル ID）を、各試験の `{IssueId}` などに入れる。
+[2-19]・[2-20] 用に、管理者のプライベートコメントを 1 つ書き、プライベートコメントを見る権限の無いメンバー（viewer）を作る。
+最後の行の `IssueId`・`NoCommentId`・`JournalId`・`JournalId2`・`PrivateJournalId`・`MissingJournalId`（存在しないジャーナル ID）・`ViewerLogin`・`ViewerPassword` を、各試験の `{IssueId}` などに入れる。
 
 ```ruby
 admin = User.find(1)
 User.current = admin
 # 前回の残りを消す
 Project.where('identifier LIKE ?', 'jl-http-%').each(&:destroy)
+User.where('login LIKE ?', 'jl_http_v_%').each(&:destroy)
+Role.where('name LIKE ?', 'JL_HTTP_Role_%').each(&:destroy)
 sfx = SecureRandom.hex(3)
 pr = Project.new(name: "JL_HTTP_#{sfx}", identifier: "jl-http-#{sfx}")
 pr.enabled_module_names = %w[issue_tracking]
@@ -545,9 +548,18 @@ pr.save!
 issue = Issue.create!(project: pr, tracker: pr.trackers.first, subject: "JL_HTTP_comment_#{sfx}", author: admin)
 j1 = Journal.create!(journalized: issue, user: admin, notes: 'JL **bold** comment 1')
 j2 = Journal.create!(journalized: issue, user: admin, notes: 'JL comment 2')
+# [2-19]・[2-20] 用: 管理者のプライベートコメントと、プライベートコメントを見る権限の無いメンバー
+jp = Journal.create!(journalized: issue, user: admin, notes: 'JL private comment', private_notes: true)
+role = Role.create!(name: "JL_HTTP_Role_#{sfx}", permissions: [:view_issues])
+viewer_password = "Pw-#{sfx}-x9Z"
+viewer = User.new(login: "jl_http_v_#{sfx}", firstname: 'JL', lastname: "Viewer#{sfx}", mail: "jl_http_v_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+viewer.password = viewer.password_confirmation = viewer_password
+viewer.save!
+Member.create!(principal: viewer, project: pr, roles: [role])
 issue.update_columns(assigned_to_id: admin.id)
 none = Issue.create!(project: pr, tracker: pr.trackers.first, subject: "JL_HTTP_none_#{sfx}", author: admin)
-puts({ IssueId: issue.id, NoCommentId: none.id, JournalId: j1.id, JournalId2: j2.id, MissingJournalId: Journal.maximum(:id) + 100000 }.to_json)
+puts({ IssueId: issue.id, NoCommentId: none.id, JournalId: j1.id, JournalId2: j2.id, PrivateJournalId: jp.id, MissingJournalId: Journal.maximum(:id) + 100000,
+       ViewerLogin: viewer.login, ViewerPassword: viewer_password }.to_json)
 ```
 
 **後片付け（HTTP テストのあとに 1 回）:**
@@ -555,6 +567,8 @@ puts({ IssueId: issue.id, NoCommentId: none.id, JournalId: j1.id, JournalId2: j2
 ```ruby
 User.current = User.find(1)
 Project.where('identifier LIKE ?', 'jl-http-%').each(&:destroy)
+User.where('login LIKE ?', 'jl_http_v_%').each(&:destroy)
+Role.where('name LIKE ?', 'JL_HTTP_Role_%').each(&:destroy)
 puts Project.where('identifier LIKE ?', 'jl-http-%').count
 ```
 
@@ -844,6 +858,39 @@ try {
 ```
 
 **期待結果:** `302`（ログイン画面 `/login` へのリダイレクト。匿名では取得不可）
+
+### [2-19] プライベートコメントを見る権限の無い人は、番号を指定してもプライベートコメントを取れない（show）
+
+viewer（チケットは見られるが、プライベートコメントを見る権限が無い）でログインし、管理者のプライベートコメント（`{PrivateJournalId}`）とパブリックのコメント（`{JournalId}`）を取得する。
+
+**確認方法:**
+```powershell
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{ViewerLogin}'; password = '{ViewerPassword}' } | Out-Null
+$code = { param($id) try { (Invoke-WebRequest -Uri "{BaseUrl}/journals_list/$id" -WebSession $session -UseBasicParsing).StatusCode } catch { $_.Exception.Response.StatusCode.Value__ } }
+"private: " + (& $code '{PrivateJournalId}')
+"public: " + (& $code '{JournalId}')
+```
+
+**期待結果:** `private: 403`・`public: 200`（プライベートコメントは取れない。パブリックのコメントは取れる）
+
+### [2-20] プライベートコメントを見る権限の無い人は、一括取得でもプライベートコメントを取れない（show_all）
+
+viewer でログインし、パブリックのコメント（`{JournalId}`）とプライベートコメント（`{PrivateJournalId}`）を一括で取得する。
+
+**確認方法:**
+```powershell
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable session -UseBasicParsing
+$token = [Net.WebUtility]::HtmlDecode([regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value)
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $session -UseBasicParsing `
+  -Body @{ authenticity_token = $token; username = '{ViewerLogin}'; password = '{ViewerPassword}' } | Out-Null
+$json = (Invoke-WebRequest -Uri '{BaseUrl}/journals_list/show_all?ids[]={JournalId}&ids[]={PrivateJournalId}' -WebSession $session -UseBasicParsing).Content | ConvertFrom-Json
+($json.PSObject.Properties.Name | Sort-Object) -join ','
+```
+
+**期待結果:** `{JournalId}` だけ（プライベートコメントの番号は JSON のキーに入らない）
 
 ---
 
