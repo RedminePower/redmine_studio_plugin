@@ -22,9 +22,23 @@ module RedmineStudioPlugin
       # ロック中の人も、見られるプロジェクトのメンバーなら探せる（ロック中の人が担当・作成したチケットを絞り込めるように）。
       # 本体の絞り込みの選択肢には、管理者でない人にはロック中の人は出ないが、id を書けば本体も絞り込める
       def user_by_login(login)
-        User.visible.find_by(login: login) ||
-          User.member_of(Project.visible.to_a).where(status: User::STATUS_LOCKED).find_by(login: login)
+        User.visible.find_by(login: login) || locked_members.find_by(login: login)
       end
+
+      # ref_issues の -f:treated の人 : まずログイン名で探し、無くて数字だけなら id で探す
+      # （数字だけのログイン名も本体では付けられるため、ログイン名を先にする。見られる範囲は user_by_login と同じ）
+      def user_by_login_or_id(key)
+        user = user_by_login(key)
+        return user if user || key.to_s !~ /\A\d+\z/
+
+        User.visible.find_by(id: key) || locked_members.find_by(id: key)
+      end
+
+      # 見られるプロジェクトのメンバーのうち、ロック中の人
+      def locked_members
+        User.member_of(Project.visible.to_a).where(status: User::STATUS_LOCKED)
+      end
+      private_class_method :locked_members
 
       # ref_issues の -f: に書いた名前を探す。project はクエリのプロジェクト（無ければ nil）
       def filter_value(filter, value, project)

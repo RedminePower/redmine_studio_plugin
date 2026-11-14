@@ -110,12 +110,12 @@ Basic のユーザー名が「登録済み OAuth アプリの uid」でない場
 ## テストの版適用（Doorkeeper 依存）
 
 サインイン機能は OAuth2 プロバイダ（Doorkeeper）に依存し、Doorkeeper は本体では **Redmine 6.1** で導入された。
-そのためテストは版で適用範囲を分ける（実行時に `Redmine::VERSION` で判定し、対象外はスキップする）。
+そのためテストは版で適用範囲を分ける（実行時に Doorkeeper の有無で判定し、対象外は SKIP と出す。Runner は `defined?(Doorkeeper)`、HTTP は用意が出す `HasDoorkeeper` で判定する）。
 
 | 区分 | 対象ケース | 適用版 |
 |------|-----------|--------|
-| 全版共通 | [1-1]〜[1-5] / [1-9] / [2-0] / [2-1] | 全版 |
-| Doorkeeper 依存（登録・patch・トークン） | [1-6]〜[1-8]（[1-7-2]・[1-7-3] を含む） / [1-10]〜[1-14] / [2-2]〜[2-7] | **6.1 以上のみ**（6.1 未満は Doorkeeper 無しでスキップ） |
+| 全版共通 | [1-1]〜[1-5] / [1-9] / [1-10] / [2-0] / [2-1] | 全版 |
+| Doorkeeper 依存（登録・patch・トークン） | [1-6]〜[1-8]（[1-7-2]・[1-7-3] を含む） / [1-11]〜[1-14] / [2-2]〜[2-7] / [2-9]〜[2-11] | **6.1 以上のみ**（6.1 未満は Doorkeeper 無しでスキップ） |
 | Doorkeeper なしの挙動（ロード・degradation） | [1-15]〜[1-16] / [2-8] | **6.1 未満のみ** |
 
 6.1 未満では、init.rb の Doorkeeper patch 適用が `defined?(Doorkeeper::OAuth::Client::Credentials)` でガードされ、
@@ -197,19 +197,23 @@ puts missing.empty? ? 'PASS' : "FAIL: missing scopes: #{missing.join(', ')}"
 今あるサインイン用アプリは、消さずに名前を一時的に変えて「未登録」にし、最後に戻す（消すと発行済みのトークンも消え、client_id も変わる）。
 
 ```ruby
-reg = RedmineStudioPlugin::OauthClient::AppRegistrar
-sfx = SecureRandom.hex(3)
-saved = reg.signin_applications.to_a
-begin
-  saved.each { |a| a.update_column(:name, "Redmine Studio saved #{sfx}") }
-  reg.ensure_registered
-  app = reg.registered_application
-  ok = app && saved.none? { |a| a.id == app.id } && app.confidential == false && app.redirect_uri == 'http://127.0.0.1/' && app.uid.present?
-  puts ok ? 'PASS' : "FAIL: app=#{app.inspect}"
-ensure
-  saved.each { |a| a.update_column(:name, 'Redmine Studio') }
-  # 試験で作ったアプリは、いちばん古い元のアプリへまとめて消す（元が無かったときは消すだけ）
-  saved.empty? ? reg.signin_applications.delete_all : reg.ensure_registered
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+  sfx = SecureRandom.hex(3)
+  saved = reg.signin_applications.to_a
+  begin
+    saved.each { |a| a.update_column(:name, "Redmine Studio saved #{sfx}") }
+    reg.ensure_registered
+    app = reg.registered_application
+    ok = app && saved.none? { |a| a.id == app.id } && app.confidential == false && app.redirect_uri == 'http://127.0.0.1/' && app.uid.present?
+    puts ok ? 'PASS' : "FAIL: app=#{app.inspect}"
+  ensure
+    saved.each { |a| a.update_column(:name, 'Redmine Studio') }
+    # 試験で作ったアプリは、いちばん古い元のアプリへまとめて消す（元が無かったときは消すだけ）
+    saved.empty? ? reg.signin_applications.delete_all : reg.ensure_registered
+  end
 end
 ```
 
@@ -220,15 +224,19 @@ end
 ### [1-7] 何度呼んでも重複登録しない（冪等）
 
 ```ruby
-reg = RedmineStudioPlugin::OauthClient::AppRegistrar
-before = reg.signin_applications.pluck(:id)
-begin
-  3.times { reg.ensure_registered }
-  count = reg.signin_applications.count
-  puts count == 1 ? 'PASS' : "FAIL: count=#{count}"
-ensure
-  # 前に無かったときは、この試験で作ったアプリを消す
-  reg.signin_applications.delete_all if before.empty?
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+  before = reg.signin_applications.pluck(:id)
+  begin
+    3.times { reg.ensure_registered }
+    count = reg.signin_applications.count
+    puts count == 1 ? 'PASS' : "FAIL: count=#{count}"
+  ensure
+    # 前に無かったときは、この試験で作ったアプリを消す
+    reg.signin_applications.delete_all if before.empty?
+  end
 end
 ```
 
@@ -243,28 +251,32 @@ end
 まとめる前でも、`registered_application`（`/oauth_client` が返すアプリ）はいちばん古いものを選ぶ。
 
 ```ruby
-R = RedmineStudioPlugin::OauthClient::AppRegistrar
-A = Doorkeeper::Application
-before = R.signin_applications.pluck(:id)
-begin
-  R.ensure_registered
-  orig = R.signin_applications.first
-  dup1 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
-  dup2 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
-  user = User.find(1)
-  tok = Doorkeeper::AccessToken.create!(application_id: dup2.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 7200, use_refresh_token: true)
-  grant = Doorkeeper::AccessGrant.create!(application_id: dup1.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 600, redirect_uri: 'http://127.0.0.1/')
-  picked = R.registered_application
-  R.ensure_registered
-  apps = A.where(name: 'Redmine Studio').to_a
-  ok = picked.id == orig.id && apps.map(&:id) == [orig.id] && tok.reload.application_id == orig.id && grant.reload.application_id == orig.id && R.registered_application.id == orig.id
-  puts ok ? 'PASS' : "FAIL: picked=#{picked.id} orig=#{orig.id} apps=#{apps.map(&:id)} tok=#{tok.reload.application_id} grant=#{grant.reload.application_id}"
-ensure
-  Doorkeeper::AccessToken.where(id: tok&.id).delete_all
-  Doorkeeper::AccessGrant.where(id: grant&.id).delete_all
-  # 途中で落ちても、二重のアプリを残さない（前に無かったときは、作ったアプリを消す）
-  R.ensure_registered
-  R.signin_applications.delete_all if before.empty?
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  R = RedmineStudioPlugin::OauthClient::AppRegistrar
+  A = Doorkeeper::Application
+  before = R.signin_applications.pluck(:id)
+  begin
+    R.ensure_registered
+    orig = R.signin_applications.first
+    dup1 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+    dup2 = A.create!(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+    user = User.find(1)
+    tok = Doorkeeper::AccessToken.create!(application_id: dup2.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 7200, use_refresh_token: true)
+    grant = Doorkeeper::AccessGrant.create!(application_id: dup1.id, resource_owner_id: user.id, scopes: 'view_issues', expires_in: 600, redirect_uri: 'http://127.0.0.1/')
+    picked = R.registered_application
+    R.ensure_registered
+    apps = A.where(name: 'Redmine Studio').to_a
+    ok = picked.id == orig.id && apps.map(&:id) == [orig.id] && tok.reload.application_id == orig.id && grant.reload.application_id == orig.id && R.registered_application.id == orig.id
+    puts ok ? 'PASS' : "FAIL: picked=#{picked.id} orig=#{orig.id} apps=#{apps.map(&:id)} tok=#{tok.reload.application_id} grant=#{grant.reload.application_id}"
+  ensure
+    Doorkeeper::AccessToken.where(id: tok&.id).delete_all
+    Doorkeeper::AccessGrant.where(id: grant&.id).delete_all
+    # 途中で落ちても、二重のアプリを残さない（前に無かったときは、作ったアプリを消す）
+    R.ensure_registered
+    R.signin_applications.delete_all if before.empty?
+  end
 end
 ```
 
@@ -279,39 +291,43 @@ end
 今あるサインイン用アプリは、名前を一時的に変えて「未登録」にし、最後に戻す。
 
 ```ruby
-R = RedmineStudioPlugin::OauthClient::AppRegistrar
-A = Doorkeeper::Application
-sfx = SecureRandom.hex(3)
-$oauth_173_dup = false
-module OAuth173Stub
-  def create!(*args, **kw, &blk)
-    app = super
-    if $oauth_173_dup
-      $oauth_173_dup = false
-      super(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
-    end
-    app
-  end
-end
-A.singleton_class.prepend(OAuth173Stub)
-saved = R.signin_applications.to_a
-made = []
-begin
-  saved.each { |a| a.update_column(:name, "Redmine Studio saved #{sfx}") }
-  admin_app = A.create!(name: 'Redmine Studio', redirect_uri: "https://example.com/cb-#{sfx}", scopes: 'view_issues', confidential: true)
-  made << admin_app.id
-  $oauth_173_dup = true
-  R.ensure_registered
-  apps = R.signin_applications.to_a
-  made.concat(A.where(name: 'Redmine Studio').pluck(:id))
-  puts "dup_made: #{!$oauth_173_dup}"
-  puts "merged_to_one: #{apps.size == 1}"
-  puts "admin_app_kept: #{A.exists?(admin_app.id) && R.registered_application&.id != admin_app.id}"
-ensure
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  R = RedmineStudioPlugin::OauthClient::AppRegistrar
+  A = Doorkeeper::Application
+  sfx = SecureRandom.hex(3)
   $oauth_173_dup = false
-  A.where(id: made.uniq).delete_all
-  saved.each { |a| a.update_column(:name, 'Redmine Studio') }
-  puts "restored: #{R.signin_applications.pluck(:id) == saved.map(&:id)}"
+  module OAuth173Stub
+    def create!(*args, **kw, &blk)
+      app = super
+      if $oauth_173_dup
+        $oauth_173_dup = false
+        super(name: 'Redmine Studio', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+      end
+      app
+    end
+  end
+  A.singleton_class.prepend(OAuth173Stub)
+  saved = R.signin_applications.to_a
+  made = []
+  begin
+    saved.each { |a| a.update_column(:name, "Redmine Studio saved #{sfx}") }
+    admin_app = A.create!(name: 'Redmine Studio', redirect_uri: "https://example.com/cb-#{sfx}", scopes: 'view_issues', confidential: true)
+    made << admin_app.id
+    $oauth_173_dup = true
+    R.ensure_registered
+    apps = R.signin_applications.to_a
+    made.concat(A.where(name: 'Redmine Studio').pluck(:id))
+    puts "dup_made: #{!$oauth_173_dup}"
+    puts "merged_to_one: #{apps.size == 1}"
+    puts "admin_app_kept: #{A.exists?(admin_app.id) && R.registered_application&.id != admin_app.id}"
+  ensure
+    $oauth_173_dup = false
+    A.where(id: made.uniq).delete_all
+    saved.each { |a| a.update_column(:name, 'Redmine Studio') }
+    puts "restored: #{R.signin_applications.pluck(:id) == saved.map(&:id)}"
+  end
 end
 ```
 
@@ -326,19 +342,23 @@ end
 ### [1-8] スコープ定義のズレを追従する
 
 ```ruby
-reg = RedmineStudioPlugin::OauthClient::AppRegistrar
-before = reg.signin_applications.pluck(:id)
-begin
-  reg.ensure_registered
-  app = reg.registered_application
-  app.update!(scopes: 'view_issues')
-  reg.ensure_registered
-  expected = RedmineStudioPlugin::OauthClient::ScopeProvider.scope_names.map(&:to_s).sort
-  ok = app.reload.scopes.all.sort == expected
-  puts ok ? 'PASS' : "FAIL: scopes=#{app.scopes.all.sort}"
-ensure
-  reg.ensure_registered  # 途中で落ちても、スコープを定義どおりに戻す
-  reg.signin_applications.delete_all if before.empty?
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+  before = reg.signin_applications.pluck(:id)
+  begin
+    reg.ensure_registered
+    app = reg.registered_application
+    app.update!(scopes: 'view_issues')
+    reg.ensure_registered
+    expected = RedmineStudioPlugin::OauthClient::ScopeProvider.scope_names.map(&:to_s).sort
+    ok = app.reload.scopes.all.sort == expected
+    puts ok ? 'PASS' : "FAIL: scopes=#{app.scopes.all.sort}"
+  ensure
+    reg.ensure_registered  # 途中で落ちても、スコープを定義どおりに戻す
+    reg.signin_applications.delete_all if before.empty?
+  end
 end
 ```
 
@@ -358,23 +378,27 @@ puts sup == exp ? 'PASS' : "FAIL: signin_supported?=#{sup} expected=#{exp}"
 
 ---
 
-> **[1-10]〜[1-14] は Doorkeeper 依存（クライアント資格情報 patch）。6.1 以上のみ実行し、6.1 未満（Doorkeeper なし）ではスキップする。**
-
-### [1-10] クライアント資格情報パッチが定義されている
+### [1-10] クライアント資格情報パッチが定義されている（全版共通）
 
 ```ruby
 puts defined?(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch) ? 'PASS' : 'FAIL: patch not defined'
 ```
 
-**期待結果:** `DoorkeeperClientCredentialsPatch` が定義されている
+**期待結果:** `DoorkeeperClientCredentialsPatch` が定義されている（モジュールの定義は Doorkeeper が無くても読み込まれる）
 
 ---
+
+> **[1-11]〜[1-14] は Doorkeeper 依存（クライアント資格情報 patch）。6.1 以上のみ実行し、6.1 未満（Doorkeeper なし）ではスキップする。**
 
 ### [1-11] パッチが Credentials の特異クラスに適用されている
 
 ```ruby
-ok = Doorkeeper::OAuth::Client::Credentials.singleton_class.ancestors.include?(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch)
-puts ok ? 'PASS' : 'FAIL: patch not prepended to Credentials singleton class'
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  ok = Doorkeeper::OAuth::Client::Credentials.singleton_class.ancestors.include?(RedmineStudioPlugin::OauthClient::DoorkeeperClientCredentialsPatch)
+  puts ok ? 'PASS' : 'FAIL: patch not prepended to Credentials singleton class'
+end
 ```
 
 **期待結果:** `Doorkeeper::OAuth::Client::Credentials` の特異クラスにパッチが `prepend` されている
@@ -384,10 +408,14 @@ puts ok ? 'PASS' : 'FAIL: patch not prepended to Credentials singleton class'
 ### [1-12] ゲートの資格情報（未登録 uid）の Basic は無視される
 
 ```ruby
-require 'base64'
-req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64('user:password'))
-creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
-puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  require 'base64'
+  req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64('user:password'))
+  creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
+  puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
+end
 ```
 
 **期待結果:** 未登録 uid（前段ゲートの資格情報）の Basic では `nil`（＝ボディ `client_id` へフォールバックさせる）
@@ -397,18 +425,22 @@ puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
 ### [1-13] 登録済みアプリ uid の Basic は従来どおり尊重される
 
 ```ruby
-require 'base64'
-reg = RedmineStudioPlugin::OauthClient::AppRegistrar
-before = reg.signin_applications.pluck(:id)
-begin
-  reg.ensure_registered
-  app = reg.registered_application
-  req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64("#{app.uid}:sek"))
-  creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
-  ok = creds && creds.first == app.uid
-  puts ok ? 'PASS' : "FAIL: #{creds.inspect}"
-ensure
-  reg.signin_applications.delete_all if before.empty?
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  require 'base64'
+  reg = RedmineStudioPlugin::OauthClient::AppRegistrar
+  before = reg.signin_applications.pluck(:id)
+  begin
+    reg.ensure_registered
+    app = reg.registered_application
+    req = Struct.new(:authorization).new('Basic ' + Base64.strict_encode64("#{app.uid}:sek"))
+    creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
+    ok = creds && creds.first == app.uid
+    puts ok ? 'PASS' : "FAIL: #{creds.inspect}"
+  ensure
+    reg.signin_applications.delete_all if before.empty?
+  end
 end
 ```
 
@@ -419,9 +451,13 @@ end
 ### [1-14] Basic ヘッダ無しは従来どおり nil
 
 ```ruby
-req = Struct.new(:authorization).new(nil)
-creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
-puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
+unless defined?(Doorkeeper)
+  puts 'SKIP: 6.1 未満（Doorkeeper なし）'
+else
+  req = Struct.new(:authorization).new(nil)
+  creds = Doorkeeper::OAuth::Client::Credentials.from_basic(req)
+  puts creds.nil? ? 'PASS' : "FAIL: #{creds.inspect}"
+end
 ```
 
 **期待結果:** Basic ヘッダが無ければ従来どおり `nil`（パッチによる副作用なし）
@@ -469,7 +505,7 @@ PowerShell で各エンドポイントにリクエストを送信する。
 
 **用意（HTTP テストの前に 1 回）:**
 ```ruby
-# 6.1 未満（Doorkeeper なし）では Token・ClientId は空（[2-6]・[2-9]〜[2-11] はスキップ）
+# 6.1 未満（Doorkeeper なし）では Token・ClientId は空、HasDoorkeeper は false（Doorkeeper に頼る試験は SKIP と出す）
 admin = User.find(1)
 User.current = admin
 reg = RedmineStudioPlugin::OauthClient::AppRegistrar
@@ -493,7 +529,7 @@ parent = Issue.create!(project: pr, tracker: pr.trackers.first, author: admin, s
 cat = pr.issue_categories.create!(name: "oca-cat-#{sfx}")
 app = reg.registered_application
 token = app ? Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: u.id, scopes: RedmineStudioPlugin::OauthClient::ScopeProvider.scope_string, expires_in: 600).plaintext_token : ''
-puts({ ProjectId: pr.identifier, ParentIssueId: parent.id, CategoryName: cat.name, Token: token, ClientId: app&.uid.to_s }.to_json)
+puts({ ProjectId: pr.identifier, ParentIssueId: parent.id, CategoryName: cat.name, Token: token, ClientId: app&.uid.to_s, HasDoorkeeper: defined?(Doorkeeper) ? 'true' : 'false' }.to_json)
 ```
 
 **後片付け（HTTP テストのあとに 1 回）:**
@@ -547,8 +583,14 @@ try {
 ### [2-2] JSON に client_id が含まれる（登録済み）
 
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/oauth_client.json' -Method Get
-$response.oauth_client.client_id
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  $response = Invoke-RestMethod -Uri '{BaseUrl}/oauth_client.json' -Method Get
+  $response.oauth_client.client_id
+}
 ```
 
 **期待結果:** `oauth_client.client_id` が空でない文字列
@@ -558,9 +600,15 @@ $response.oauth_client.client_id
 ### [2-3] JSON の scopes が配列で admin を含まない
 
 ```powershell
-$response = Invoke-RestMethod -Uri '{BaseUrl}/oauth_client.json' -Method Get
-$scopes = $response.oauth_client.scopes
-($scopes -is [array]) -and (-not ($scopes -contains 'admin'))
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  $response = Invoke-RestMethod -Uri '{BaseUrl}/oauth_client.json' -Method Get
+  $scopes = $response.oauth_client.scopes
+  ($scopes -is [array]) -and (-not ($scopes -contains 'admin'))
+}
 ```
 
 **期待結果:** `scopes` が配列で、`admin` を含まない
@@ -570,8 +618,14 @@ $scopes = $response.oauth_client.scopes
 ### [2-4] XML に oauth_client / client_id が含まれる
 
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.xml' -Method Get
-($response.Content -match '<oauth_client>') -and ($response.Content -match '<client_id>')
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  $response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.xml' -Method Get
+  ($response.Content -match '<oauth_client>') -and ($response.Content -match '<client_id>')
+}
 ```
 
 **期待結果:** レスポンスに `<oauth_client>` と `<client_id>` が含まれる
@@ -585,17 +639,23 @@ $response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.xml' -Method Get
 rails runner は起動のたびに自己修復登録が走るため、戻すときに `ensure_registered` で元のアプリ（いちばん古いもの）へまとめる。
 
 ```powershell
-$Container = '{Container}'
-function Rr($code) { docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1 }
-$sfx = -join (1..6 | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
-$before = Rr 'puts RedmineStudioPlugin::OauthClient::AppRegistrar.signin_applications.pluck(:id).inspect'
-try {
-  Rr "RedmineStudioPlugin::OauthClient::AppRegistrar.signin_applications.update_all(name: 'Redmine Studio saved $sfx'); puts 'hidden'" | Out-Null
-  $response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get
-  "status=$($response.StatusCode) body=$($response.Content)"
-} finally {
-  $after = Rr "R = RedmineStudioPlugin::OauthClient::AppRegistrar; Doorkeeper::Application.where(name: 'Redmine Studio saved $sfx').update_all(name: 'Redmine Studio'); R.ensure_registered; puts R.signin_applications.pluck(:id).inspect"
-  "restored=$($after -eq $before)"
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  $Container = '{Container}'
+  function Rr($code) { docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1 }
+  $sfx = -join (1..6 | ForEach-Object { '{0:x}' -f (Get-Random -Maximum 16) })
+  $before = Rr 'puts RedmineStudioPlugin::OauthClient::AppRegistrar.signin_applications.pluck(:id).inspect'
+  try {
+    Rr "RedmineStudioPlugin::OauthClient::AppRegistrar.signin_applications.update_all(name: 'Redmine Studio saved $sfx'); puts 'hidden'" | Out-Null
+    $response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get
+    "status=$($response.StatusCode) body=$($response.Content)"
+  } finally {
+    $after = Rr "R = RedmineStudioPlugin::OauthClient::AppRegistrar; Doorkeeper::Application.where(name: 'Redmine Studio saved $sfx').update_all(name: 'Redmine Studio'); R.ensure_registered; puts R.signin_applications.pluck(:id).inspect"
+    "restored=$($after -eq $before)"
+  }
 }
 ```
 
@@ -611,22 +671,28 @@ try {
 クライアント認証が通ったことの証明になる。
 
 ```powershell
-# 登録済みアプリの uid（用意の ClientId）
-$uid = '{ClientId}'
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  # 登録済みアプリの uid（用意の ClientId）
+  $uid = '{ClientId}'
 
-$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('user:password'))
-$headers = @{ Authorization = "Basic $basic" }
-$body = @{
-  grant_type    = 'authorization_code'
-  code          = 'bogus-code-not-exist'
-  client_id     = $uid
-  redirect_uri  = 'http://127.0.0.1/'
-  code_verifier = ('a' * 43)
-}
-try {
-  Invoke-RestMethod -Uri '{BaseUrl}/oauth/token' -Method Post -Headers $headers -Body $body
-} catch {
-  $_.ErrorDetails.Message   # {"error":"invalid_grant",...} 期待
+  $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('user:password'))
+  $headers = @{ Authorization = "Basic $basic" }
+  $body = @{
+    grant_type    = 'authorization_code'
+    code          = 'bogus-code-not-exist'
+    client_id     = $uid
+    redirect_uri  = 'http://127.0.0.1/'
+    code_verifier = ('a' * 43)
+  }
+  try {
+    Invoke-RestMethod -Uri '{BaseUrl}/oauth/token' -Method Post -Headers $headers -Body $body
+  } catch {
+    $_.ErrorDetails.Message   # {"error":"invalid_grant",...} 期待
+  }
 }
 ```
 
@@ -640,18 +706,24 @@ try {
 [2-6] の対照として、パッチが「Basic を無条件に通す」ものではないことを確認する。
 
 ```powershell
-$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('user:password'))
-$headers = @{ Authorization = "Basic $basic" }
-$body = @{
-  grant_type    = 'authorization_code'
-  code          = 'bogus-code-not-exist'
-  redirect_uri  = 'http://127.0.0.1/'
-  code_verifier = ('a' * 43)
-}
-try {
-  Invoke-RestMethod -Uri '{BaseUrl}/oauth/token' -Method Post -Headers $headers -Body $body
-} catch {
-  $_.ErrorDetails.Message   # {"error":"invalid_client",...} 期待
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes('user:password'))
+  $headers = @{ Authorization = "Basic $basic" }
+  $body = @{
+    grant_type    = 'authorization_code'
+    code          = 'bogus-code-not-exist'
+    redirect_uri  = 'http://127.0.0.1/'
+    code_verifier = ('a' * 43)
+  }
+  try {
+    Invoke-RestMethod -Uri '{BaseUrl}/oauth/token' -Method Post -Headers $headers -Body $body
+  } catch {
+    $_.ErrorDetails.Message   # {"error":"invalid_client",...} 期待
+  }
 }
 ```
 
@@ -664,9 +736,15 @@ try {
 ### [2-8] 6.1 未満: 空応答を返す（degradation）
 
 ```powershell
-$response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get
-$response.StatusCode   # 200 期待
-$response.Content      # {"oauth_client":{}} 期待（client_id 無し）
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'true') {
+  'SKIP: 6.1 以上（Doorkeeper あり）'
+} else {
+  $response = Invoke-WebRequest -Uri '{BaseUrl}/oauth_client.json' -Method Get
+  $response.StatusCode   # 200 期待
+  $response.Content      # {"oauth_client":{}} 期待（client_id 無し）
+}
 ```
 
 **期待結果:** 6.1 未満（Doorkeeper なし）でも 404 ではなく 200 で空オブジェクト `{"oauth_client":{}}` を返す（`client_id` 無し＝アプリは「プラグイン対応・Redmine 非対応」と解釈できる）
@@ -687,11 +765,17 @@ $response.Content      # {"oauth_client":{}} 期待（client_id 無し）
 ### [2-9] スコープ契約: 親チケットを指定した作成が配下に入る
 
 ```powershell
-# 親チケットを指定して作成し、作成結果の parent を確認（作ったチケットは後片付けでプロジェクトごと消える）
-$h = @{ Authorization = 'Bearer {Token}' }
-$body = @{ issue = @{ project_id = '{ProjectId}'; subject = 'scope contract: parent'; parent_issue_id = {ParentIssueId} } } | ConvertTo-Json
-$r = Invoke-RestMethod -Uri '{BaseUrl}/issues.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
-(Invoke-RestMethod -Uri "{BaseUrl}/issues/$($r.issue.id).json" -Headers $h).issue.parent.id -eq {ParentIssueId}   # True 期待
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  # 親チケットを指定して作成し、作成結果の parent を確認（作ったチケットは後片付けでプロジェクトごと消える）
+  $h = @{ Authorization = 'Bearer {Token}' }
+  $body = @{ issue = @{ project_id = '{ProjectId}'; subject = 'scope contract: parent'; parent_issue_id = {ParentIssueId} } } | ConvertTo-Json
+  $r = Invoke-RestMethod -Uri '{BaseUrl}/issues.json' -Method Post -Body $body -ContentType 'application/json' -Headers $h
+  (Invoke-RestMethod -Uri "{BaseUrl}/issues/$($r.issue.id).json" -Headers $h).issue.parent.id -eq {ParentIssueId}   # True 期待
+}
 ```
 
 **期待結果:** `True`（作成されたチケットの `parent.id` が親チケットの番号。`manage_subtasks` がスコープに無いと、エラーにならず親なしで作成されてしまう）
@@ -701,9 +785,15 @@ $r = Invoke-RestMethod -Uri '{BaseUrl}/issues.json' -Method Post -Body $body -Co
 ### [2-10] スコープ契約: カテゴリー一覧が取得できる
 
 ```powershell
-# カテゴリー一覧 API（コアが manage_categories を要求）を Bearer で取得
-$r = Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/issue_categories.json' -Headers @{ Authorization = 'Bearer {Token}' }
-$r.issue_categories.name -contains '{CategoryName}'   # True 期待（スコープ不足だと 403）
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  # カテゴリー一覧 API（コアが manage_categories を要求）を Bearer で取得
+  $r = Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/issue_categories.json' -Headers @{ Authorization = 'Bearer {Token}' }
+  $r.issue_categories.name -contains '{CategoryName}'   # True 期待（スコープ不足だと 403）
+}
 ```
 
 **期待結果:** `True`（200 で用意したカテゴリーを含む一覧が返る。`manage_categories` がスコープに無いと 403 になり、cache_bundle でもカテゴリーが空になる）
@@ -713,11 +803,17 @@ $r.issue_categories.name -contains '{CategoryName}'   # True 期待（スコー�
 ### [2-11] スコープ契約: Wiki ページの作成・編集ができる（先行確保）
 
 ```powershell
-# Wiki ページを Bearer で作成（PUT は新規作成と更新を兼ねる）し、取得して確認（ページは後片付けでプロジェクトごと消える）
-$h = @{ Authorization = 'Bearer {Token}' }
-$body = @{ wiki_page = @{ text = 'scope contract wiki text' } } | ConvertTo-Json
-Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/wiki/ScopeContractPage.json' -Method Put -Body $body -ContentType 'application/json' -Headers $h | Out-Null
-(Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/wiki/ScopeContractPage.json' -Headers $h).wiki_page.text -eq 'scope contract wiki text'   # True 期待
+if ('{HasDoorkeeper}' -notin 'true', 'false') {
+  throw 'HasDoorkeeper が true / false でない（用意の出力を確かめる）'
+} elseif ('{HasDoorkeeper}' -eq 'false') {
+  'SKIP: 6.1 未満（Doorkeeper なし）'
+} else {
+  # Wiki ページを Bearer で作成（PUT は新規作成と更新を兼ねる）し、取得して確認（ページは後片付けでプロジェクトごと消える）
+  $h = @{ Authorization = 'Bearer {Token}' }
+  $body = @{ wiki_page = @{ text = 'scope contract wiki text' } } | ConvertTo-Json
+  Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/wiki/ScopeContractPage.json' -Method Put -Body $body -ContentType 'application/json' -Headers $h | Out-Null
+  (Invoke-RestMethod -Uri '{BaseUrl}/projects/{ProjectId}/wiki/ScopeContractPage.json' -Headers $h).wiki_page.text -eq 'scope contract wiki text'   # True 期待
+}
 ```
 
 **期待結果:** `True`（作成が成功し、取得したページ本文が一致する。`edit_wiki_pages` がスコープに無いと 403。将来の Wiki 書き込み機能のための先行確保が効いていることの確認）
