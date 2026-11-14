@@ -31,6 +31,7 @@ usage: {{ref_issues([option].., [column]..)}}<br>
 -q=CustomQueryName : specify custom query by name<br>
 -p[=identifier] : restrict project<br>
 -f:FILTER[=WORD[|WORD...]] : additional filter<br>
+-f:treated USER START|END : issues USER created or updated in the period<br>
 -t[=column] : display text<br>
 -l[=column] : display linked text<br>
 -c : count issues<br>

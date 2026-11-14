@@ -192,6 +192,16 @@ You can add filter conditions using the `-f:field=value` format.
 | `version` | Target version name |
 | `project` | Project name |
 | `cf_number` | Custom field ID |
+| `treated` | Issues the specified person created or updated in the specified period (see below) |
+
+**treated:**
+
+Write it as `-f:treated PERSON START|END` (e.g. `-f:treated [current_user] [7days_ago]|[0days_ago]`).
+
+- Specify the person by login name or user ID. A value of digits only is treated as a login name if such a user exists, otherwise as a user ID
+- A user the viewer cannot see gives the same error as a nonexistent user
+- Specify dates as `YYYY-MM-DD` or `[Ndays_ago]`. Both the start and end dates are included (a negative value such as `[-1days_ago]` means a future date)
+- History entries with private notes the viewer cannot see are not counted (same as the core "Updated by" filter)
 
 **Operators:**
 

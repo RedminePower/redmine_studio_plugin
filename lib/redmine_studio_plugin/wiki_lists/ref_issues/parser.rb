@@ -105,6 +105,12 @@ module RedmineStudioPlugin
                     values = default_words(obj)
                   end
 
+                  # treated は演算子の位置に人を書く（-f:treated 人 開始日|終了日）ので、演算子の検証より前に見分ける
+                  if filter == 'treated'
+                    @additional_filter << treated_filter(operator, values, words)
+                    next
+                  end
+
                   # Query#add_filter は operator を検証しないため、ここで検証する
                   unless Query.operators.keys.include?(operator) || EXTENDED_OPERATORS.include?(operator)
                     raise "- invalid operator '#{operator}' in filter option (-f): #{words}"
@@ -195,7 +201,9 @@ module RedmineStudioPlugin
           @query.available_filters['category_id'] = {type: :int}
           @query.available_filters['parent_id'] = {type: :int}
           @query.available_filters['id'] = {type: :int}
-          @query.available_filters['treated'] = {type: :date}
+          # 値は [利用者の id, 開始日, 終了日]（treated_filter で確かめる）。:date にすると本体の確かめで
+          # 先頭の id が日付でないと落とされ、絞り込みが黙って外れるので :string にする
+          @query.available_filters['treated'] = {type: :string}
 
           @query
         end
@@ -221,6 +229,23 @@ module RedmineStudioPlugin
         end
 
         private
+
+        # -f:treated 人 開始日|終了日 を確かめて、絞り込みの形（値は [利用者の id, 開始日, 終了日]）にする。
+        # 人はログイン名か id で、見られる範囲で探す。日付は YYYY-MM-DD だけを受け付ける（問い合わせの文に渡す前に必ず確かめる）
+        def treated_filter(user_key, values, words)
+          raise "- too few values for treated: #{words}" if values.nil? || values.length < 2
+          raise "- too many values for treated: #{words}" if values.length > 2
+
+          user = RedmineStudioPlugin::WikiLists::VisibleLookup.user_by_login_or_id(user_key)
+          raise "- can not find user <#{user_key}>" unless user
+
+          dates = values.map do |v|
+            date = (Date.strptime(v, '%Y-%m-%d') if v =~ /\A\d{4}-\d{2}-\d{2}\z/) rescue nil
+            raise "- invalid date for treated: #{v}" unless date
+            date.strftime('%Y-%m-%d')
+          end
+          {:filter=>'treated', :operator=>'=', :values=>[user.id.to_s] + dates}
+        end
 
         def get_column(name)
           name_sym = name.to_sym
@@ -280,33 +305,29 @@ module RedmineStudioPlugin
 
               sql += ')'
               return sql
-            elsif db_field == 'treated'
-              raise "- too many values for treated" if value.length > 2
-              raise "- too few values for treated" if value.length < 2
-              start_date = value[0]
-              end_date = value[1]
-              if operator =~ /^\d+$/
-                user = operator
-              else
-                user_obj = RedmineStudioPlugin::WikiLists::VisibleLookup.user_by_login(operator)
-                raise "- can not find user <#{operator}>" if user_obj.nil?
-                user = user_obj.id.to_s
-              end
-
-              sql =  '('
-              sql += "  (issues.author_id = #{user}"
-              sql += "   AND (CAST(issues.created_on AS DATE) BETWEEN '#{start_date}' AND '#{end_date}'))"
-              sql += "  OR ("
-              sql += "    (select count(*) from journals where journalized_type = 'Issue' AND journalized_id = issues.id"
-              sql += "      AND journals.user_id = #{user}"
-              sql += "      AND (CAST(journals.created_on AS DATE) BETWEEN '#{start_date}' AND '#{end_date}')"
-              sql += "    ) > 0"
-              sql += "  )"
-              sql += ')'
-              return sql
             end
 
             return super(field, operator, value, db_table, db_field, is_custom_filter)
+          end
+
+          # -f:treated の絞り込み。本体の「更新者」（sql_for_updated_by_field）と同じく、
+          # Query#statement が sql_for_<名前>_field を見つけて呼ぶ。
+          # 値は Parser#treated_filter で確かめた [利用者の id, 開始日, 終了日]。
+          # 利用者の id は整数にしてからつなぎ、期間は date_clause で組む（値を文に直接つながない）。
+          # 履歴は「更新者」と同じく、見ている人が見られないプライベートコメントを数えない
+          def query.sql_for_treated_field(field, operator, value)
+            user_id = Integer(value[0])
+            from = Date.strptime(value[1], '%Y-%m-%d')
+            to = Date.strptime(value[2], '%Y-%m-%d')
+            issues = Issue.table_name
+            journals = Journal.table_name
+            sql =  "((#{issues}.author_id = #{user_id} AND #{date_clause(issues, 'created_on', from, to, false)})"
+            sql += " OR EXISTS (SELECT 1 FROM #{journals}"
+            sql += " WHERE #{journals}.journalized_type = 'Issue' AND #{journals}.journalized_id = #{issues}.id"
+            sql += " AND #{journals}.user_id = #{user_id}"
+            sql += " AND #{date_clause(journals, 'created_on', from, to, false)}"
+            sql += " AND (#{Journal.visible_notes_condition(User.current, :skip_pre_condition => true)})))"
+            sql
           end
         end
 
@@ -350,7 +371,8 @@ module RedmineStudioPlugin
           end
 
           if word =~ /\[(.*)days_ago\]/
-            return (Date.today - $1.to_i).strftime("%Y-%m-%d")
+            # 見ている人のタイムゾーンでの今日から数える（本体の日付の絞り込みと同じ）
+            return (User.current.today - $1.to_i).strftime("%Y-%m-%d")
           end
 
           if word =~ /\A\[(.*)\]\z/
