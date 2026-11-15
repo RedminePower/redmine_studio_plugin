@@ -4236,7 +4236,7 @@ $s2 = (Invoke-RestMethod -Uri "{BaseUrl}/studio_settings/$rg.json?key=$AdminKey"
 
 ## 2C. 本人の設定と版（HTTP テスト）
 
-本人の設定（user スコープ）の作成・更新・削除、版による衝突検出、`versions` エンドポイント、`ids` フィルタを確かめる。2B と同じ API キー（admin / vis_member / vis_nonmember / vis_limited）を使う。番号順に流す（前のテストで作った ID・版を後で使う）。
+本人の設定（user スコープ）の作成・更新・削除、版による衝突検出、`versions` エンドポイント、`ids` フィルタを確かめる。2B と同じ API キー（admin・vis_member・vis_nonmember・vis_limited）を使う。番号順に流す（前のテストで作った ID・版を後で使う）。
 
 2B の変数（`$AdminKey`・`$MemberKey`・`$NonMemberKey`・`$MemberId`・`$LimitedKey`・`$HiddenId`・`$projASettingId`）をそのまま使う。2C だけを新しいシェルで流すときは、先に用意と 2B の事前準備を流す。
 

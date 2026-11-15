@@ -2131,6 +2131,31 @@ finally { & $issue '説明に IssueNameLinkTest_{Sfx} を含む' }
 
 **期待結果:** `[4-R-90] PASS`（説明の列には「WLNEST」だけが出る。説明の中の ref_issues は何も出さない）
 
+#### [4-R-91] 一覧画面の説明列で動いても、画面の「今のクエリ」を書き換えない
+
+チケット一覧（issues#index）の「説明」列の中で ref_issues が動くと、本体と共有の「表示中のクエリ」（絞り込み・列・並び順）を書き換えて自分の一覧を作る。描画のあとに元へ戻すので、同じ画面の CSV 出力フォームが、マクロのクエリではなくホストのクエリ（絞り込み・列）を指すことを確かめる（試験の最後に説明を元に戻す）。
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }
+# RefIssuesTest1 の説明にマクロを仕込む。一覧の「説明」列で描画される。
+# マクロの絞り込みは subject（RefIssuesTest にマッチ）で、ホストの status_id とは別物にしておく。
+$issue = { param($desc) $b = @{ issue = @{ description = $desc } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri '{BaseUrl}/issues/{R1Id}.json' -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null }
+& $issue '{{ref_issues(-s=RefIssuesTest)}}'
+try {
+  # ホストのクエリ: status_id の絞り込み・説明列・題名の並び
+  $u = '{BaseUrl}/projects/{ProjectIdent}/issues?set_filter=1&f[]=status_id&op[status_id]=o&c[]=subject&c[]=description&sort=subject'
+  $c = (Invoke-WebRequest -Uri $u -Headers $h).Content
+  $form = [regex]::Match($c, 'id="csv-export-form"[\s\S]*?</form>').Value
+  $hostFilter = $form.Contains('name="f[]" value="status_id"')
+  $hostColumn = $form.Contains('name="c[]" value="description"')
+  $notMacroFilter = -not ($form -match 'name="f\[\]" value="subject"')
+  "[4-R-91] " + $(if ($hostFilter -and $hostColumn -and $notMacroFilter) { 'PASS' } else { "FAIL: $form" })
+} catch { "[4-R-91] FAIL: $($_.Exception.Message)" }
+finally { & $issue '' }
+```
+
+**期待結果:** `[4-R-91] PASS`（一覧の CSV 出力フォームがホストのクエリ（status_id の絞り込み・description 列）を指し、マクロの絞り込み（subject）に書き換わっていない）
+
 ---
 
 ## 5. HTTP テスト - 見られる範囲
