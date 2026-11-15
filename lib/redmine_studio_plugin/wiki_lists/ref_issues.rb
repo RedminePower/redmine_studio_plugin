@@ -14,6 +14,19 @@ module RedmineStudioPlugin
               next RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, err, RedmineStudioPlugin::WikiLists::RefIssues.usage)
             end
 
+            # ref_issues は一覧などの画面のビュー（self）で動くため、本体 SortHelper や @query を
+            # そのまま使うと、ホスト画面と共有の状態（表示中のクエリ @query・並び替えの @sort_criteria・
+            # 本体の並び順セッションなど）を書き換えてしまう。同じ画面の CSV 出力などがこれを見るので、
+            # 描画に要る分だけ使い、下の ensure で必ず元へ戻す。
+            preserved_ivars = [:@query, :@issues, :@sort_criteria, :@sortable_columns, :@sort_default]
+            undefined_ivar = Object.new
+            saved_ivars = preserved_ivars.each_with_object({}) do |iv, h|
+              h[iv] = instance_variable_defined?(iv) ? instance_variable_get(iv) : undefined_ivar
+            end
+            host_sort_key = ("#{controller_name}_#{action_name}_sort" rescue nil)
+            host_sort_had = (host_sort_key ? session.key?(host_sort_key) : false) rescue false
+            host_sort_val = host_sort_had ? session[host_sort_key] : nil
+
             begin
               unless parser.has_search_conditions? # 検索条件がなにもなかったら
                 # 検索するキーワードを取得する
@@ -162,6 +175,21 @@ module RedmineStudioPlugin
               disp
             rescue => err
               RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, err)
+            ensure
+              saved_ivars.each do |iv, val|
+                if val.equal?(undefined_ivar)
+                  remove_instance_variable(iv) if instance_variable_defined?(iv)
+                else
+                  instance_variable_set(iv, val)
+                end
+              end
+              if host_sort_key
+                begin
+                  host_sort_had ? (session[host_sort_key] = host_sort_val) : session.delete(host_sort_key)
+                rescue
+                  # セッションを使えない描画では戻す対象もない
+                end
+              end
             end
           end
         end
