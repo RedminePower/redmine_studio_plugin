@@ -4,20 +4,18 @@ module RedmineStudioPlugin
   module WikiLists
     module IssueNameLink
       Redmine::WikiFormatting::Macros.register do
-        desc 'Make a link of a issue by its subject.'
+        desc 'Make a link of an issue by its subject.'
         macro :issue_name_link do |obj, args|
-          out = ''
-
           begin
-            raise '- no parameters' if args.count.zero?
-            raise '- too many parameters' if args.count > 1
+            raise MacroArgumentError, '- no parameters' if args.count.zero?
+            raise MacroArgumentError, '- too many parameters' if args.count > 1
             arg = args.shift
             arg.strip!
 
             if arg =~ /\A([^:]*):([^:]*)\z/
               # 見られないプロジェクト・チケットは、無い物と同じ表示にする
               prj = RedmineStudioPlugin::WikiLists::VisibleLookup.project_by_identifier_or_name($1)
-              raise "- project:#{$1} is not found." unless prj
+              raise MacroArgumentError, "- project:#{$1} is not found." unless prj
               arg = $2
             else
               prj = obj.project
@@ -32,16 +30,13 @@ module RedmineStudioPlugin
             end
 
             issue = Issue.visible.where(project_id: prj.id, subject: name).first
-            raise "- issue:#{name} is not found in prj:#{prj.to_s}" unless issue
-            out += link_to("#{disp}", issue_path(issue))
-          rescue => err_msg
-            return RedmineStudioPlugin::WikiLists::MacroError.html(self, :issue_name_link, <<-TEXT)
-Parameter error: #{err_msg}<br>
-Usage: {{issue_name_link([project_name:]issue_subject[|description])}}
+            raise MacroArgumentError, "- issue:#{name} is not found in prj:#{prj.to_s}" unless issue
+            link_to(disp, issue_path(issue))
+          rescue => err
+            RedmineStudioPlugin::WikiLists::MacroError.html(self, :issue_name_link, err, <<-TEXT)
+usage: {{issue_name_link([project:]issue_subject[|text])}}
 TEXT
           end
-
-          out.html_safe
         end
       end
     end

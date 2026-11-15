@@ -44,13 +44,13 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 
 ### フェーズ 1: Runner テスト
 
-バッチ 1: [1-1] 〜 [1-7] を1つのスクリプトにまとめて実行
+バッチ 1: [1-1] 〜 [1-8] を1つのスクリプトにまとめて実行
 
 ### フェーズ 2: HTTP テスト
 
 各マクロのオプション動作を確認する。コンテナの再起動は要らない（Runner テストは DB を書き換えない）。
 
-[2-W-*]〜[4-R-*] のデータは、2 章の頭の用意でその場で作る（後片付けで消す）。[5-V-1] は、試験用のプロジェクト・利用者を作って最後に消す（ほかの HTTP テストのデータには触らない）。
+[2-W-*]〜[4-R-*] のデータは、2 章の頭の用意でその場で作る（後片付けで消す）。[5-V-1] は、試験用のプロジェクト・利用者・ロール・カスタムフィールドを作って最後に消す（ほかの HTTP テストのデータには触らない）。
 
 ---
 
@@ -64,6 +64,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 |--------|------|
 | wl-spec-<印> | WL_Spec_<印> |
 | wl-spec-x-<印> | WL_Spec_<u>X</u>_<印>（[2-W-14] 用。名前に HTML を入れる） |
+| wl-spec-o-<印> | WL_Spec_O_<印>（[4-R-68] 用。ほかのプロジェクトのチケットを置く） |
 
 ### ユーザー
 
@@ -73,7 +74,7 @@ docker exec -u redmine -w /usr/src/redmine {Container} bundle exec rails runner 
 | wl_spec_v_<印> | Wiki List Viewer<印>（[4-R-65] でページを見る。JSON の `ViewerKey` が API キー） |
 | （viewer の id の数字） | Wiki List WLSpecNum<印>（[4-R-64] 用。ログイン名が wl_spec_v_<印> の id と同じ） |
 
-admin（id が 1 の管理者。ログイン名は JSON の `AdminLogin`）・wl_spec_<印>・wl_spec_v_<印> を、用意で作るロール（`WL_Spec_Role_<印>`。プライベートコメントを見る権限は無い）で wl-spec-<印> のメンバーにする。admin は wl-spec-x-<印> のメンバーにもする。
+admin（id が 1 の管理者。ログイン名は JSON の `AdminLogin`）・wl_spec_<印>・wl_spec_v_<印> を、用意で作るロール（`WL_Spec_Role_<印>`。プライベートコメントを見る権限は無い）で wl-spec-<印> のメンバーにする。admin は wl-spec-x-<印>・wl-spec-o-<印> のメンバーにもする。
 
 ### トラッカー・ステータス
 
@@ -89,7 +90,12 @@ admin（id が 1 の管理者。ログイン名は JSON の `AdminLogin`）・wl
 
 | WLXss（wl-spec-x-<印>） | - | `WLK: <script>x</script><b onclick="y">k</b>` |
 
-リダイレクト: `WLT` → `WikiListTest`、`<u>wla` → `WLXss`（wl-spec-x-<印>）
+リダイレクト（別名）:
+
+- `WLT`・`WLT2` → `WikiListTest`（[2-W-2] 用。別名が 2 つ）
+- `RefIssuesTest3_<印>` → `RefIssuesTest1_<印>`（[4-R-1] 用。同じ Wiki の別名）
+- `<u>wla` → `WLXss`（wl-spec-x-<印>）
+- `RefIssuesTest2_<印>` → `RefIssuesTest1_<印>`（wl-spec-x-<印>。[4-R-1] 用。ほかの Wiki の別名）
 
 マクロは各試験で `WLMacro` ページ（無ければ作られる）に書く。
 
@@ -100,9 +106,12 @@ admin（id が 1 の管理者。ログイン名は JSON の `AdminLogin`）・wl
 | IssueNameLinkTest_<印> | T1 | admin | 新規 | |
 | RefIssuesTest1_<印> | T1 | admin | 新規 | |
 | RefIssuesTest2_<印> | T1 | wl_spec_<印> | 進行中 | `説明に IssueNameLinkTest_<印> を含む` |
-| RefIssuesTest3_<印> | T2 | admin | 終了 | |
+| RefIssuesTest3_<印> | T2 | admin | 終了 | `WLPct 100%` |
+| WLOther_<印>（wl-spec-o-<印>） | T1 | admin | 新規 | |
 
 作成者はすべて admin。履歴: RefIssuesTest1 に wl_spec_<印> のコメント、RefIssuesTest2 に wl_spec_<印> のプライベートコメント、RefIssuesTest3 に数字のログイン名のユーザーのコメント。
+
+バージョン `WLVer_<印>`（RefIssuesTest1 の対象バージョン）・`WLVer2_<印>`（RefIssuesTest3 の対象バージョン）と、カテゴリ `WLCat_<印>`（RefIssuesTest2 のカテゴリ）・`WLCat2_<印>`（RefIssuesTest3 のカテゴリ）を wl-spec-<印> に作る。
 
 ### カスタムクエリ
 
@@ -191,6 +200,47 @@ puts "[1-7] PASS"
 
 **期待結果:** 最大表示件数が1000
 
+### [1-8] 思わぬエラーは、文だけを出してログに残す
+
+マクロの中で思わぬエラー（書き方の誤りではないエラー）が起きたとき、エラー文だけを出し、`parameter error` の頭も使い方も付けず、どこで起きたか（ファイルの場所）は出さないこと、ログに残すことを確かめる。
+3 つのマクロで、中で使う処理を一時的にエラーにして描画する（`Thread.current[:wl_spec_boom]` が立っている間だけエラーにする）。
+
+**確認方法:**
+```ruby
+require 'stringio'
+User.current = User.find(1)
+project = Project.first
+controller = WikiController.new
+controller.request = ActionDispatch::TestRequest.create
+controller.instance_variable_set(:@project, project)
+view = controller.view_context
+boom = Module.new do
+  def new(*args) = Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
+  def project_by_name(*args) = Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
+  def project_by_identifier_or_name(*args) = Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
+end
+RedmineStudioPlugin::WikiLists::RefIssues::Parser.singleton_class.prepend(boom)
+RedmineStudioPlugin::WikiLists::VisibleLookup.singleton_class.prepend(boom)
+{'ref_issues' => '{{ref_issues(-p)}}', 'wiki_list' => '{{wiki_list(-p=x)}}', 'issue_name_link' => '{{issue_name_link(x:y)}}'}.each do |name, text|
+  log = StringIO.new
+  original_logger = Rails.logger
+  Rails.logger = Logger.new(log)
+  Thread.current[:wl_spec_boom] = true
+  begin
+    html = view.textilizable(text, project: project)
+  ensure
+    Thread.current[:wl_spec_boom] = nil
+    Rails.logger = original_logger
+  end
+  raise "FAIL #{name}: #{html}" unless html.include?('flash error') && html.include?('wl_spec_boom')
+  raise "FAIL #{name}: #{html}" if html =~ /parameter error|usage:|\.rb:\d+/
+  raise "FAIL #{name} log: #{log.string}" unless log.string.include?("#{name} macro: RuntimeError: wl_spec_boom") && log.string =~ /\.rb:\d+/
+end
+puts "[1-8] PASS"
+```
+
+**期待結果:** 3 つのマクロで、エラー文（wl_spec_boom）だけが出て、ログにエラーとファイルの場所が残る
+
 ---
 
 ## 2. HTTP テスト - wiki_list
@@ -238,18 +288,29 @@ top = mk_page.call('WikiListTest', "担当: 山田太郎\n期間: 2024/01/01\n�
 mk_page.call('WikiListChild1', "担当: 佐藤花子\nステータス: 進行中", top)
 mk_page.call('WikiListChild2', "担当: 鈴木一郎\nステータス: 完了", top)
 WikiRedirect.create!(wiki: wiki, title: 'WLT', redirects_to: 'WikiListTest')
+WikiRedirect.create!(wiki: wiki, title: 'WLT2', redirects_to: 'WikiListTest')
+# [4-R-1] 用: 同じ Wiki の別名（[4-R-1] のページの既定の検索語に入る）
+WikiRedirect.create!(wiki: wiki, title: "RefIssuesTest3_#{sfx}", redirects_to: "RefIssuesTest1_#{sfx}")
 mk_issue = ->(subject, tracker, assignee, status, desc = '') {
   Issue.create!(project: prj, tracker: tracker, subject: "#{subject}_#{sfx}", author: admin, assigned_to: assignee, status: status, description: desc)
 }
 inl = mk_issue.call('IssueNameLinkTest', t1, admin, st_new)
 r1 = mk_issue.call('RefIssuesTest1', t1, admin, st_new)
 r2 = mk_issue.call('RefIssuesTest2', t1, user, st_prog, "説明に IssueNameLinkTest_#{sfx} を含む")
-r3 = mk_issue.call('RefIssuesTest3', t2, admin, st_closed)
+r3 = mk_issue.call('RefIssuesTest3', t2, admin, st_closed, 'WLPct 100%')
 # [4-R-52]〜 用: wl_spec_<印>（作成者ではない）が RefIssuesTest1 に履歴を、RefIssuesTest2 にプライベートコメントを書く
 Journal.create!(journalized: r1, user: user, notes: 'treated note')
 Journal.create!(journalized: r2, user: user, notes: 'treated private note', private_notes: true)
 # [4-R-64] 用: 数字のログイン名のユーザーが RefIssuesTest3 に履歴を書く
 Journal.create!(journalized: r3, user: num, notes: 'treated by number')
+# [4-R-69]・[4-R-70]・[4-R-79]・[4-R-80] 用: バージョンとカテゴリ（RefIssuesTest1 にバージョン、RefIssuesTest2 にカテゴリ、RefIssuesTest3 に 2 つ目の両方）
+ver = Version.create!(project: prj, name: "WLVer_#{sfx}")
+ver2 = Version.create!(project: prj, name: "WLVer2_#{sfx}")
+cat = IssueCategory.create!(project: prj, name: "WLCat_#{sfx}")
+cat2 = IssueCategory.create!(project: prj, name: "WLCat2_#{sfx}")
+r1.reload.update!(fixed_version: ver)
+r2.reload.update!(category: cat)
+r3.reload.update!(fixed_version: ver2, category: cat2)
 q = IssueQuery.new(name: "WikiListTestQuery_#{sfx}", project: prj, visibility: Query::VISIBILITY_PUBLIC, user: admin)
 q.filters = { 'status_id' => { operator: '=', values: [st_new.id.to_s] } }
 q.save!
@@ -263,6 +324,14 @@ xpage = WikiPage.new(wiki: xwiki, title: 'WLXss')
 xpage.content = WikiContent.new(page: xpage, text: 'WLK: <script>x</script><b onclick="y">k</b>', author: admin)
 xpage.save!
 WikiRedirect.create!(wiki: xwiki, title: '<u>wla', redirects_to: 'WLXss')
+# [4-R-1] 用: ほかの Wiki の、同じ題名のページへの別名（[4-R-1] のページの既定の検索語に混ざらないこと）
+WikiRedirect.create!(wiki: xwiki, title: "RefIssuesTest2_#{sfx}", redirects_to: "RefIssuesTest1_#{sfx}")
+# [4-R-68] 用: ほかのプロジェクトのチケット
+oprj = Project.create!(name: "WL_Spec_O_#{sfx}", identifier: "wl-spec-o-#{sfx}", is_public: false, tracker_ids: [t1.id])
+oprj.enabled_module_names = %w[issue_tracking]
+oprj.save!
+Member.create!(principal: admin, project: oprj, roles: [role])
+Issue.create!(project: oprj, tracker: t1, subject: "WLOther_#{sfx}", author: admin, status: st_new)
 puts({ Sfx: sfx, ProjectIdent: prj.identifier, ProjectName: prj.name, UserLogin: user.login, UserId: user.id, UserName: user.name, AdminLogin: admin.login,
        QueryId: q.id, QueryName: q.name, Tracker1: t1.name, Tracker2: t2.name,
        StatusNewId: st_new.id, StatusNew: st_new.name, StatusClosedId: st_closed.id, AdminName: admin.name,
@@ -303,10 +372,10 @@ $h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIde
 $body = @{ wiki_page = @{ text = '{{wiki_list(-p, +title, +alias)}}' } } | ConvertTo-Json -Compress
 Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
-"[2-W-2] " + $(if ($c.Contains('>WikiListTest</a></td><td>WLT</td>')) { 'PASS' } else { "FAIL: $c" })
+"[2-W-2] " + $(if ($c -match '>WikiListTest</a></td><td>WLT<br\s*/?>WLT2</td>') { 'PASS' } else { "FAIL: $c" })
 ```
 
-**期待結果:** `[2-W-2] PASS`（WikiListTest の行に別名 WLT が表示される）
+**期待結果:** `[2-W-2] PASS`（WikiListTest の行に別名 WLT と WLT2 が、改行で分けて表示される）
 
 ### [2-W-3] +project カラム
 
@@ -488,6 +557,59 @@ $checks = [ordered]@{
 
 **期待結果:** `[2-W-14] PASS`（`<u>` や `onclick` が HTML として働かず、`&lt;u&gt;` などのエスケープした文字で出る）
 
+### [2-W-15] 抜き出した文字の中の wiki_list は動かない
+
+**マクロ:** `WLNest` ページに `WLN: {{wiki_list(-p={ProjectName}, +title, WLN:)}}` を書き、`WLMacro` に `{{wiki_list(-p, +title, WLN:)}}`
+
+抜き出した文字の中の wiki_list が自分を呼び続けず、ページが開けることを確かめる（試験の最後に WLNest を消す）。
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $base = '{BaseUrl}/projects/{ProjectIdent}/wiki'
+$put = { param($page, $text) $b = @{ wiki_page = @{ text = $text } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri "$base/$page.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null }
+& $put 'WLNest' 'WLN: {{wiki_list(-p={ProjectName}, +title, WLN:)}}'
+& $put 'WLMacro' '{{wiki_list(-p, +title, WLN:)}}'
+try {
+  $c = (((Invoke-WebRequest -Uri "$base/WLMacro" -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+  "[2-W-15] " + $(if ($c.Contains('/wiki/WLNest">WLNest</a>') -and -not ($c -match 'flash error') -and [regex]::Matches($c, '<table').Count -eq 1) { 'PASS' } else { "FAIL: $c" })
+} catch { "[2-W-15] FAIL: $($_.Exception.Message)" }
+finally { Invoke-RestMethod -Method Delete -Uri "$base/WLNest.json" -Headers $h | Out-Null }
+```
+
+**期待結果:** `[2-W-15] PASS`（ページが開け、WLNest の行が出る。抜き出した文字の中の wiki_list は何も出さない（表は 1 つだけ））
+
+### [2-W-16] 1 ページの中にキーワードが 2 つあると 2 行になる
+
+**マクロ:** `WLMulti` ページに `WLM: a1` と `WLM: b2` の 2 行を書き、`WLMacro` に `{{wiki_list(-p, +title, WLM:)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $base = '{BaseUrl}/projects/{ProjectIdent}/wiki'
+$put = { param($page, $text) $b = @{ wiki_page = @{ text = $text } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri "$base/$page.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null }
+& $put 'WLMulti' "WLM: a1`nWLM: b2"
+& $put 'WLMacro' '{{wiki_list(-p, +title, WLM:)}}'
+try {
+  $c = (((Invoke-WebRequest -Uri "$base/WLMacro" -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+  $rows = [regex]::Matches($c, '/wiki/WLMulti">WLMulti</a></td><td>(?:<p>)?(\w+)') | ForEach-Object { $_.Groups[1].Value }
+  "[2-W-16] " + $(if (($rows -join ',') -eq 'a1,b2') { 'PASS' } else { "FAIL: $c" })
+} catch { "[2-W-16] FAIL: $($_.Exception.Message)" }
+finally { Invoke-RestMethod -Method Delete -Uri "$base/WLMulti.json" -Headers $h | Out-Null }
+```
+
+**期待結果:** `[2-W-16] PASS`（WLMulti の行が 2 つ（a1 と b2）出る）
+
+### [2-W-17] エラー: 同じオプションを 2 回書く
+
+**マクロ:** `{{wiki_list(-p, -p={ProjectName}, +title)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{wiki_list(-p, -p={ProjectName}, +title)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+"[2-W-17] " + $(if ($c -match 'flash error' -and $c.Contains('parameter error: - the same option is specified more than once: -p')) { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[2-W-17] PASS`（`the same option is specified more than once: -p` エラー）
+
 ---
 
 ## 3. HTTP テスト - issue_name_link
@@ -557,10 +679,10 @@ $h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIde
 $body = @{ wiki_page = @{ text = '{{issue_name_link()}}' } } | ConvertTo-Json -Compress
 Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
-"[3-I-5] " + $(if ($c -match 'flash error' -and $c.Contains('no parameters')) { 'PASS' } else { "FAIL: $c" })
+"[3-I-5] " + $(if ($c -match 'flash error' -and $c.Contains('parameter error: - no parameters') -and $c.Contains('usage: {{issue_name_link(')) { 'PASS' } else { "FAIL: $c" })
 ```
 
-**期待結果:** `[3-I-5] PASS`（`no parameters` エラー）
+**期待結果:** `[3-I-5] PASS`（`parameter error: - no parameters` エラーと使い方）
 
 ### [3-I-6] エラー: パラメータ過多
 
@@ -620,10 +742,10 @@ $body = @{ wiki_page = @{ text = '{{ref_issues()}}' } } | ConvertTo-Json -Compre
 Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
 $hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
-"[4-R-1] " + $(if ($set -eq 'RefIssuesTest1') { 'PASS' } else { "FAIL: $o" })
+"[4-R-1] " + $(if ($set -eq 'RefIssuesTest1,RefIssuesTest3') { 'PASS' } else { "FAIL: $o" })
 ```
 
-**期待結果:** `[4-R-1] PASS`（ページ名（RefIssuesTest1_…）を含むチケットだけが一覧表示）
+**期待結果:** `[4-R-1] PASS`（ページ名（RefIssuesTest1_…）と、同じ Wiki の別名（RefIssuesTest3_…）を含むチケットが一覧表示。ほかの Wiki にある同じ題名への別名（RefIssuesTest2_…）は検索語に混ざらない）
 
 #### [4-R-2] -i オプション（クエリID）
 
@@ -750,6 +872,39 @@ $hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | For
 ```
 
 **期待結果:** `[4-R-9] PASS`（どちらかを含むチケット）
+
+#### [4-R-71] -s の % と _ は文字として探す
+
+**マクロ:** `{{ref_issues(-p, -s=%|RefIssuesTest_, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -s=%|RefIssuesTest_, -c)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-71] " + $(if ($txt -eq '0') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-71] PASS`（件数が 0（% と _ を文字として探すので、どの題名にも当たらない。本体の「含む」と同じ））
+
+#### [4-R-72] -s で _ を含む語
+
+**マクロ:** `{{ref_issues(-p, -s=RefIssuesTest1_, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -s=RefIssuesTest1_, -c)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-72] " + $(if ($txt -eq '1') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-72] PASS`（件数が 1（RefIssuesTest1_… だけ））
+
 
 ### フィルタ
 
@@ -998,6 +1153,71 @@ $hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | For
 ```
 
 **期待結果:** `[4-R-65] PASS`（RefIssuesTest1 だけ（RefIssuesTest2 の履歴はプライベートコメントなので数えない））
+
+#### [4-R-67] -f:author（ログイン名）
+
+**マクロ:** `{{ref_issues(-p, -f:author={AdminLogin})}}` と `{{ref_issues(-p, -f:author={UserLogin}, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$render = { param($text) $b = @{ wiki_page = @{ text = $text } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null; (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0] }
+$set = { param($c) (@([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d|WLOther)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique) -join ',' }
+$count = { param($c) ($c -replace '<[^>]+>', '').Trim() }
+$a = & $render '{{ref_issues(-p, -f:author={AdminLogin})}}'
+$b = & $render '{{ref_issues(-p, -f:author={UserLogin}, -c)}}'
+"[4-R-67] " + $(if ((& $set $a) -eq 'IssueNameLinkTest,RefIssuesTest1,RefIssuesTest2,RefIssuesTest3' -and (& $count $b) -eq '0') { 'PASS' } else { "FAIL: $a / $b" })
+```
+
+**期待結果:** `[4-R-67] PASS`（admin が作成者のチケットは用意した 4 件。wl_spec_<印> が作成者のチケットは 0 件）
+
+#### [4-R-68] -f:project（プロジェクトの名前）
+
+**マクロ:** `{{ref_issues(-f:project={ProjectName})}}` と `{{ref_issues(-f:project=WL_Spec_O_{Sfx})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$render = { param($text) $b = @{ wiki_page = @{ text = $text } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null; (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0] }
+$set = { param($c) (@([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d|WLOther)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique) -join ',' }
+$count = { param($c) ($c -replace '<[^>]+>', '').Trim() }
+$a = & $render '{{ref_issues(-f:project={ProjectName})}}'
+$b = & $render '{{ref_issues(-f:project=WL_Spec_O_{Sfx})}}'
+"[4-R-68] " + $(if ((& $set $a) -eq 'IssueNameLinkTest,RefIssuesTest1,RefIssuesTest2,RefIssuesTest3' -and (& $set $b) -eq 'WLOther') { 'PASS' } else { "FAIL: $a / $b" })
+```
+
+**期待結果:** `[4-R-68] PASS`（用意したプロジェクトのチケット（4 件）だけが出て、ほかのプロジェクトのチケット（WLOther_…）は出ない。ほかのプロジェクトの名前では WLOther_… だけが出る）
+
+#### [4-R-69] -f:version（バージョンの名前）
+
+**マクロ:** `{{ref_issues(-p, -f:version=WLVer_{Sfx})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:version=WLVer_{Sfx})}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-69] " + $(if ($set -eq 'RefIssuesTest1') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-69] PASS`（RefIssuesTest1 だけ）
+
+#### [4-R-70] -f:category（カテゴリの名前）
+
+**マクロ:** `{{ref_issues(-p, -f:category=WLCat_{Sfx})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:category=WLCat_{Sfx})}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-70] " + $(if ($set -eq 'RefIssuesTest2') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-70] PASS`（RefIssuesTest2 だけ）
+
 
 ### 表示形式
 
@@ -1387,10 +1607,10 @@ $h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIde
 $body = @{ wiki_page = @{ text = '{{ref_issues(-x)}}' } } | ConvertTo-Json -Compress
 Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
-"[4-R-30] " + $(if ($c -match 'flash error' -and $c.Contains('unknown option:-x')) { 'PASS' } else { "FAIL: $c" })
+"[4-R-30] " + $(if ($c -match 'flash error' -and $c.Contains('unknown option:-x') -and -not ($c -match '\.rb:\d+')) { 'PASS' } else { "FAIL: $c" })
 ```
 
-**期待結果:** `[4-R-30] PASS`（`unknown option:-x` エラー）
+**期待結果:** `[4-R-30] PASS`（`unknown option:-x` エラー。サーバーの中のファイルの場所は出ない）
 
 #### [4-R-31] 不正な表示件数
 
@@ -1616,6 +1836,301 @@ $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki 
 
 **期待結果:** `[4-R-66] PASS`（`too many values for treated` エラー）
 
+#### [4-R-73] 確かめに落ちる値
+
+**マクロ:** `{{ref_issues(-p, -f:id=abc)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:id=abc)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-73] " + $(if ($c -match 'flash error' -and $c.Contains('invalid filter') -and $hit.Count -eq 0) { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-73] PASS`（`invalid filter` エラー。チケットは出ない（絞り込みが外れて全部のチケットが出ることはない））
+
+#### [4-R-74] 同じ項目の -f: を 2 回書く
+
+**マクロ:** `{{ref_issues(-p, -f:status={StatusNew}, -f:status_id={StatusClosedId})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:status={StatusNew}, -f:status_id={StatusClosedId})}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-74] " + $(if ($c -match 'flash error' -and $c.Contains('the same filter is specified more than once: -f:status_id')) { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-74] PASS`（`the same filter is specified more than once` エラー（status と status_id は同じ項目））
+
+#### [4-R-75] -s を 2 回書く
+
+**マクロ:** `{{ref_issues(-p, -s=RefIssuesTest1, -s=RefIssuesTest2)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -s=RefIssuesTest1, -s=RefIssuesTest2)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-75] " + $(if ($c -match 'flash error' -and $c.Contains('the same filter is specified more than once: -s')) { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-75] PASS`（`the same filter is specified more than once: -s` エラー）
+
+#### [4-R-76] -s= に語を書かない
+
+**マクロ:** `{{ref_issues(-p, -s=, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -s=, -c)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-76] " + $(if ($txt -eq '4') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-76] PASS`（件数が 4（語が 1 つも無い検索は条件にしない。エラーにならない））
+
+#### [4-R-77] カスタムクエリの条件をマクロで上書きする
+
+**マクロ:** `{{ref_issues(-i={QueryId}, -f:status_id={StatusClosedId})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-i={QueryId}, -f:status_id={StatusClosedId})}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-77] " + $(if ($set -eq 'RefIssuesTest3') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-77] PASS`（クエリの「ステータス = 新規」を、マクロの「ステータス = 終了」で上書きし、RefIssuesTest3 だけが出る）
+
+#### [4-R-78] 値の要らない演算子
+
+**マクロ:** `{{ref_issues(-p, -f:status_id o)}}` と `{{ref_issues(-p, -f:assigned_to_id !*, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$render = { param($text) $b = @{ wiki_page = @{ text = $text } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null; (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0] }
+$set = { param($c) (@([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d|WLOther)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique) -join ',' }
+$count = { param($c) ($c -replace '<[^>]+>', '').Trim() }
+$a = & $render '{{ref_issues(-p, -f:status_id o)}}'
+$b = & $render '{{ref_issues(-p, -f:assigned_to_id !*, -c)}}'
+"[4-R-78] " + $(if ((& $set $a) -eq 'IssueNameLinkTest,RefIssuesTest1,RefIssuesTest2' -and (& $count $b) -eq '0') { 'PASS' } else { "FAIL: $a / $b" })
+```
+
+**期待結果:** `[4-R-78] PASS`（未完了のチケットが 3 件出る。担当者のいないチケットは 0 件。どちらもエラーにならない）
+
+#### [4-R-79] -f:version に 2 つの値
+
+**マクロ:** `{{ref_issues(-p, -f:version=WLVer_{Sfx}|WLVer2_{Sfx})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:version=WLVer_{Sfx}|WLVer2_{Sfx})}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-79] " + $(if ($set -eq 'RefIssuesTest1,RefIssuesTest3') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-79] PASS`（RefIssuesTest1 と RefIssuesTest3（2 つ目の値も効く））
+
+#### [4-R-80] -f:category に 2 つの値
+
+**マクロ:** `{{ref_issues(-p, -f:category=WLCat_{Sfx}|WLCat2_{Sfx})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:category=WLCat_{Sfx}|WLCat2_{Sfx})}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-80] " + $(if ($set -eq 'RefIssuesTest2,RefIssuesTest3') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-80] PASS`（RefIssuesTest2 と RefIssuesTest3（2 つ目の値も効く））
+
+#### [4-R-81] -f:id に 2 つの値
+
+**マクロ:** `{{ref_issues(-p, -f:id={R1Id}|{R3Id})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:id={R1Id}|{R3Id})}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-81] " + $(if ($set -eq 'RefIssuesTest1,RefIssuesTest3') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-81] PASS`（RefIssuesTest1 と RefIssuesTest3（2 つ目の値も効く））
+
+#### [4-R-82] -f:parent_id
+
+**マクロ:** `{{ref_issues(-p, -f:parent_id={R1Id}|{R3Id}, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:parent_id={R1Id}|{R3Id}, -c)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-82] " + $(if ($txt -eq '0' -and -not ($c -match 'flash error')) { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-82] PASS`（件数が 0（子チケットは無い。エラーにならない））
+
+#### [4-R-83] -f:fixed_version.status（バージョンのステータス）
+
+**マクロ:** `{{ref_issues(-p, -f:fixed_version.status=open)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:fixed_version.status=open)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-83] " + $(if ($set -eq 'RefIssuesTest1,RefIssuesTest3') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-83] PASS`（バージョンが未完了のチケット（RefIssuesTest1 と RefIssuesTest3））
+
+#### [4-R-84] -f:start_date（日付の項目）に 2 つの値
+
+**マクロ:** `{{ref_issues(-p, -f:start_date=2024-01-01|2024-01-02)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:start_date=2024-01-01|2024-01-02)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-84] " + $(if ($c -match 'flash error' -and $c.Contains('parameter error: - too many values for -f:start_date') -and $hit.Count -eq 0) { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-84] PASS`（`too many values` エラー（日付の項目は値を 1 つしか読めない））
+
+#### [4-R-85] -f:subjectdescription に「含む」以外の演算子
+
+**マクロ:** `{{ref_issues(-p, -f:subjectdescription=abc)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -f:subjectdescription=abc)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-85] " + $(if ($c -match 'flash error' -and $c.Contains('subjectdescription can be used only with') -and -not ($c -match 'SQL|SELECT')) { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-85] PASS`（`subjectdescription can be used only with` エラー。問い合わせの文は出ない）
+
+#### [4-R-86] 同じオプションを 2 回書く
+
+**マクロ:** `{{ref_issues(-p, -p={ProjectIdent})}}` と `{{ref_issues(-i={QueryId}, -q={QueryName})}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$render = { param($text) $b = @{ wiki_page = @{ text = $text } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null; (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0] }
+$set = { param($c) (@([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d|WLOther)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique) -join ',' }
+$count = { param($c) ($c -replace '<[^>]+>', '').Trim() }
+$a = & $render '{{ref_issues(-p, -p={ProjectIdent})}}'
+$b = & $render '{{ref_issues(-i={QueryId}, -q={QueryName})}}'
+"[4-R-86] " + $(if ($a.Contains('parameter error: - the same option is specified more than once: -p') -and $b.Contains('the same option is specified more than once: -i/-q')) { 'PASS' } else { "FAIL: $a / $b" })
+```
+
+**期待結果:** `[4-R-86] PASS`（どちらも `the same option is specified more than once` エラー（`-i` と `-q` は同じ指定））
+
+#### [4-R-87] -s の語の間に空の語
+
+**マクロ:** `{{ref_issues(-p, -s=RefIssuesTest1_{Sfx}||RefIssuesTest2_{Sfx}, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -s=RefIssuesTest1_{Sfx}||RefIssuesTest2_{Sfx}, -c)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-87] " + $(if ($txt -eq '2') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-87] PASS`（件数が 2（空の語は捨てる。空の語で全部のチケットに当たらない））
+
+#### [4-R-88] -d で % を含む語
+
+**マクロ:** `{{ref_issues(-p, -d=100%, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -d=100%, -c)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-88] " + $(if ($txt -eq '1') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-88] PASS`（件数が 1（説明に「100%」を含む RefIssuesTest3_… だけ））
+
+#### [4-R-89] -s は大文字・小文字を区別しない
+
+**マクロ:** `{{ref_issues(-p, -s=refissuestest1_{Sfx}, -c)}}`
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{ref_issues(-p, -s=refissuestest1_{Sfx}, -c)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
+$txt = ($c -replace '<[^>]+>', '').Trim()
+"[4-R-89] " + $(if ($txt -eq '1') { 'PASS' } else { "FAIL: $c" })
+```
+
+**期待結果:** `[4-R-89] PASS`（件数が 1（RefIssuesTest1_…））
+
+#### [4-R-90] 一覧の説明の中の ref_issues は動かない
+
+**マクロ:** RefIssuesTest2 の説明を `WLNEST {{ref_issues(-p, -c)}}` にし、`WLMacro` に `{{ref_issues(-p, -s=RefIssuesTest2_{Sfx}, subject, description)}}`
+
+一覧の説明の列の中の ref_issues は何も表示しないことを確かめる（試験の最後に説明を元に戻す）。
+
+```powershell
+$h = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$render = { param($text) $b = @{ wiki_page = @{ text = $text } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null; (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0] }
+$set = { param($c) (@([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d|WLOther)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }) | Sort-Object -Unique) -join ',' }
+$count = { param($c) ($c -replace '<[^>]+>', '').Trim() }
+$issue = { param($desc) $b = @{ issue = @{ description = $desc } } | ConvertTo-Json -Compress; Invoke-RestMethod -Method Put -Uri '{BaseUrl}/issues/{R2Id}.json' -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($b)) | Out-Null }
+& $issue 'WLNEST {{ref_issues(-p, -c)}}'
+try {
+  $c = & $render '{{ref_issues(-p, -s=RefIssuesTest2_{Sfx}, subject, description)}}'
+  $desc = [regex]::Match($c, '(?s)<td[^>]*class="description[^"]*"[^>]*>(.*?)</td>').Groups[1].Value
+  "[4-R-90] " + $(if ($desc.Contains('WLNEST') -and ($desc -replace '<[^>]+>', '').Trim() -eq 'WLNEST' -and -not ($c -match 'flash error')) { 'PASS' } else { "FAIL: $c" })
+} catch { "[4-R-90] FAIL: $($_.Exception.Message)" }
+finally { & $issue '説明に IssueNameLinkTest_{Sfx} を含む' }
+```
+
+**期待結果:** `[4-R-90] PASS`（説明の列には「WLNEST」だけが出る。説明の中の ref_issues は何も出さない）
+
 ---
 
 ## 5. HTTP テスト - 見られる範囲
@@ -1633,7 +2148,9 @@ $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki 
 viewer は Pub だけのメンバー、secretonly は Secret だけのメンバー、locked は Pub のメンバーでロック中にする。
 Pub の中に、viewer から見えない非公開チケット（insider が作成）と、locked が担当のチケットを置く。
 Secret には、共有しないバージョン・system で共有するバージョンとカテゴリを置く。Pub にもバージョンとカテゴリを置く。
-最後の行に、viewer の API キーなどを JSON で出す。
+カスタムフィールドを 2 つ（viewer のロールに見せない hidden と、だれにでも見せる shown）と、hidden だけを見せるロールを作り、Pub のチケットに値を入れる。
+説明に `[cf_N]` を使う ref_issues を書いたチケット（cf_issue）と、カスタムフィールドを使わないトラッカーのチケットも Pub に置く。
+最後の行に、viewer の API キーなどを JSON で出す（管理者の API キーは、HTTP テストと同じ `{ApiKey}` を使う）。
 
 ```ruby
 sfx = SecureRandom.hex(3)
@@ -1645,7 +2162,9 @@ mk_user = ->(name) {
 }
 role = Role.create!(name: "WM_Role_#{sfx}", permissions: [:view_issues, :view_wiki_pages], users_visibility: 'members_of_visible_projects', issues_visibility: 'default', assignable: true)
 tracker = Tracker.first
-pub = Project.create!(name: "WM_Pub_#{sfx}", identifier: "wm-pub-#{sfx}", is_public: false, tracker_ids: [tracker.id])
+# カスタムフィールドを使わないトラッカー（そのチケットはカスタムフィールドの値を持たない）
+no_cf_tracker = Tracker.where.not(id: tracker.id).first
+pub = Project.create!(name: "WM_Pub_#{sfx}", identifier: "wm-pub-#{sfx}", is_public: false, tracker_ids: [tracker.id, no_cf_tracker.id])
 secret = Project.create!(name: "WM_Secret_#{sfx}", identifier: "wm-secret-#{sfx}", is_public: false, tracker_ids: [tracker.id])
 [pub, secret].each { |p| p.enabled_module_names = %w[issue_tracking wiki]; p.save! }
 viewer = mk_user.call('viewer')
@@ -1670,16 +2189,32 @@ Version.create!(project: secret, name: "WM_SharedVer_#{sfx}", sharing: 'system')
 Version.create!(project: pub, name: "WM_PubVer_#{sfx}")
 IssueCategory.create!(project: secret, name: "WM_SecretCat_#{sfx}")
 IssueCategory.create!(project: pub, name: "WM_PubCat_#{sfx}")
+# カスタムフィールド: hidden は viewer のロールに見せない（WM_CFRole だけに見せる）、shown はだれにでも見せる。
+# hidden の値は WM_PubIssue の題名にする（[cf_N] で題名を探したとき、値が読めたかどうかが件数で分かるように）
+cf_role = Role.create!(name: "WM_CFRole_#{sfx}", permissions: [:view_issues])
+hidden_cf = IssueCustomField.create!(name: "WM_HiddenCF_#{sfx}", field_format: 'string', visible: false, role_ids: [cf_role.id], is_for_all: false, project_ids: [pub.id], tracker_ids: [tracker.id])
+shown_cf = IssueCustomField.create!(name: "WM_ShownCF_#{sfx}", field_format: 'string', visible: true, is_for_all: false, project_ids: [pub.id], tracker_ids: [tracker.id])
+pub_issue.reload
+pub_issue.custom_field_values = { hidden_cf.id.to_s => "WM_PubIssue_#{sfx}", shown_cf.id.to_s => "WM_ShownVal_#{sfx}" }
+pub_issue.save!
+# 説明に [cf_N] を使う ref_issues を書いたチケット（チケットのページを開いたときに動く）
+cf_issue = Issue.create!(project: pub, tracker: tracker, subject: "WM_CFIssue_#{sfx}", author: admin,
+                         description: "{{ref_issues(-p=#{pub.identifier},-s=[cf_#{hidden_cf.id}],-c)}}")
+cf_issue.reload
+cf_issue.custom_field_values = { hidden_cf.id.to_s => "WM_PubIssue_#{sfx}" }
+cf_issue.save!
+Issue.create!(project: pub, tracker: no_cf_tracker, subject: "WM_NoCFIssue_#{sfx}", author: admin)
 api_key = viewer.api_key
 puts({ suffix: sfx, key: api_key, pub_id: pub.id, pub_ident: pub.identifier, pub_name: pub.name, pub_issue: pub_issue.id,
        secret_id: secret.id, secret_ident: secret.identifier, secret_name: secret.name, secret_only: secret_only.login,
-       secret_only_id: secret_only.id, locked: locked.login, locked_id: locked.id, tracker: tracker.name }.to_json)
+       secret_only_id: secret_only.id, locked: locked.login, locked_id: locked.id, tracker: tracker.name,
+       hidden_cf: hidden_cf.id, shown_cf: shown_cf.id, cf_issue: cf_issue.id }.to_json)
 ```
 
 実行（PowerShell 7）：
 
 ```powershell
-$Container = '{Container}'; $BaseUrl = '{BaseUrl}'
+$Container = '{Container}'; $BaseUrl = '{BaseUrl}'; $AdminKey = '{ApiKey}'
 docker cp "wm_setup.rb" "${Container}:/tmp/wm_setup.rb" | Out-Null
 $d = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner /tmp/wm_setup.rb 2>$null | Select-Object -Last 1 | ConvertFrom-Json
 try {
@@ -1711,6 +2246,11 @@ try {
     "ref_issues -f:project: " + (Same "{{ref_issues(-f:project=$($d.secret_name))}}" "{{ref_issues(-f:project=WM_None_$s)}}" $d.secret_name "WM_None_$s" 'can not resolve &#39;KEY&#39;')
     "ref_issues -f:version: " + (Same "{{ref_issues(-f:version=WM_SecretVer_$s)}}" "{{ref_issues(-f:version=WM_NoVer_$s)}}" "WM_SecretVer_$s" "WM_NoVer_$s" 'can not resolve &#39;KEY&#39;')
     "ref_issues -f:category: " + (Same "{{ref_issues(-f:category=WM_SecretCat_$s)}}" "{{ref_issues(-f:category=WM_NoCat_$s)}}" "WM_SecretCat_$s" "WM_NoCat_$s" 'can not resolve &#39;KEY&#39;')
+    # 見られないカスタムフィールドは、無いカスタムフィールドと同じ（値が出ない）
+    $one = "-p=$($d.pub_ident),-f:id=$($d.pub_issue)"
+    "ref_issues -t=cf_N: " + (Same "{{ref_issues($one,-t=cf_$($d.hidden_cf))}}" "{{ref_issues($one,-t=cf_999999)}}" "cf_$($d.hidden_cf)" 'cf_999999' 'unknown attribute: &#39;KEY&#39;')
+    "ref_issues -t=CF name: " + (Same "{{ref_issues($one,-t=WM_HiddenCF_$s)}}" "{{ref_issues($one,-t=WM_NoCF_$s)}}" "WM_HiddenCF_$s" "WM_NoCF_$s" 'unknown attribute: &#39;KEY&#39;')
+    "ref_issues -l=cf_N: " + (Same "{{ref_issues($one,-l=cf_$($d.hidden_cf))}}" "{{ref_issues($one,-l=cf_999999)}}" "cf_$($d.hidden_cf)" 'cf_999999' 'unknown attribute: &#39;KEY&#39;')
     # 見られる物は使える
     "visible issue_name_link: " + ((Render "{{issue_name_link($($d.pub_ident):WM_PubIssue_$s)}}") -match "issues/$($d.pub_issue)")
     "visible ref_issues -p: " + (Works "{{ref_issues(-p=$($d.pub_ident),-c)}}")
@@ -1724,6 +2264,23 @@ try {
     # ロック中のメンバーは -f:treated でも使える（ログイン名・id）
     "visible -f:treated locked: " + (Works "{{ref_issues(-f:treated $($d.locked) [1days_ago]|[-1days_ago],-c)}}")
     "visible -f:treated locked id: " + (Works "{{ref_issues(-f:treated $($d.locked_id) [1days_ago]|[-1days_ago],-c)}}")
+    # 見られるカスタムフィールドの値は出る
+    "visible -t=cf_N: " + (Render "{{ref_issues($one,-t=cf_$($d.shown_cf))}}").Contains("WM_ShownVal_$s")
+    "visible -t=CF name: " + (Render "{{ref_issues($one,-t=WM_ShownCF_$s)}}").Contains("WM_ShownVal_$s")
+    "visible -l=cf_N: " + (Render "{{ref_issues($one,-l=cf_$($d.shown_cf))}}").Contains(">WM_ShownVal_$s</a>")
+    # 値の無いチケット（カスタムフィールドを使うが値が空・使わないトラッカー）が混ざっても、エラーにならず、
+    # 値のあるチケットだけに値が出る（ほかのチケットの値を引き継がない）
+    $all = Render "{{ref_issues(-p=$($d.pub_ident),-t=cf_$($d.shown_cf))}}"
+    "visible -t=cf_N mixed: " + ((-not ($all -match 'flash error')) -and ([regex]::Matches($all, "WM_ShownVal_$s").Count -eq 1))
+    # 一覧の列にしたときも、見られるカスタムフィールドの値が出る
+    "visible cf column: " + (Render "{{ref_issues($one,subject,cf_$($d.shown_cf))}}").Contains("WM_ShownVal_$s")
+    # チケットの説明の [cf_N]：見られない人には値が読めない（0 件）。見られる管理者には読める（1 件）
+    $descCount = {
+        param($key)
+        $page = (Invoke-WebRequest -Uri "$BaseUrl/issues/$($d.cf_issue)" -Headers @{ 'X-Redmine-API-Key' = $key }).Content
+        ([regex]::Match($page, '(?s)<div class="description".*?<div [^>]*class="wiki"[^>]*>(.*?)</div>').Groups[1].Value -replace '<[^>]+>', '').Trim()
+    }
+    "[cf_N] in description viewer/admin: " + (& $descCount $d.key) + '/' + (& $descCount $AdminKey)
     # ロック中のメンバーが担当のチケットが 1 件だけ数えられる
     $lockedCount = Render "{{ref_issues(-f:assigned_to=$($d.locked),-c)}}"
     "locked member count: " + ($lockedCount -replace '<[^>]+>', '').Trim()
@@ -1735,15 +2292,16 @@ try {
 } finally {
     # 後片付け。suffix が 6 桁の 16 進でなければ止める（空のまま LIKE で探すと、ほかのプロジェクト・ユーザーに当たる）
     if ($d.suffix -notmatch '^[0-9a-f]{6}$') { throw "suffix が正しくない: '$($d.suffix)'" }
-    $cleanup = "sfx = '$($d.suffix)'; Project.where('identifier LIKE ?', ""wm-%-#{sfx}"").each(&:destroy); User.where('login LIKE ?', ""wm_%_#{sfx}"").each(&:destroy); Role.where(name: ""WM_Role_#{sfx}"").each(&:destroy); puts 'cleanup: ok'"
+    $cleanup = "sfx = '$($d.suffix)'; Project.where('identifier LIKE ?', ""wm-%-#{sfx}"").each(&:destroy); User.where('login LIKE ?', ""wm_%_#{sfx}"").each(&:destroy); IssueCustomField.where('name LIKE ?', ""WM_%CF_#{sfx}"").each(&:destroy); Role.where(name: [""WM_Role_#{sfx}"", ""WM_CFRole_#{sfx}""]).each(&:destroy); puts 'cleanup: ok'"
     docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $cleanup 2>$null | Select-Object -Last 1
 }
 ```
 
 **期待結果:**
 
-- 11 の組み合わせ（issue_name_link のプロジェクト・チケット、wiki_list の `-p=`、ref_issues の `-p=`〔識別子・数字の id〕・`-f:assigned_to`・`-f:treated`〔ログイン名・id〕・`-f:project`・`-f:version`・`-f:category`）がすべて `same`（見られない物と無い物で同じ表示で、期待するエラー文）
-- `visible issue_name_link` が `True`、`visible ...` の 9 つがすべて `works`（ほかのプロジェクトから system で共有された版も、`-p` で決めたプロジェクトで使える。ロック中のメンバーは `-f:treated` でも使える）
+- 14 の組み合わせ（issue_name_link のプロジェクト・チケット、wiki_list の `-p=`、ref_issues の `-p=`〔識別子・数字の id〕・`-f:assigned_to`・`-f:treated`〔ログイン名・id〕・`-f:project`・`-f:version`・`-f:category`・`-t=`〔cf_N・カスタムフィールドの名前〕・`-l=`）がすべて `same`（見られない物と無い物で同じ表示で、期待するエラー文）
+- `visible issue_name_link`・`visible -t=cf_N`・`visible -t=CF name`・`visible -l=cf_N`・`visible -t=cf_N mixed`・`visible cf column` が `True`、`visible ...` の 9 つがすべて `works`（ほかのプロジェクトから system で共有された版も、`-p` で決めたプロジェクトで使える。ロック中のメンバーは `-f:treated` でも使える）
+- `[cf_N] in description viewer/admin: 0/1`（チケットの説明の `[cf_N]` は、見られないカスタムフィールドの値を読まない。管理者は読める）
 - `locked member count: 1`（ロック中のメンバーが担当のチケットを数えられる）
 - `error line break: True`・`error text escaped: True`
 - `cleanup: ok`

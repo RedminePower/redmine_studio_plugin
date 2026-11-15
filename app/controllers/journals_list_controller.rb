@@ -36,7 +36,9 @@ class JournalsListController < ApplicationController
 
   def find_journal
     @journal = Journal.find(params[:id])
-    unless @journal.journalized.visible? && @journal.visible?
+    # 本体の Journal.visible で確かめる（チケットが見られることに加え、プライベートコメントを見る権限も見る。
+    # Journal#visible? はチケットが見られるかしか見ない）
+    unless Journal.visible.where(id: @journal.id).exists?
       Rails.logger.warn "[JournalsList] Unauthorized: issue_id=#{@journal.journalized_id}, journal_id=#{params[:id]}, user=#{User.current.login}"
       raise Unauthorized
     end
@@ -47,11 +49,11 @@ class JournalsListController < ApplicationController
 
   def find_journals
     ids = Array(params[:ids]).map(&:to_i)
-    @journals = Journal.where(id: ids).preload(journalized: :project).to_a
-    filtered_count = @journals.size
-    @journals.select! { |j| j.journalized.visible? && j.visible? }
-    if @journals.size < filtered_count
-      Rails.logger.warn "[JournalsList] Filtered #{filtered_count - @journals.size} journals due to visibility: user=#{User.current.login}"
+    # 見られる範囲は find_journal と同じ（本体の Journal.visible）
+    @journals = Journal.visible.where(id: ids).preload(journalized: :project).to_a
+    found_count = Journal.where(id: ids).count
+    if @journals.size < found_count
+      Rails.logger.warn "[JournalsList] Filtered #{found_count - @journals.size} journals due to visibility: user=#{User.current.login}"
     end
   end
 end

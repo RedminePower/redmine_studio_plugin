@@ -6,286 +6,232 @@ module RedmineStudioPlugin
       Redmine::WikiFormatting::Macros.register do
         desc 'Displays a list of referer issues.'
         macro :ref_issues do |obj, args|
-          # 再帰防止: ref_issues マクロの展開中に再度呼ばれた場合は何も表示しない。
-          # 入れ子になるのはほぼ一覧の「説明」列などの中で、表の中に表を出しても読めない。
-          # また自己参照かどうかは見ずに入れ子をすべて止めているため、通知文を出すと
-          # 通常の使い方（説明に一覧を含むチケットの一覧）で毎行に並ぶ雑音になる。
-          if (Thread.current[:ref_issues_depth] || 0) > 0
-            return ''.html_safe
+          # 一覧の「説明」列などの中の ref_issues は、何も表示しない（NestingGuard）
+          RedmineStudioPlugin::WikiLists::NestingGuard.run(:ref_issues_depth) do
+            begin
+              parser = RedmineStudioPlugin::WikiLists::RefIssues::Parser.new(obj, args, @project)
+            rescue => err
+              next RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, err, RedmineStudioPlugin::WikiLists::RefIssues.usage)
+            end
+
+            begin
+              unless parser.has_search_conditions? # 検索条件がなにもなかったら
+                # 検索するキーワードを取得する
+                parser.search_words_w << parser.default_words(obj)
+              end
+
+              @query = parser.query @project
+
+              extend SortHelper
+              extend QueriesHelper
+              extend IssuesHelper
+
+              name_lines = RedmineStudioPlugin::WikiLists::MacroError.method(:name_lines)
+
+              # -o はカスタムクエリ（-i / -q）の並び順より優先する
+              if parser.sort_criteria
+                sortable = @query.sortable_columns.select {|_name, sql| sql}.keys
+                parser.sort_criteria.each do |name, _order|
+                  unless sortable.include?(name)
+                    raise MacroArgumentError, "- can not sort by '#{name}'<br>[SORT]<br>#{name_lines.call(sortable)}"
+                  end
+                end
+                default_sort = parser.sort_criteria
+              else
+                default_sort = @query.sort_criteria.empty? ? [['id', 'desc']] : @query.sort_criteria
+              end
+
+              # -g はカスタムクエリのグループ条件より優先する。
+              # 件数のみ（-c）・リンクのみ（-l）は見出しを出せないため使わない
+              if parser.group_by && !parser.count_flag && !parser.only_link
+                groupable = @query.groupable_columns.collect {|column| column.name.to_s}
+                unless groupable.include?(parser.group_by)
+                  raise MacroArgumentError, "- can not group by '#{parser.group_by}'<br>[GROUP]<br>#{name_lines.call(groupable)}"
+                end
+                @query.group_by = parser.group_by
+              end
+
+              sort_clear
+              sort_init(default_sort)
+              sort_update(@query.sortable_columns)
+              # 列の見出しの並び替えの印はクエリの並び順を見るため、-o のときはクエリにも渡す
+              @query.sort_criteria = sort_criteria.to_a if parser.sort_criteria
+
+              # 同じ項目を 2 回指定すると、本体の add_filter は後の 1 つで上書きする。黙って片方が効かなくならないよう、
+              # 使った項目を覚えておき、2 回目はエラーにする。
+              # カスタムクエリ（-i・-q）の条件は、マクロで同じ項目を指定すれば上書きする（-o・-g と同じく、マクロの指定を優先する）
+              claimed_filters = []
+              claim_filter = lambda do |field, label|
+                raise MacroArgumentError, "- the same filter is specified more than once: #{label}" if claimed_filters.include?(field)
+                claimed_filters << field
+              end
+
+              # 語が 1 つも無い検索（語を取り出せない場所の既定の検索など）は、条件にしない
+              {'subject' => [parser.search_words_s, '-s'],
+               'description' => [parser.search_words_d, '-d'],
+               'subjectdescription' => [parser.search_words_w, '-w']}.each do |field, (words_list, label)|
+                words_list.reject(&:empty?).each do |words|
+                  claim_filter.call(field, label)
+                  @query.add_filter(field, '~', words)
+                end
+              end
+
+              named_filters = RedmineStudioPlugin::WikiLists::VisibleLookup::NAMED_FILTERS
+
+              parser.additional_filter.each do |filter_set|
+                filter = filter_set[:filter]
+                operator = filter_set[:operator]
+                values = filter_set[:values]
+
+                if (named = named_filters[filter])
+                  unless values.nil?
+                    values = values.collect do |value|
+                      # 見られない物は、無い物と同じエラーにする
+                      tgt_obj = named[:find].call(value, @query.project)
+                      raise MacroArgumentError, "- can not resolve '#{value}' in #{named[:label]} " if tgt_obj.nil?
+                      tgt_obj.id.to_s
+                    end
+                  end
+                  filter = named[:field]
+                end
+
+                claim_filter.call(filter, "-f:#{filter_set[:filter]}")
+                values = RedmineStudioPlugin::WikiLists::RefIssues.values_for_core(@query, filter, operator, values, filter_set[:filter])
+                res = @query.add_filter(filter, operator, values)
+
+                if res.nil?
+                  filter_str = filter_set[:filter] + filter_set[:operator] + Array(filter_set[:values]).join('|')
+                  raise MacroArgumentError,
+                        "- failed add_filter: #{filter_str}<br>" \
+                        "[FILTER]<br>#{name_lines.call(@query.available_filters.keys + named_filters.keys)}<br>" \
+                        "[OPERATOR]<br>#{name_lines.call(Query.operators_labels.collect {|k, l| "#{k}:#{l}"})}"
+                end
+              end
+
+              # 本体は、絞り込みの値が 1 つでも確かめに落ちると、絞り込みを全部外して一覧を作る（Query#statement）。
+              # 全部のチケットが正しい結果のように出ないよう、エラーにする
+              unless @query.valid?
+                raise MacroArgumentError, "- invalid filter: #{@query.errors.full_messages.join(', ')}"
+              end
+
+              @query.column_names = parser.columns unless parser.columns.empty?
+              total_count = @query.issue_count
+              @issues = @query.issues(order: sort_clause, limit: parser.display_limit)
+
+              # 表示は SafeBuffer に足していく（文字列は足すときにエスケープされ、HTML は link_to・textilizable・render が作る物だけになる）
+              disp = ActiveSupport::SafeBuffer.new
+              limit_notice = lambda do
+                if total_count > parser.display_limit && !parser.display_limit_specified
+                  disp << content_tag(:p, I18n.t('ref_issues_display_limit_reached', limit: parser.display_limit, total: total_count))
+                end
+              end
+
+              if parser.zero_flag && @issues.size == 0
+                # 何も出さない
+              elsif parser.only_text || parser.only_link
+                limit_notice.call
+                atr = parser.only_text || parser.only_link
+                text_of = RedmineStudioPlugin::WikiLists::RefIssues.text_reader(atr, @issues)
+
+                @issues.each do |issue|
+                  word = text_of.call(issue)
+                  disp << ' ' unless disp.empty?
+
+                  if parser.only_link
+                    disp << link_to(word, issue_path(issue))
+                  else
+                    # CommonMark（Redmine 7.0 以降）は非 UTF-8 文字列を拒否するため、
+                    # 数値カラム由来の US-ASCII 文字列を UTF-8 に統一してから整形する
+                    disp << textilizable(word.dup.force_encoding('UTF-8'), object: issue)
+                  end
+                end
+              elsif parser.count_flag
+                disp << total_count.to_s
+              else
+                limit_notice.call
+
+                if params[:format] == 'pdf'
+                  disp << render(partial: 'issues/list.html', locals: {issues: @issues, query: @query})
+                else
+                  # 一覧の右クリックメニューの JS・CSS をページの頭に入れる（本体の context_menu。戻り値は無い）
+                  context_menu
+                  disp << render(partial: 'issues/list', locals: {issues: @issues, query: @query})
+                end
+              end
+
+              disp
+            rescue => err
+              RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, err)
+            end
           end
+        end
+      end
 
-          incremented = true
-          Thread.current[:ref_issues_depth] = (Thread.current[:ref_issues_depth] || 0) + 1
-          parser = nil
+      module_function
 
-          begin
-            parser = RedmineStudioPlugin::WikiLists::RefIssues::Parser.new(obj, args, @project)
-          rescue => err_msg
-            attributes = IssueQuery.available_columns
-            msg = <<-TEXT
-- <br>parameter error: #{err_msg}<br>
-#{err_msg.backtrace[0]}<br><br>
+      # 引数の書き方の誤りのときに添える使い方
+      def usage
+        columns = RedmineStudioPlugin::WikiLists::MacroError.name_lines(IssueQuery.available_columns.collect {|a| a.name.to_s} + ['cf_*'])
+        <<-TEXT
 usage: {{ref_issues([option].., [column]..)}}<br>
-<br>[options]<br>
+[options]<br>
 -i=CustomQueryID : specify custom query by id<br>
 -q=CustomQueryName : specify custom query by name<br>
 -p[=identifier] : restrict project<br>
+-s[=WORD[|WORD...]] : search words in subject<br>
+-d[=WORD[|WORD...]] : search words in description<br>
+-w[=WORD[|WORD...]] : search words in subject and description<br>
 -f:FILTER[=WORD[|WORD...]] : additional filter<br>
 -f:treated USER START|END : issues USER created or updated in the period<br>
--t[=column] : display text<br>
--l[=column] : display linked text<br>
+-t[=attribute] : display text<br>
+-l[=attribute] : display linked text<br>
 -c : count issues<br>
 -0 : no display if no issues<br>
--n=NUMBER : display limit (default: 100, max: 1000)<br>
--o=COLUMN[:desc][|COLUMN[:desc]...] : sort order (max 3 columns)<br>
--g=COLUMN : group by
-<br>[columns]<br> {
+-n=NUMBER : display limit (default: #{Parser::DEFAULT_DISPLAY_LIMIT}, max: #{Parser::MAX_DISPLAY_LIMIT})<br>
+-o=COLUMN[:desc][|COLUMN[:desc]...] : sort order (max #{Parser::MAX_SORT_COLUMNS} columns)<br>
+-g=COLUMN : group by<br>
+[columns]<br>
+#{columns}
 TEXT
+      end
 
-            while attributes
-              attributes[0...5].each do |a|
-                msg += a.name.to_s + ', '
-              end
+      # 本体は、数・日付などの項目では、値を 1 つ（範囲の「><」は 2 つ）しか読まず、残りを黙って捨てる。
+      # 数の項目（数・親チケット）は、本体の画面と同じく , でつないだ 1 つの値にして渡す。そのほかは、多すぎる値をエラーにする
+      JOINABLE_TYPES = [:integer, :tree].freeze
+      SINGLE_VALUE_TYPES = [:float, :date, :date_past, :relation].freeze
 
-              attributes = attributes[5..-1]
-              msg += '<br>' if attributes
-            end
+      def values_for_core(query, filter, operator, values, label)
+        return values if values.nil? || values.size < 2
 
-            msg += 'cf_* }<br/>'
-            return RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, msg)
-          end
+        type = query.available_filters[filter].try(:[], :type)
+        if JOINABLE_TYPES.include?(type) && %w[= ~].include?(operator)
+          [values.join(',')]
+        elsif (JOINABLE_TYPES + SINGLE_VALUE_TYPES).include?(type) && values.size > (operator == '><' ? 2 : 1)
+          raise MacroArgumentError, "- too many values for -f:#{label}: #{values.join('|')}"
+        else
+          values
+        end
+      end
 
-          begin
-            unless parser.has_search_conditions? # 検索条件がなにもなかったら
-              # 検索するキーワードを取得する
-              parser.search_words_w << parser.default_words(obj)
-            end
+      # -t=・-l= に書いた属性の値を、チケットごとに読む関数を返す。
+      # 属性は、チケットの属性名（status_id など）か、見ている人が見られるカスタムフィールド（cf_数字か名前）。
+      # 見られないカスタムフィールドは、無い物と同じエラーにする。
+      # そのチケットにカスタムフィールドの値が無いとき（トラッカー・プロジェクトで使っていないなど）は空にする
+      def text_reader(atr, issues)
+        sample = issues.first
+        return ->(_issue) { '' } unless sample
+        return ->(issue) { issue.attributes[atr].to_s } if sample.attributes.has_key?(atr)
 
-            @query = parser.query @project
+        lookup = RedmineStudioPlugin::WikiLists::VisibleLookup
+        custom_field = lookup.issue_custom_field(atr)
+        unless custom_field
+          names = sample.attributes.keys + sample.visible_custom_field_values(User.current).collect {|v| "cf_#{v.custom_field.id}"}
+          raise MacroArgumentError, "- unknown attribute: '#{atr}'<br>[ATTRIBUTES]<br>#{RedmineStudioPlugin::WikiLists::MacroError.name_lines(names)}"
+        end
 
-            extend SortHelper
-            extend QueriesHelper
-            extend IssuesHelper
-
-            # 使える列の一覧を 5 個ずつ改行してエラーに添える
-            name_lines = lambda do |names|
-              names.each_slice(5).collect {|slice| slice.join(', ')}.join(',<br>')
-            end
-
-            # -o はカスタムクエリ（-i / -q）の並び順より優先する
-            if parser.sort_criteria
-              sortable = @query.sortable_columns.select {|_name, sql| sql}.keys
-              parser.sort_criteria.each do |name, _order|
-                unless sortable.include?(name)
-                  raise "- can not sort by '#{name}'<br><br>[SORT]<br>#{name_lines.call(sortable)}<br>".html_safe
-                end
-              end
-              default_sort = parser.sort_criteria
-            else
-              default_sort = @query.sort_criteria.empty? ? [['id', 'desc']] : @query.sort_criteria
-            end
-
-            # -g はカスタムクエリのグループ条件より優先する。
-            # 件数のみ（-c）・リンクのみ（-l）は見出しを出せないため使わない
-            if parser.group_by && !parser.count_flag && !parser.only_link
-              groupable = @query.groupable_columns.collect {|column| column.name.to_s}
-              unless groupable.include?(parser.group_by)
-                raise "- can not group by '#{parser.group_by}'<br><br>[GROUP]<br>#{name_lines.call(groupable)}<br>".html_safe
-              end
-              @query.group_by = parser.group_by
-            end
-
-            sort_clear
-            sort_init(default_sort)
-            sort_update(@query.sortable_columns)
-            # 列の見出しの並び替えの印はクエリの並び順を見るため、-o のときはクエリにも渡す
-            @query.sort_criteria = sort_criteria.to_a if parser.sort_criteria
-            #@issue_count_by_group = @query.issue_count_by_group
-
-            parser.search_words_s.each do |words|
-              @query.add_filter('subject', '~', words)
-            end
-
-            parser.search_words_d.each do |words|
-              @query.add_filter('description', '~', words)
-            end
-
-            parser.search_words_w.each do |words|
-              @query.add_filter('subjectdescription', '~', words)
-            end
-
-            models =
-                {'tracker' => Tracker,
-                 'category' => IssueCategory,
-                 'status' => IssueStatus,
-                 'assigned_to' => User,
-                 'author' => User,
-                 'version' => Version,
-                 'project' => Project}
-            ids =
-                {'tracker' => 'tracker_id',
-                 'category' => 'category_id',
-                 'status' => 'status_id',
-                 'assigned_to' => 'assigned_to_id',
-                 'author' => 'author_id',
-                 'version' => 'fixed_version_id',
-                 'project' => 'project_id'}
-            attributes =
-                {'tracker' => 'name',
-                 'category' => 'name',
-                 'status' => 'name',
-                 'assigned_to' => 'login',
-                 'author' => 'login',
-                 'version' => 'name',
-                 'project' => 'name'}
-
-            parser.additional_filter.each do |filter_set|
-              filter = filter_set[:filter]
-              operator = filter_set[:operator]
-              values = filter_set[:values]
-
-              if models.has_key?(filter)
-                unless values.nil?
-                  tgt_objs = []
-                  values.each do |value|
-                    # 見られない物は、無い物と同じエラーにする
-                    tgt_obj = RedmineStudioPlugin::WikiLists::VisibleLookup.filter_value(filter, value, @query.project)
-                    raise "- can not resolve '#{value}' in #{models[filter].to_s}.#{attributes[filter]} " if tgt_obj.nil?
-                    tgt_objs << tgt_obj.id.to_s
-                  end
-                  values = tgt_objs
-                end
-                filter = ids[filter]
-              end
-
-              res = @query.add_filter(filter , operator, values)
-
-              if res.nil?
-                filter_str = filter_set[:filter] + filter_set[:operator] + filter_set[:values].join('|')
-                cr_count = 0
-                msg = "- failed add_filter: #{filter_str}<br><br>[FILTER]<br>"
-
-                @query.available_filters.each do |k,f|
-                  if cr_count >= 5
-                    msg += '<br>'
-                    cr_count = 0
-                  end
-
-                  msg += k.to_s + ', '
-                  cr_count += 1
-                end
-
-                models.each do |k, _m|
-                  if cr_count >= 5
-                    msg += '<br>'
-                    cr_count = 0
-                  end
-
-                  msg += k.to_s + ', '
-                  cr_count += 1
-                end
-
-                msg += '<br><br>[OPERATOR]<br>'
-                cr_count = 0
-
-                Query.operators_labels.each do |k, l|
-                  if cr_count >= 5
-                    msg += '<br>'
-                    cr_count = 0
-                  end
-
-                  msg += k + ':' + l + ', '
-                  cr_count += 1
-                end
-
-                msg += '<br>'
-                raise msg.html_safe
-              end
-            end
-
-            @query.column_names = parser.columns unless parser.columns.empty?
-            total_count = @query.issue_count
-            @issues = @query.issues(order: sort_clause, limit: parser.display_limit)
-
-            if parser.zero_flag && @issues.size == 0
-              disp = String.new
-            elsif parser.only_text || parser.only_link
-              if total_count > parser.display_limit && !parser.display_limit_specified
-                disp = "<p>#{I18n.t('ref_issues_display_limit_reached', limit: parser.display_limit, total: total_count)}</p>"
-              else
-                disp = String.new
-              end
-              atr = parser.only_text if parser.only_text
-              atr = parser.only_link if parser.only_link
-              word = nil
-
-              @issues.each do |issue|
-                if issue.attributes.has_key?(atr)
-                  word = issue.attributes[atr].to_s
-                else
-                  issue.custom_field_values.each do |cf|
-                    if 'cf_'+cf.custom_field.id.to_s == atr || cf.custom_field.name == atr
-                      word = cf.value
-                    end
-                  end
-                end
-
-                if word.nil?
-                  msg = 'attributes:'
-
-                  issue.attributes.each do |a|
-                    msg += a.to_s + ', '
-                  end
-
-                  raise msg.html_safe
-                  break
-                end
-
-                disp += ' ' if disp.size!=0
-
-                if parser.only_link
-                  disp += link_to("#{word}", issue_path(issue))
-                else
-                  # CommonMark（Redmine 7.0 以降）は非 UTF-8 文字列を拒否するため、
-                  # 数値カラム由来の US-ASCII 文字列を UTF-8 に統一してから整形する
-                  disp += textilizable(word.to_s.dup.force_encoding('UTF-8'), object: issue)
-                end
-              end
-            elsif parser.count_flag
-              disp = total_count.to_s
-            else
-              if total_count > parser.display_limit && !parser.display_limit_specified
-                disp = "<p>#{I18n.t('ref_issues_display_limit_reached', limit: parser.display_limit, total: total_count)}</p>"
-              else
-                disp = String.new
-              end
-
-              if params[:format] == 'pdf'
-                disp += render(partial: 'issues/list.html', locals: {issues: @issues, query: @query})
-              else
-                if method(:context_menu).parameters.size > 0
-                  disp += context_menu(issues_context_menu_path) # < redmine 3.3.x
-                else
-                  disp += context_menu.to_s # >= redmine 3.4.0
-                end
-                disp += render(partial: 'issues/list', locals: {issues: @issues, query: @query})
-              end
-            end
-
-            disp.html_safe
-          rescue => err_msg
-            msg = "#{err_msg}"
-            if msg[0] != '-'
-              err_msg.backtrace.each do |backtrace|
-                msg += "<br>#{backtrace}"
-              end
-            end
-            RedmineStudioPlugin::WikiLists::MacroError.html(self, :ref_issues, msg)
-          end
-        ensure
-          if incremented
-            Thread.current[:ref_issues_depth] = [(Thread.current[:ref_issues_depth] || 0) - 1, 0].max
-          end
+        lambda do |issue|
+          value = lookup.custom_value(issue, custom_field)
+          value ? value.value.to_s : ''
         end
       end
     end

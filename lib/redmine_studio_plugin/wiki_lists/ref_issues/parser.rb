@@ -36,6 +36,12 @@ module RedmineStudioPlugin
           @display_limit_specified = false
           @sort_criteria = nil
           @group_by = nil
+          # 同じ指定を 2 回書くと、黙って片方だけが効く（-p・-n など）ので、2 回目はエラーにする
+          claimed_options = []
+          claim_option = lambda do |label|
+            raise MacroArgumentError, "- the same option is specified more than once: #{label}" if claimed_options.include?(label)
+            claimed_options << label
+          end
 
           args.each do |arg|
             arg.strip!
@@ -63,22 +69,25 @@ module RedmineStudioPlugin
               when 'w','sdw'
                 @search_words_w.push words_to_word_array(obj, words)
               when 'q'
+                claim_option.call('-i/-q')
                 if sep
                   @custom_query_name = words
                 else
-                  raise "- no CustomQuery name:#{arg}"
+                  raise MacroArgumentError, "- no CustomQuery name:#{arg}"
                 end
               when 'i'
+                claim_option.call('-i/-q')
                 if sep
                   @custom_query_id = words
                 else
-                  raise "- no CustomQuery ID:#{arg}"
+                  raise MacroArgumentError, "- no CustomQuery ID:#{arg}"
                 end
               when 'p'
+                claim_option.call('-p')
                 if sep
                   # 見られないプロジェクトは、無いプロジェクトと同じエラーにする
                   @restrict_project = RedmineStudioPlugin::WikiLists::VisibleLookup.project_by_identifier_or_id(words)
-                  raise "- project:#{words} is not found." unless @restrict_project
+                  raise MacroArgumentError, "- project:#{words} is not found." unless @restrict_project
                 else
                   @restrict_project = project
                 end
@@ -113,49 +122,58 @@ module RedmineStudioPlugin
 
                   # Query#add_filter は operator を検証しないため、ここで検証する
                   unless Query.operators.keys.include?(operator) || EXTENDED_OPERATORS.include?(operator)
-                    raise "- invalid operator '#{operator}' in filter option (-f): #{words}"
+                    raise MacroArgumentError, "- invalid operator '#{operator}' in filter option (-f): #{words}"
+                  end
+                  # subjectdescription（題名と説明）は「含む」だけを作っている（ほかの演算子は、無い列を問い合わせてしまう）
+                  if filter == 'subjectdescription' && operator != '~'
+                    raise MacroArgumentError, "- subjectdescription can be used only with '~': #{words}"
                   end
 
                   @additional_filter << {:filter=>filter, :operator=>operator, :values=>values}
                 else
-                  raise "- no additional filter:#{arg}"
+                  raise MacroArgumentError, "- no additional filter:#{arg}"
                 end
               when 't'
+                claim_option.call('-t/-l')
                 @only_text = sep ? words : 'subject'
               when 'l'
+                claim_option.call('-t/-l')
                 @only_link = sep ? words : 'subject'
               when 'c'
                 @count_flag = true
               when '0'
                 @zero_flag = true
               when 'n'
+                claim_option.call('-n')
                 if sep
                   unless words =~ /\A[1-9]\d*\z/
-                    raise "- display limit must be a positive integer: #{arg}"
+                    raise MacroArgumentError, "- display limit must be a positive integer: #{arg}"
                   end
                   limit = words.to_i
                   if limit > MAX_DISPLAY_LIMIT
-                    raise "- display limit '#{limit}' exceeds maximum (#{MAX_DISPLAY_LIMIT})"
+                    raise MacroArgumentError, "- display limit '#{limit}' exceeds maximum (#{MAX_DISPLAY_LIMIT})"
                   end
                   @display_limit = limit
                   @display_limit_specified = true
                 else
-                  raise "- no display limit specified: #{arg}"
+                  raise MacroArgumentError, "- no display limit specified: #{arg}"
                 end
               when 'o'
+                claim_option.call('-o')
                 if sep && words.present?
                   @sort_criteria = words_to_sort_criteria(words)
                 else
-                  raise "- no sort order specified: #{arg}"
+                  raise MacroArgumentError, "- no sort order specified: #{arg}"
                 end
               when 'g'
+                claim_option.call('-g')
                 if sep && words.present?
                   @group_by = words
                 else
-                  raise "- no group column specified: #{arg}"
+                  raise MacroArgumentError, "- no group column specified: #{arg}"
                 end
               else
-                raise "- unknown option:#{arg}"
+                raise MacroArgumentError, "- unknown option:#{arg}"
             end
           end
         end
@@ -176,14 +194,10 @@ module RedmineStudioPlugin
           # オプションにカスタムクエリがあればカスタムクエリを名前から取得
           if @custom_query_id
             @query = IssueQuery.visible.find_by_id(@custom_query_id)
-            raise "- can not find CustomQuery ID:'#{@custom_query_id}'" unless @query
+            raise MacroArgumentError, "- can not find CustomQuery ID:'#{@custom_query_id}'" unless @query
           elsif @custom_query_name
-            cond = 'project_id IS NULL'
-            cond += " OR project_id = #{project.id}" if project
-            base_query = IssueQuery.where(cond).where(name: @custom_query_name)
-            @query = base_query.where(user_id: User.current.id).first
-            @query = base_query.where(visibility: Query::VISIBILITY_PUBLIC).first unless @query
-            raise "- can not find CustomQuery Name:'#{@custom_query_name}'" unless @query
+            @query = RedmineStudioPlugin::WikiLists::VisibleLookup.custom_query_by_name(@custom_query_name, project)
+            raise MacroArgumentError, "- can not find CustomQuery Name:'#{@custom_query_name}'" unless @query
           else
             @query = IssueQuery.new(name: '_', filters: {})
           end
@@ -195,15 +209,19 @@ module RedmineStudioPlugin
 
           # Queryモデルを拡張
           overwrite_sql_for_field(@query)
-          @query.available_filters['description'] = {type: :text, order: 8}
-          @query.available_filters['subjectdescription'] = {type: :text, order: 8}
-          @query.available_filters['fixed_version_id'] = {type: :int}
-          @query.available_filters['category_id'] = {type: :int}
-          @query.available_filters['parent_id'] = {type: :int}
-          @query.available_filters['id'] = {type: :int}
+          # 先に本体の絞り込みを作らせる。本体は available_filters を初めて読むときに絞り込みを作るが、
+          # その前に add_available_filter を呼ぶと、本体の絞り込みが作られないまま、足した物だけになる
+          filters = @query.available_filters
+          @query.add_available_filter('subjectdescription', type: :text, order: 8,
+                                      name: "#{::I18n.t(:field_subject)}+#{::I18n.t(:field_description)}")
+          # 本体に無い項目だけを数の項目として足す。本体にある項目（版・親チケットなど）は本体の型のまま使う
+          # （id はチケットの番号。category_id は、本体はプロジェクトがあるときだけ作る）
+          {'id' => '#', 'category_id' => ::I18n.t(:field_category)}.each do |field, name|
+            @query.add_available_filter(field, type: :integer, name: name) unless filters.has_key?(field)
+          end
           # 値は [利用者の id, 開始日, 終了日]（treated_filter で確かめる）。:date にすると本体の確かめで
-          # 先頭の id が日付でないと落とされ、絞り込みが黙って外れるので :string にする
-          @query.available_filters['treated'] = {type: :string}
+          # 先頭の id が日付でないと落とされるので :string にする
+          @query.add_available_filter('treated', type: :string, name: 'treated')
 
           @query
         end
@@ -213,7 +231,8 @@ module RedmineStudioPlugin
 
           if obj.class == WikiContent  # Wikiの場合はページ名および別名を検索ワードにする
             words.push(obj.page.title) #ページ名
-            redirects = WikiRedirect.where(redirects_to: obj.page.title) #別名query
+            # このページへの別名だけ（本体は、別名の行き先の Wiki を redirects_to_wiki_id で持つ）
+            redirects = WikiRedirect.where(redirects_to_wiki_id: obj.page.wiki_id, redirects_to: obj.page.title)
 
             redirects.each do |redirect|
               words << redirect.title #別名
@@ -233,15 +252,15 @@ module RedmineStudioPlugin
         # -f:treated 人 開始日|終了日 を確かめて、絞り込みの形（値は [利用者の id, 開始日, 終了日]）にする。
         # 人はログイン名か id で、見られる範囲で探す。日付は YYYY-MM-DD だけを受け付ける（問い合わせの文に渡す前に必ず確かめる）
         def treated_filter(user_key, values, words)
-          raise "- too few values for treated: #{words}" if values.nil? || values.length < 2
-          raise "- too many values for treated: #{words}" if values.length > 2
+          raise MacroArgumentError, "- too few values for treated: #{words}" if values.nil? || values.length < 2
+          raise MacroArgumentError, "- too many values for treated: #{words}" if values.length > 2
 
           user = RedmineStudioPlugin::WikiLists::VisibleLookup.user_by_login_or_id(user_key)
-          raise "- can not find user <#{user_key}>" unless user
+          raise MacroArgumentError, "- can not find user <#{user_key}>" unless user
 
           dates = values.map do |v|
             date = (Date.strptime(v, '%Y-%m-%d') if v =~ /\A\d{4}-\d{2}-\d{2}\z/) rescue nil
-            raise "- invalid date for treated: #{v}" unless date
+            raise MacroArgumentError, "- invalid date for treated: #{v}" unless date
             date.strftime('%Y-%m-%d')
           end
           {:filter=>'treated', :operator=>'=', :values=>[user.id.to_s] + dates}
@@ -258,36 +277,25 @@ module RedmineStudioPlugin
           return :updated_on if name_sym == :updated
           return :created_on if name_sym == :created
           return name_sym if name =~ /\Acf_/
-          raise "- unknown column:#{name}"
+          raise MacroArgumentError, "- unknown column:#{name}"
         end
 
-        # @todo Стремный патч, который сделан из-за отсутствия поминимания как работать с Query. По сути, надо патчить IssueQuery
+        # このクエリだけ、絞り込みの問い合わせの文の作り方を差し替える（本体の IssueQuery には手を入れない）
         def overwrite_sql_for_field(query)
           def query.sql_for_field(field, operator, value, db_table, db_field, is_custom_filter=false)
             if operator == '~'
-              # monkey patched for ref_issues: originally treat single value  -> extend multiple value
-              if db_field=='subjectdescription'
-                sql = '('
-
-                value.each do |v|
-                  sql += ' OR ' if sql != '('
-                  sql += "LOWER(#{db_table}.subject) LIKE '%#{self.class.connection.quote_string(v.to_s.downcase)}%'"
-                  sql += " OR LOWER(#{db_table}.description) LIKE '%#{self.class.connection.quote_string(v.to_s.downcase)}%'"
-                end
-
-                sql += ')'
-                return sql
-              else
-                sql = '('
-
-                value.each do |v|
-                  sql += ' OR ' if sql != '('
-                  sql += "LOWER(#{db_table}.#{db_field}) LIKE '%#{self.class.connection.quote_string(v.to_s.downcase)}%'"
-                end
-
-                sql += ')'
-                return sql
+              # ref_issues の「含む」は、| で区切った語のどれかを含むものを探す。語はひとかたまりで探す
+              # （本体は語を空白で分け、全部を含むものを探すが、ref_issues は分けない）。
+              # 大文字・小文字の扱いと % _ の扱い（文字として探す）は、本体の「含む」と同じにする
+              contains = lambda do |column, v|
+                Issue.sanitize_sql_for_conditions(
+                  [Redmine::Database.like(column, '?'), "%#{Issue.sanitize_sql_like(v.to_s)}%"])
               end
+              columns = db_field == 'subjectdescription' ? ["#{db_table}.subject", "#{db_table}.description"] : ["#{db_table}.#{db_field}"]
+              conditions = value.flat_map do |v|
+                columns.map {|column| contains.call(column, v)}
+              end
+              return "(#{conditions.join(' OR ')})"
             elsif operator == '=='
               sql = '('
 
@@ -336,23 +344,23 @@ module RedmineStudioPlugin
         def words_to_sort_criteria(words)
           criteria = words.split('|').collect do |word|
             name, order = word.split(':', 2).collect(&:strip)
-            raise "- no sort column specified: -o=#{words}" if name.blank?
+            raise MacroArgumentError, "- no sort column specified: -o=#{words}" if name.blank?
             order = order.blank? ? 'asc' : order.downcase
             unless ['asc', 'desc'].include?(order)
-              raise "- sort order must be 'asc' or 'desc': -o=#{words}"
+              raise MacroArgumentError, "- sort order must be 'asc' or 'desc': -o=#{words}"
             end
             [name, order]
           end
 
           if criteria.size > MAX_SORT_COLUMNS
-            raise "- too many sort columns (max #{MAX_SORT_COLUMNS}): -o=#{words}"
+            raise MacroArgumentError, "- too many sort columns (max #{MAX_SORT_COLUMNS}): -o=#{words}"
           end
           criteria
         end
 
+        # | で区切った語の配列にする。空の語（a||b の間など）は捨てる（残すと、全部のチケットに当たる）
         def words_to_word_array(obj, words)
-          words.split('|').collect do |word|
-            word.strip!
+          words.split('|').collect(&:strip).reject(&:empty?).collect do |word|
             refer_field(obj, word)
           end
         end
@@ -367,6 +375,7 @@ module RedmineStudioPlugin
           end
 
           if word =~ /\[current_project_id\]/
+            raise MacroArgumentError, "- can not use '#{word}' outside a project." unless @project
             return @project.id.to_s
           end
 
@@ -382,17 +391,16 @@ module RedmineStudioPlugin
             elsif obj.class == Journal && obj.journalized_type == 'Issue'
               issue = obj.issue
             else
-              raise "- can not use reference '#{word}' except for issues."
+              raise MacroArgumentError, "- can not use reference '#{word}' except for issues."
             end
 
             if issue.attributes.has_key?(atr)
               word = issue.attributes[atr]
             else
-              issue.custom_field_values.each do |cf|
-                if 'cf_' + cf.custom_field.id.to_s == atr || cf.custom_field.name == atr
-                  word = cf.value
-                end
-              end
+              # 見ている人が見られないカスタムフィールドは、無い項目と同じに扱う
+              custom_field = RedmineStudioPlugin::WikiLists::VisibleLookup.issue_custom_field(atr)
+              value = custom_field && RedmineStudioPlugin::WikiLists::VisibleLookup.custom_value(issue, custom_field)
+              word = value.value if value
             end
           end
           return word.to_s
