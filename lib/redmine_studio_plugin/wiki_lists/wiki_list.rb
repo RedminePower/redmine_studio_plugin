@@ -95,6 +95,16 @@ TEXT
             header = content_tag(:tr, safe_join(column_names.zip(column_widths).collect {|name, width| content_tag(:th, name, width: width)}))
             rows = []
 
+            # -p（プロジェクト指定）も -c（子ページ限定）も無いと抽出条件が空になり、全プロジェクトの
+            # 全 Wiki ページを読み出してしまう（下の visible? で 1 ページずつ権限を確認して弾くので N+1 にもなる）。
+            # 既定の対象を、閲覧できるプロジェクトに絞る。本体 WikiPage#visible?（= :view_wiki_pages 権限）と
+            # 同じ範囲なので、表示される結果は変わらない。
+            if conds.empty?
+              allowed_ids = Project.allowed_to(User.current, :view_wiki_pages).ids
+              conds << (allowed_ids.empty? ? '1=0' : "project_id IN (#{allowed_ids.join(',')})")
+              joins = 'INNER JOIN wikis ON wiki_pages.wiki_id = wikis.id'
+            end
+
             # Wikiページの抽出
             wiki_pages = WikiPage.joins(joins).where(conds.join(' AND '))
 

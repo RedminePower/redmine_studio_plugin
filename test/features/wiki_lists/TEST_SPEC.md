@@ -610,6 +610,29 @@ $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki 
 
 **期待結果:** `[2-W-17] PASS`（`the same option is specified more than once: -p` エラー）
 
+### [2-W-18] -p・-c 省略時は、閲覧できるプロジェクトの Wiki に限定する
+
+**マクロ:** `{{wiki_list(+title)}}`（対象を絞るオプションを付けない）
+
+`-p`（プロジェクト）も `-c`（子ページ）も付けないと、閲覧できるすべてのプロジェクトの Wiki を対象にする。別プロジェクトのページも出るが、見られないプロジェクトのページは出ない（本体のページ単位の可視判定と同じ範囲）。管理者（`{ApiKey}`）は別プロジェクト wl-spec-x のページ WLXss も見え、wl-spec のメンバーだが wl-spec-x のメンバーではない閲覧者（`{ViewerKey}`）は WLXss が見えないことを確かめる。
+
+```powershell
+$ha = @{ 'X-Redmine-API-Key' = '{ApiKey}' }; $hv = @{ 'X-Redmine-API-Key' = '{ViewerKey}' }; $u = '{BaseUrl}/projects/{ProjectIdent}/wiki/WLMacro'
+$body = @{ wiki_page = @{ text = '{{wiki_list(+title)}}' } } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $ha -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
+$ca = (((Invoke-WebRequest -Uri $u -Headers $ha).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$cv = (((Invoke-WebRequest -Uri $u -Headers $hv).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
+$checks = [ordered]@{
+  admin_sees_own     = $ca.Contains('>WikiListTest</a>')
+  admin_sees_other   = $ca.Contains('>WLXss</a>')
+  viewer_sees_own    = $cv.Contains('>WikiListTest</a>')
+  viewer_hides_other = -not $cv.Contains('>WLXss</a>')
+}
+"[2-W-18] " + $(if (-not ($checks.Values -contains $false)) { 'PASS' } else { "FAIL: $(($checks.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' ')" })
+```
+
+**期待結果:** `[2-W-18] PASS`（管理者は別プロジェクトの WLXss も表示、閲覧者は WLXss 非表示。どちらも WikiListTest は表示）
+
 ---
 
 ## 3. HTTP テスト - issue_name_link
