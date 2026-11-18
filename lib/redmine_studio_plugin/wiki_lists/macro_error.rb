@@ -24,8 +24,16 @@ module RedmineStudioPlugin
         end
 
         lines = String.new(message.to_s).split(%r{<br\s*/?>|\n}).map(&:strip).reject(&:empty?)
-        text = ::I18n.t(:error_can_not_execute_macro_html, name: ::ERB::Util.h(name.to_s), error: view.safe_join(lines, view.tag.br))
-        view.content_tag(:div, text.html_safe, class: 'flash error')
+
+        if view.respond_to?(:content_tag) && view.respond_to?(:safe_join)
+          text = ::I18n.t(:error_can_not_execute_macro_html, name: ::ERB::Util.h(name.to_s), error: view.safe_join(lines, view.tag.br))
+          view.content_tag(:div, text.html_safe, class: 'flash error')
+        else
+          # 画面のビュー文脈が無い描画（通知メールなど）：view ヘルパに依らず同じ枠を組む
+          joined = lines.map {|l| ::ERB::Util.h(l)}.join('<br>')
+          text = ::I18n.t(:error_can_not_execute_macro_html, name: ::ERB::Util.h(name.to_s), error: joined)
+          %(<div class="flash error">#{text}</div>).html_safe
+        end
       end
 
       # エラーに添える名前の一覧を、5 個ずつ行に分けて並べる
