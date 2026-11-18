@@ -64,9 +64,18 @@ module RedmineStudioPlugin
                 @query.group_by = parser.group_by
               end
 
-              sort_clear
+              # 通知メールなど、画面のビュー文脈が無い場（self が Mailer で request/session が無い）では、
+              # 本体 SortHelper がセッションを触れず落ちる（undefined method `session'）。ビュー文脈がある
+              # ときだけ本体の並び替え状態（セッション）を使い、無いときは既定の並び順だけで組む。
+              in_view_context = respond_to?(:request, true) && respond_to?(:session, true)
               sort_init(default_sort)
-              sort_update(@query.sortable_columns)
+              if in_view_context
+                sort_clear
+                sort_update(@query.sortable_columns)
+              else
+                @sort_criteria = Redmine::SortCriteria.new(@sort_default)
+                @sortable_columns = @query.sortable_columns
+              end
               # 列の見出しの並び替えの印はクエリの並び順を見るため、-o のときはクエリにも渡す
               @query.sort_criteria = sort_criteria.to_a if parser.sort_criteria
 
@@ -141,6 +150,11 @@ module RedmineStudioPlugin
 
               if parser.zero_flag && @issues.size == 0
                 # 何も出さない
+              elsif !in_view_context
+                # 画面のビュー文脈が無い（通知メールなど）：request/session・view ヘルパに依らず簡易表示する
+                disp << RedmineStudioPlugin::WikiLists::RefIssues.mail_fallback(
+                          @query, @issues, total_count, parser,
+                          ->(issue) { url_for(controller: 'issues', action: 'show', id: issue, only_path: false) })
               elsif parser.only_text || parser.only_link
                 limit_notice.call
                 atr = parser.only_text || parser.only_link
@@ -196,6 +210,78 @@ module RedmineStudioPlugin
       end
 
       module_function
+
+      # 画面のビュー文脈（request/session・view ヘルパ）が無い描画（通知メールなど）向けの簡易表示。
+      # link は issue を受け取り、そのチケットの絶対URL（文字列）を返す呼び出し可能オブジェクト。
+      def mail_fallback(query, issues, total_count, parser, link)
+        esc = ->(s) { ERB::Util.html_escape(s.to_s) }
+        anchor = ->(issue, text) { %(<a href="#{esc.call(link.call(issue))}">#{esc.call(text)}</a>).html_safe }
+
+        return total_count.to_s.html_safe if parser.count_flag
+
+        buf = ActiveSupport::SafeBuffer.new
+        if total_count > parser.display_limit && !parser.display_limit_specified
+          buf << ('<p>' + esc.call(I18n.t('ref_issues_display_limit_reached', limit: parser.display_limit, total: total_count)) + '</p>').html_safe
+        end
+
+        if parser.only_text || parser.only_link
+          atr = parser.only_text || parser.only_link
+          text_of = text_reader(atr, issues)
+          first = true
+          issues.each do |issue|
+            word = text_of.call(issue)
+            buf << ' '.html_safe unless first
+            first = false
+            buf << (parser.only_link ? anchor.call(issue, word) : esc.call(word))
+          end
+          return buf
+        end
+
+        # 一覧（表）。画面と同じ列・並び順を使い、画面専用の装飾（チェックボックス・右クリック・並び替え）は省く。
+        columns = query.inline_columns
+        link_col = columns.find {|c| c.name == :subject} || columns.find {|c| c.name == :id}
+        buf << '<table class="list issues"><thead><tr>'.html_safe
+        buf << '<th>#</th>'.html_safe unless link_col
+        columns.each {|c| buf << '<th>'.html_safe << esc.call(c.caption) << '</th>'.html_safe }
+        buf << '</tr></thead><tbody>'.html_safe
+        issues.each do |issue|
+          buf << '<tr>'.html_safe
+          buf << ('<td>'.html_safe + anchor.call(issue, "##{issue.id}") + '</td>'.html_safe) unless link_col
+          columns.each do |c|
+            buf << '<td>'.html_safe
+            case c.name
+            when :subject then buf << anchor.call(issue, issue.subject)
+            when :id      then buf << anchor.call(issue, "##{issue.id}")
+            else buf << esc.call(mail_cell_value(c, issue))
+            end
+            buf << '</td>'.html_safe
+          end
+          buf << '</tr>'.html_safe
+        end
+        buf << '</tbody></table>'.html_safe
+        buf
+      end
+
+      # 表の 1 セルの値を、view ヘルパに依らずテキスト化する（複数値は , でつなぐ）。
+      def mail_cell_value(column, issue)
+        value = column.respond_to?(:value_object) ? column.value_object(issue) : column.value(issue)
+        values = value.is_a?(Array) ? value : [value]
+        values.map {|v| mail_scalar(v) }.reject(&:empty?).join(', ')
+      end
+
+      def mail_scalar(v)
+        case v
+        when nil         then ''
+        when true        then '1'
+        when false       then ''
+        when Time, DateTime
+          zone = (User.current.time_zone rescue nil)
+          t = zone ? v.in_time_zone(zone) : (v.respond_to?(:localtime) ? v.localtime : v)
+          (I18n.l(t, format: :short) rescue t.to_s)
+        when Date        then (I18n.l(v) rescue v.to_s)
+        else v.to_s
+        end
+      end
 
       # 引数の書き方の誤りのときに添える使い方
       def usage

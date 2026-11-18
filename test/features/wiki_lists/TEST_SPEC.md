@@ -249,6 +249,49 @@ puts "[1-8] PASS"
 
 **期待結果:** 3 つのマクロで、エラー文（wl_spec_boom）だけが出て、ログにエラーとファイルの場所が残る
 
+### [1-9] 通知メール（画面のセッションが無い文脈）でも一覧を出す
+
+ref_issues は本体 SortHelper や `issues/list` を使うため、画面のセッション・request が前提になる。通知メール（`self` が Mailer）ではそれらが無く、本体 SortHelper が `session` を触って落ち、一覧の代わりにエラーの枠が出ていた。メールの文脈では、request/session・view ヘルパに依らない簡易一覧（表・件数・リンク）を出し、不正なマクロも同じ体裁のエラー枠になることを確かめる。
+
+**確認方法:**
+```ruby
+require 'action_mailer'
+User.current = User.find(1)
+proj = Project.first
+tracker = proj.trackers.first || Tracker.first
+tok = "WLMAILSPEC#{rand(1_000_000)}"
+tgt = Issue.create!(project: proj, tracker: tracker, author: User.current,
+                    subject: "#{tok} target", status: IssueStatus.first, priority: IssuePriority.first)
+region = lambda do |issue, macro|
+  j = Journal.new(journalized: issue, user: User.current, notes: "BR #{macro} ER")
+  j.id = 2_000_000_019
+  j.created_on = Time.now
+  m = Mailer.issue_edit(User.current, j)
+  body = m.html_part ? m.html_part.body.to_s : m.body.to_s
+  i = body.index('BR '); k = body.index(' ER')
+  body[(i + 3)...k]
+end
+begin
+  # 一覧：エラー枠でなく、表＋対象チケットへのリンクが出る（session で落ちない）
+  list = region.call(tgt, "{{ref_issues(-s=#{tok})}}")
+  raise "FAIL error box: #{list[0, 200]}" if list.include?('flash error') || list.include?('undefined method')
+  raise "FAIL no list table: #{list[0, 120]}" unless list.start_with?('<table class="list issues">')
+  raise "FAIL no link to target" unless list.include?(%(/issues/#{tgt.id}">))
+  # 件数：数字だけ
+  cnt = region.call(tgt, "{{ref_issues(-s=#{tok}, -c)}}")
+  raise "FAIL count not 1: #{cnt.inspect}" unless cnt.strip == '1'
+  # 不正マクロでも、メールで同じ体裁のエラー枠（view ヘルパ非対応でも組める）
+  err = region.call(tgt, "{{ref_issues(-i=99999999)}}")
+  raise "FAIL err not styled: #{err[0, 160]}" unless err.include?('class="flash error"')
+  raise "FAIL err leaked undefined: #{err[0, 160]}" if err.include?('undefined method')
+  puts "[1-9] PASS"
+ensure
+  tgt.destroy
+end
+```
+
+**期待結果:** 通知メールの本文で、ref_issues がエラーの枠でなく一覧（表・リンク・件数）を出し、不正なマクロは同じ体裁のエラー枠になる（`session` で落ちない）
+
 ---
 
 ## 2. HTTP テスト - wiki_list
