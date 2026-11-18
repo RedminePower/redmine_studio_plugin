@@ -215,9 +215,17 @@ controller.request = ActionDispatch::TestRequest.create
 controller.instance_variable_set(:@project, project)
 view = controller.view_context
 boom = Module.new do
-  def new(*args) = Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
-  def project_by_name(*args) = Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
-  def project_by_identifier_or_name(*args) = Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
+  def new(*args)
+    Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
+  end
+
+  def project_by_name(*args)
+    Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
+  end
+
+  def project_by_identifier_or_name(*args)
+    Thread.current[:wl_spec_boom] ? raise('wl_spec_boom') : super
+  end
 end
 RedmineStudioPlugin::WikiLists::RefIssues::Parser.singleton_class.prepend(boom)
 RedmineStudioPlugin::WikiLists::VisibleLookup.singleton_class.prepend(boom)
@@ -1364,7 +1372,7 @@ $body = @{ wiki_page = @{ text = '{{ref_issues(-p, subject)}}' } } | ConvertTo-J
 Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
 $hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
-$cols = ([regex]::Matches($c, '<th class="([a-z_]+)"') | ForEach-Object { $_.Groups[1].Value }) -join ','
+$cols = ([regex]::Matches($c, '<th class="([a-z_]+)"') | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -ne 'buttons' }) -join ','
 "[4-R-23] " + $(if ($cols -eq 'id,subject') { 'PASS' } else { "FAIL: $o" })
 ```
 
@@ -1380,7 +1388,7 @@ $body = @{ wiki_page = @{ text = '{{ref_issues(-p, id, subject, status)}}' } } |
 Invoke-RestMethod -Method Put -Uri "$u.json" -Headers $h -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 $c = (((Invoke-WebRequest -Uri $u -Headers $h).Content -split '<div class="wiki wiki-page">', 2)[1] -split '<fieldset', 2)[0]
 $hit = @([regex]::Matches($c, '(IssueNameLinkTest|RefIssuesTest\d)_{Sfx}') | ForEach-Object { $_.Groups[1].Value }); $o = $hit -join ','; $set = ($hit | Sort-Object -Unique) -join ','
-$cols = ([regex]::Matches($c, '<th class="([a-z_]+)"') | ForEach-Object { $_.Groups[1].Value }) -join ','
+$cols = ([regex]::Matches($c, '<th class="([a-z_]+)"') | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -ne 'buttons' }) -join ','
 "[4-R-24] " + $(if ($cols -eq 'id,subject,status') { 'PASS' } else { "FAIL: $o" })
 ```
 

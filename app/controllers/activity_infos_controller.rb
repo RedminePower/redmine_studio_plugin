@@ -19,9 +19,9 @@ class ActivityInfosController < ApplicationController
     events = fetcher.events(from, to + 1) # to は inclusive なので +1 日
 
     # イベントに関連するチケットの ID を収集
-    issue_ids = events.filter_map do |e|
+    issue_ids = events.map do |e|
       e.is_a?(Journal) ? e.journalized_id : (e.is_a?(Issue) ? e.id : nil)
-    end.uniq
+    end.compact.uniq
 
     # 親チケット階層も含めた全チケット ID を収集し、Journal を一括プリロード
     all_issue_ids = collect_all_issue_ids(issue_ids)
@@ -37,9 +37,9 @@ class ActivityInfosController < ApplicationController
     # 親チケット階層のキャッシュ（同じチケットの親階層は共通）
     parent_cache = {}
 
-    @activity_infos = events.filter_map do |event|
+    @activity_infos = events.map do |event|
       build_activity_info(event, journals_by_issue, issues_by_id, parent_cache, status_lookup, principal_lookup)
-    end
+    end.compact
 
     respond_to do |format|
       format.api

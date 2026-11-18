@@ -242,12 +242,12 @@ class StudioSettingsController < ApplicationController
     return ['studio_setting must be an object'] unless raw.is_a?(ActionController::Parameters)
     return ['studio_setting is required'] if raw.empty?
 
-    messages = STRING_FIELDS.filter_map do |field|
+    messages = STRING_FIELDS.map do |field|
       "#{field} must be a string" if raw.key?(field) && !raw[field].nil? && !raw[field].is_a?(String)
-    end
-    messages += INTEGER_FIELDS.filter_map do |field|
+    end.compact
+    messages += INTEGER_FIELDS.map do |field|
       "#{field} must be an integer" if raw.key?(field) && !integer_or_blank?(raw[field])
-    end
+    end.compact
     messages + StudioSettingHistory.comment_errors(raw[:comment])
   end
 

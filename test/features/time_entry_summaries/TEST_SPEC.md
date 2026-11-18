@@ -208,7 +208,7 @@ begin
     status, body = call_api(key, params)
     raise "status #{status} #{body}" unless status == 200
 
-    body['time_entry_summaries'].to_h { |s| [[s['user_id'], s['spent_on'], s['project_id']], s['digest']] }
+    body['time_entry_summaries'].map { |s| [[s['user_id'], s['spent_on'], s['project_id']], s['digest']] }.to_h
   end
   k_d1p1 = [u1.id, '2001-01-10', p1.id]
   k_d2p1 = [u1.id, '2001-01-11', p1.id]
@@ -312,11 +312,11 @@ begin
       { :from => '2001-01-01', :to => '2001-01-31', :user_id => (1..101).map(&:to_s) } => 422, # user_id[]= の配列
       { :from => '2001-01-01', :to => '2001-01-31', :unknown_param => 'x' } => 200 # 知らない引数は無視する
     }
-    bad = cases.filter_map do |params, expected|
+    bad = cases.map do |params, expected|
       s, b = call_api(admin_key, params)
       ok = s == expected && (expected != 422 || b['errors'].is_a?(Array) && b['errors'].any?)
       "#{params.inspect} => #{s}" unless ok
-    end
+    end.compact
     [bad.empty?, bad.join(', ')]
   end
 

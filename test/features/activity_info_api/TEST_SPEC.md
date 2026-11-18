@@ -457,7 +457,7 @@ begin
   controller = ActivityInfosController.new
   ids = [d[:leaf].id, d[:mid].id, d[:root].id]
   issues_by_id = Issue.where(id: ids).index_by(&:id)
-  journals_by_issue = ids.to_h { |id| [id, issues_by_id[id].journals.preload(:details).sort_by(&:created_on)] }
+  journals_by_issue = ids.map { |id| [id, issues_by_id[id].journals.preload(:details).sort_by(&:created_on)] }.to_h
   leaf = issues_by_id[d[:leaf].id]
   tree = controller.send(:build_ticket_tree, leaf, leaf.created_on, journals_by_issue, issues_by_id, {}, status_lookup, principal_lookup)
   got = tree.map { |x| x[:id] }
@@ -545,7 +545,7 @@ begin
   controller = ActivityInfosController.new
   ids = [d[:leaf].id, d[:mid].id, d[:root].id]
   issues_by_id = Issue.where(id: ids).index_by(&:id)
-  journals_by_issue = ids.to_h { |id| [id, issues_by_id[id].journals.preload(:details).sort_by(&:created_on)] }
+  journals_by_issue = ids.map { |id| [id, issues_by_id[id].journals.preload(:details).sort_by(&:created_on)] }.to_h
   leaf = issues_by_id[d[:leaf].id]
   cache = {}
   tree1 = controller.send(:build_ticket_tree, leaf, leaf.created_on, journals_by_issue, issues_by_id, cache, status_lookup, principal_lookup)

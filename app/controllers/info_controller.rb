@@ -32,11 +32,11 @@ class InfoController < ApplicationController
   end
 
   def gather_scm_info
-    Redmine::Scm::Base.all.filter_map do |scm|
+    Redmine::Scm::Base.all.map do |scm|
       scm_class = "Repository::#{scm}".constantize
       version = scm_class.scm_version_string
       { name: scm, version: version } if version.present?
-    end
+    end.compact
   end
 
   def gather_plugins_info
