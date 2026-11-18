@@ -162,6 +162,42 @@ GET /activity_infos.xml?user_id=1&from=2026-04-07&to=2026-04-10    → XML 形�
 
 ---
 
+## 活動を組み立てられなかったとき
+
+活動 1 件の組み立てで例外が出たときは、その 1 件だけを飛ばし、残りの活動を返す（200）。飛ばしたときだけ、一覧に次の値が付く（XML では `<activity_infos>` の属性、JSON では `activity_infos` と同じ階層のキー）。
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `skipped_count` | int | 飛ばした活動の件数 |
+| `skipped_errors` | string | 飛ばした例外の説明。「クラス名 (ファイル名:行)」を、出た順に重ねずに `, ` でつないだもの |
+
+例外の説明には、例外のメッセージを入れない。場所は、スタックトレースのうちプラグインの中で最初に出てくる行（無ければ最初の行）。
+
+```json
+{
+  "activity_infos": [ ... ],
+  "skipped_count": 1,
+  "skipped_errors": "NoMethodError (activity_infos_controller.rb:212)"
+}
+```
+
+```xml
+<activity_infos type="array" skipped_count="1" skipped_errors="NoMethodError (activity_infos_controller.rb:212)">
+  ...
+</activity_infos>
+```
+
+次のときは、500 を返す。本文の `errors` には、利用者への案内の文（利用者の言語）と例外の説明の 2 つを、この順に入れる。
+
+- 活動の一覧を取る所・まとめて読み込む所で失敗したとき
+- 活動が 1 件以上あって、全件の組み立てに失敗したとき
+- データベースの例外（`ActiveRecord::StatementInvalid`・`ActiveRecord::ConnectionNotEstablished` とその子）・タイムアウト（`Timeout::Error`）のとき
+- 書き出しの途中で失敗したとき
+
+どの場合も、Redmine のログに、例外と文脈（user_id・from・to、活動の種類と ID）を残す。スタックトレースは、1 回の呼び出しで例外の種類ごとに最初の 1 件だけ書く。
+
+---
+
 ## エラーレスポンス
 
 | ステータス | 条件 |
@@ -169,6 +205,25 @@ GET /activity_infos.xml?user_id=1&from=2026-04-07&to=2026-04-10    → XML 形�
 | 401 | 未認証（ログインが必要） |
 | 404 | 指定した user_id のユーザーが存在しない |
 | 422 | 必須パラメータ（user_id, from, to）が未指定 |
+| 500 | 活動を組み立てられなかった（上の「活動を組み立てられなかったとき」） |
+
+### 500 エラー例
+
+```json
+{
+  "errors": [
+    "Redmine で活動を組み立てられませんでした。時間をおいて再試行し、改善しない場合は Redmine の管理者にお問い合わせください（原因は Redmine のログに残っています）。",
+    "NoMethodError (activity_infos_controller.rb:212)"
+  ]
+}
+```
+
+```xml
+<errors type="array">
+  <error>Redmine で活動を組み立てられませんでした。…</error>
+  <error>NoMethodError (activity_infos_controller.rb:212)</error>
+</errors>
+```
 
 ### 422 エラー例
 

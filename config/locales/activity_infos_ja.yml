@@ -1,0 +1,2 @@
+ja:
+  error_activity_infos_failed: Redmine で活動を組み立てられませんでした。時間をおいて再試行し、改善しない場合は Redmine の管理者にお問い合わせください（原因は Redmine のログに残っています）。

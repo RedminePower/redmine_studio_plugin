@@ -5,6 +5,12 @@ class ActivityInfosController < ApplicationController
   # 追加 API は本体の login_required 設定に関わらず一律ログイン必須にする（匿名アクセス遮断）
   before_action :require_login
 
+  # 活動 1 件の組み立てで出ても飛ばさず、一覧ごと失敗にする例外（データベースの例外・タイムアウト）。
+  # 一時的な障害で欠けた結果を、成功として返さないため。
+  NOT_SKIPPED_ERRORS = [ActiveRecord::StatementInvalid, ActiveRecord::ConnectionNotEstablished, Timeout::Error].freeze
+
+  PLUGIN_ROOT = File.expand_path('../..', __dir__)
+
   # GET /activity_infos?user_id=N&from=YYYY-MM-DD&to=YYYY-MM-DD
   def index
     return unless validate_params!
@@ -12,7 +18,46 @@ class ActivityInfosController < ApplicationController
     author = User.visible.active.find(params[:user_id])
     from = params[:from].to_date
     to = params[:to].to_date
+    context = "user_id=#{author.id} from=#{from} to=#{to}"
 
+    begin
+      @activity_infos, skipped = build_activity_infos(author, from, to, context)
+      @skipped_count = skipped.size
+      @skipped_errors = skipped.map { |e| describe_error(e) }.uniq.join(', ')
+
+      # 書き出しの失敗もここで拾えるよう、アクションの中で書き出す（ブロックが無いと、アクションの後で書き出される）
+      respond_to do |format|
+        format.api { render :action => 'index' }
+      end
+    rescue ActionController::UnknownFormat, ::Unauthorized
+      # 形式の誤り（406）と権限の不足は、今までどおり Redmine 本体に任せる
+      raise
+    rescue StandardError => e
+      logger.error "[ActivityInfos] failed: #{context} #{e.class}: #{e.message}\n#{Array(e.backtrace).join("\n")}"
+      render_activity_error(e)
+    end
+  rescue ActiveRecord::RecordNotFound
+    render_404
+  end
+
+  private
+
+  def validate_params!
+    %w[user_id from to].each do |key|
+      if params[key].blank?
+        respond_to do |format|
+          format.api { render_api_errors("#{key} is required") }
+        end
+        return false
+      end
+    end
+    true
+  end
+
+  # 期間の活動を組み立てる。活動 1 件の組み立てで失敗したらその 1 件を飛ばし、
+  # [組み立てた活動の配列, 飛ばした例外の配列] を返す。
+  # 1 件ずつに分けられない所・データベースの例外・タイムアウト・全件の失敗は、例外のまま上げる。
+  def build_activity_infos(author, from, to, context)
     # Fetcher で issues タイプの活動イベントを取得
     fetcher = Redmine::Activity::Fetcher.new(User.current, :author => author)
     fetcher.scope = ['issues']
@@ -37,29 +82,56 @@ class ActivityInfosController < ApplicationController
     # 親チケット階層のキャッシュ（同じチケットの親階層は共通）
     parent_cache = {}
 
-    @activity_infos = events.map do |event|
-      build_activity_info(event, journals_by_issue, issues_by_id, parent_cache, status_lookup, principal_lookup)
-    end.compact
-
-    respond_to do |format|
-      format.api
-    end
-  rescue ActiveRecord::RecordNotFound
-    render_404
-  end
-
-  private
-
-  def validate_params!
-    %w[user_id from to].each do |key|
-      if params[key].blank?
-        respond_to do |format|
-          format.api { render_api_errors("#{key} is required") }
-        end
-        return false
+    infos = []
+    skipped = []
+    logged_classes = {}
+    events.each do |event|
+      begin
+        info = build_activity_info(event, journals_by_issue, issues_by_id, parent_cache, status_lookup, principal_lookup)
+        infos << info if info
+      rescue *NOT_SKIPPED_ERRORS
+        raise
+      rescue StandardError => e
+        skipped << e
+        log_skipped(e, event, context, logged_classes)
       end
     end
-    true
+
+    # 全件が失敗したときは、空の一覧を「活動なし」と取り違えないよう、一覧ごとの失敗にする
+    raise skipped.first if infos.empty? && skipped.any?
+
+    [infos, skipped]
+  end
+
+  # 飛ばした活動をログに残す。スタックトレースは、1 回の呼び出しで例外のクラスごとに最初の 1 件だけ書く
+  def log_skipped(error, event, context, logged_classes)
+    message = "[ActivityInfos] skipped: #{context} #{event.class.name}##{event.id} #{error.class}: #{error.message}"
+    if logged_classes[error.class]
+      logger.error message
+    else
+      logged_classes[error.class] = true
+      logger.error "#{message}\n#{Array(error.backtrace).join("\n")}"
+    end
+  end
+
+  # 応答に入れる例外の説明。「クラス名 (ファイル名:行)」。メッセージは入れない（件名などが混ざりうるため）。
+  # 場所は、スタックトレースのうちプラグインの中で最初に出てくる行。無ければ最初の行。フォルダの名前は入れない
+  def describe_error(error)
+    # ビューの書き出しで出た例外は、Rails が包んでいるので、中の例外を出す
+    error = error.cause if error.is_a?(ActionView::Template::Error) && error.cause
+    lines = Array(error.backtrace)
+    line = lines.find { |l| l.start_with?(PLUGIN_ROOT + '/') } || lines.first
+    match = line && line.match(/\A(.+?):(\d+)/)
+    name = error.class.name || error.class.to_s
+    match ? "#{name} (#{File.basename(match[1])}:#{match[2]})" : name
+  end
+
+  # 一覧ごとの失敗を 500 で返す。本文は API の形（errors）にし、利用者への案内と例外の説明の 2 つを入れる
+  # （アプリは errors をそのままダイアログに出すので、案内が無いと例外の説明だけになる）。
+  # 書き出しの途中で失敗したときも、応答はまだ書かれていないので、ここで書ける
+  def render_activity_error(error)
+    @error_messages = [l(:error_activity_infos_failed), describe_error(error)]
+    render :template => 'common/error_messages', :formats => [:api], :status => 500
   end
 
   # 親チケットを再帰的にたどり、関連するすべてのチケット ID を収集する
@@ -129,6 +201,8 @@ class ActivityInfosController < ApplicationController
     ids.to_a
   end
 
+  # 活動 1 件を、応答に書く値だけのハッシュにする。
+  # ビューの途中で例外が出ると 1 件だけ飛ばせないため、モデルは入れず、文字列・数値・日時・nil・配列・ハッシュだけを入れる
   def build_activity_info(event, journals_by_issue, issues_by_id, parent_cache, status_lookup, principal_lookup)
     if event.is_a?(Journal)
       build_from_journal(event, journals_by_issue, issues_by_id, parent_cache, status_lookup, principal_lookup)
@@ -151,7 +225,7 @@ class ActivityInfosController < ApplicationController
       :issue_id => issue.id,
       :journal_id => journal.id,
       :issue => restored,
-      :journal => journal,
+      :journal => journal_values(journal),
       :ticket_tree => ticket_tree
     }
   end
@@ -170,6 +244,25 @@ class ActivityInfosController < ApplicationController
       :journal => nil,
       :ticket_tree => ticket_tree
     }
+  end
+
+  # Journal を、応答に書く値だけのハッシュにする（変更の詳細は、呼んだ人に見えるものだけ）
+  def journal_values(journal)
+    {
+      :id => journal.id,
+      :user => id_name(journal.user),
+      :notes => journal.notes,
+      :created_on => journal.created_on,
+      :private_notes => journal.private_notes,
+      :details => journal.visible_details.map do |detail|
+        { :property => detail.property, :name => detail.prop_key, :old_value => detail.old_value, :new_value => detail.value }
+      end
+    }
+  end
+
+  # モデルを { id, name } のハッシュにする。無ければ nil
+  def id_name(record)
+    record ? { :id => record.id, :name => record.name } : nil
   end
 
   # 活動時点の status_id と assigned_to_id を復元する
@@ -197,15 +290,15 @@ class ActivityInfosController < ApplicationController
     {
       :id => issue.id,
       :subject => issue.subject,
-      :tracker => issue.tracker,
+      :tracker => id_name(issue.tracker),
       :status_id => restored_status_id,
-      :status => restored_status_id ? status_lookup[restored_status_id] : nil,
+      :status => restored_status_id ? { :id => restored_status_id, :name => status_lookup[restored_status_id]&.name } : nil,
       :assigned_to_id => restored_assigned_to_id,
-      :assigned_to => restored_assigned_to_id ? principal_lookup[restored_assigned_to_id] : nil,
-      :project => issue.project,
+      :assigned_to => restored_assigned_to_id ? { :id => restored_assigned_to_id, :name => principal_lookup[restored_assigned_to_id]&.name } : nil,
+      :project => id_name(issue.project),
       :parent_id => issue.parent_id,
-      :priority => issue.priority,
-      :author => issue.author,
+      :priority => id_name(issue.priority),
+      :author => id_name(issue.author),
       :done_ratio => issue.done_ratio,
       :start_date => issue.start_date,
       :due_date => issue.due_date,

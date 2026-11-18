@@ -1,4 +1,13 @@
-api.array :activity_infos do
+# 値はコントローラーで組み立て済み（モデルは入っていない）。ここでは書くだけにする。
+# 組み立てで飛ばした活動があるときだけ、件数と例外の説明を一覧の属性（JSON では同じ階層のキー）に足す。
+# 本体と同じく api_meta を通し、nometa の指定があるときは付けない
+meta = {}
+if @skipped_count.to_i > 0
+  meta[:skipped_count] = @skipped_count
+  meta[:skipped_errors] = @skipped_errors
+end
+
+api.array :activity_infos, api_meta(meta) do
   @activity_infos.each do |info|
     api.activity_info do
       api.activity_datetime info[:activity_datetime]
@@ -11,12 +20,12 @@ api.array :activity_infos do
       api.issue do
         api.id issue[:id]
         api.subject issue[:subject]
-        api.tracker(:id => issue[:tracker].id, :name => issue[:tracker].name) if issue[:tracker]
-        api.status(:id => issue[:status_id], :name => issue[:status]&.name) if issue[:status_id]
-        api.priority(:id => issue[:priority].id, :name => issue[:priority].name) if issue[:priority]
-        api.author(:id => issue[:author].id, :name => issue[:author].name) if issue[:author]
-        api.assigned_to(:id => issue[:assigned_to_id], :name => issue[:assigned_to]&.name) if issue[:assigned_to_id]
-        api.project(:id => issue[:project].id, :name => issue[:project].name) if issue[:project]
+        api.tracker(:id => issue[:tracker][:id], :name => issue[:tracker][:name]) if issue[:tracker]
+        api.status(:id => issue[:status][:id], :name => issue[:status][:name]) if issue[:status]
+        api.priority(:id => issue[:priority][:id], :name => issue[:priority][:name]) if issue[:priority]
+        api.author(:id => issue[:author][:id], :name => issue[:author][:name]) if issue[:author]
+        api.assigned_to(:id => issue[:assigned_to][:id], :name => issue[:assigned_to][:name]) if issue[:assigned_to]
+        api.project(:id => issue[:project][:id], :name => issue[:project][:name]) if issue[:project]
         api.parent(:id => issue[:parent_id]) if issue[:parent_id]
         api.description issue[:description]
         api.start_date issue[:start_date]
@@ -28,16 +37,16 @@ api.array :activity_infos do
 
       # Journal（更新イベントの場合のみ）
       journal = info[:journal]
-      api.journal :id => journal.id do
-        api.user(:id => journal.user_id, :name => journal.user.name) if journal.user
-        api.notes journal.notes
-        api.created_on journal.created_on
-        api.private_notes journal.private_notes
+      api.journal :id => journal[:id] do
+        api.user(:id => journal[:user][:id], :name => journal[:user][:name]) if journal[:user]
+        api.notes journal[:notes]
+        api.created_on journal[:created_on]
+        api.private_notes journal[:private_notes]
         api.array :details do
-          journal.visible_details.each do |detail|
-            api.detail :property => detail.property, :name => detail.prop_key do
-              api.old_value detail.old_value
-              api.new_value detail.value
+          journal[:details].each do |detail|
+            api.detail :property => detail[:property], :name => detail[:name] do
+              api.old_value detail[:old_value]
+              api.new_value detail[:new_value]
             end
           end
         end
@@ -49,12 +58,12 @@ api.array :activity_infos do
           api.issue do
             api.id tree_issue[:id]
             api.subject tree_issue[:subject]
-            api.tracker(:id => tree_issue[:tracker].id, :name => tree_issue[:tracker].name) if tree_issue[:tracker]
-            api.status(:id => tree_issue[:status_id], :name => tree_issue[:status]&.name) if tree_issue[:status_id]
-            api.priority(:id => tree_issue[:priority].id, :name => tree_issue[:priority].name) if tree_issue[:priority]
-            api.author(:id => tree_issue[:author].id, :name => tree_issue[:author].name) if tree_issue[:author]
-            api.assigned_to(:id => tree_issue[:assigned_to_id], :name => tree_issue[:assigned_to]&.name) if tree_issue[:assigned_to_id]
-            api.project(:id => tree_issue[:project].id, :name => tree_issue[:project].name) if tree_issue[:project]
+            api.tracker(:id => tree_issue[:tracker][:id], :name => tree_issue[:tracker][:name]) if tree_issue[:tracker]
+            api.status(:id => tree_issue[:status][:id], :name => tree_issue[:status][:name]) if tree_issue[:status]
+            api.priority(:id => tree_issue[:priority][:id], :name => tree_issue[:priority][:name]) if tree_issue[:priority]
+            api.author(:id => tree_issue[:author][:id], :name => tree_issue[:author][:name]) if tree_issue[:author]
+            api.assigned_to(:id => tree_issue[:assigned_to][:id], :name => tree_issue[:assigned_to][:name]) if tree_issue[:assigned_to]
+            api.project(:id => tree_issue[:project][:id], :name => tree_issue[:project][:name]) if tree_issue[:project]
             api.parent(:id => tree_issue[:parent_id]) if tree_issue[:parent_id]
             api.description tree_issue[:description]
             api.start_date tree_issue[:start_date]
