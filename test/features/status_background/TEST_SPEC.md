@@ -227,7 +227,7 @@ if left.any?
   left.each(&:destroy)
 end
 current = Setting.plugin_redmine_studio_plugin.to_h
-saved = keys.to_h { |k| [k, current.key?(k) ? current[k] : nil] }
+saved = keys.map { |k| [k, current.key?(k) ? current[k] : nil] }.to_h
 sfx = SecureRandom.hex(3)
 closed = IssueStatus.where(is_closed: true).order(:position).first
 pr = Project.new(name: "SB_HTTP_#{sfx}", identifier: "sb-http-#{sfx}", description: saved.to_json)

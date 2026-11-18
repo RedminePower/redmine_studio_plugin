@@ -30,9 +30,9 @@ This plugin provides features for [Redmine Studio](https://www.redmine-power.com
 
 ## Supported Redmine
 
-- V5.x (Tested on V5.1.11)
-- V6.x (Tested on V6.1.1)
-- V7.x (Tested on V7.0.1)
+- V5.x (Tested on V5.0.14 with Ruby 2.5 / 2.6, and V5.1.11 with Ruby 3.2)
+- V6.x (Tested on V6.1.1 with Ruby 3.4)
+- V7.x (Tested on V7.0.1 with Ruby 4.0)
 
 ## Installation
 
