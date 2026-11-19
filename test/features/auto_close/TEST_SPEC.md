@@ -628,13 +628,30 @@ puts ac.valid? # true
 #### [2-E-2] 期限切れトリガーのバリデーション（action_user 必須）
 
 **条件:**
-- ルール: trigger_type=expired, trigger_tracker=バグ, action_user=nil
+- ルール: trigger_type=expired, trigger_tracker=バグ, action_user なし
 
 **手順:**
-1. 期限切れトリガーのルールを action_user なしで作成しようとする
+```ruby
+# 作るときに action_user を渡さなくても、after_initialize で assignee が入る
+# そのため、作ったあとに値を消して確かめる
+ac = AutoClose.new(title: 'Test', trigger_type: 'expired', trigger_tracker: Tracker.sorted.first.id, action_status: IssueStatus.where(is_closed: true).sorted.first.id, action_user: nil)
+puts ac.action_user # assignee
+puts ac.valid? # true
+
+# nil の場合
+ac.action_user = nil
+puts ac.valid? # false
+puts ac.errors[:action_user].any? # true
+
+# 空文字の場合
+ac.action_user = ''
+puts ac.valid? # false
+puts ac.errors[:action_user].any? # true
+```
 
 **期待結果:**
-- バリデーションエラーが発生する
+- 作った直後は action_user が assignee になり、有効
+- action_user を nil・空文字にすると、action_user のバリデーションエラーが発生する
 
 #### [2-E-2a] max_issues_per_run のバリデーション
 
