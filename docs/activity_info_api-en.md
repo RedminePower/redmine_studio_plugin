@@ -162,6 +162,42 @@ Response:
 
 ---
 
+## When Activities Cannot Be Built
+
+If building a single activity raises an exception, only that activity is skipped and the rest are returned (200). Only when something was skipped, the list carries the following values (attributes of `<activity_infos>` in XML, keys at the same level as `activity_infos` in JSON).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `skipped_count` | int | Number of skipped activities |
+| `skipped_errors` | string | Descriptions of the skipped exceptions, "ClassName (file:line)", in order of occurrence, without duplicates, joined with `, ` |
+
+The description does not include the exception message. The location is the first backtrace line inside the plugin (or the first line if there is none).
+
+```json
+{
+  "activity_infos": [ ... ],
+  "skipped_count": 1,
+  "skipped_errors": "NoMethodError (activity_infos_controller.rb:212)"
+}
+```
+
+```xml
+<activity_infos type="array" skipped_count="1" skipped_errors="NoMethodError (activity_infos_controller.rb:212)">
+  ...
+</activity_infos>
+```
+
+In the following cases, 500 is returned. `errors` contains two entries in this order: a guidance message for the user (in the user's language) and the exception description.
+
+- Fetching or bulk-loading the activities fails
+- There is at least one activity and building all of them fails
+- A database exception (`ActiveRecord::StatementInvalid`, `ActiveRecord::ConnectionNotEstablished` and their subclasses) or a timeout (`Timeout::Error`) occurs
+- Rendering the response fails
+
+In every case, the exception and its context (user_id, from, to, activity type and ID) are written to the Redmine log. The backtrace is written only for the first exception of each class per request.
+
+---
+
 ## Error Responses
 
 | Status | Condition |
@@ -169,6 +205,25 @@ Response:
 | 401 | Not authenticated (login required) |
 | 404 | Specified user_id does not exist |
 | 422 | Required parameter (user_id, from, to) is missing |
+| 500 | Activities could not be built (see "When Activities Cannot Be Built" above) |
+
+### 500 Error Example
+
+```json
+{
+  "errors": [
+    "Redmine could not build the activities. Please try again later, and if the problem persists, contact your Redmine administrator (the cause is recorded in the Redmine log).",
+    "NoMethodError (activity_infos_controller.rb:212)"
+  ]
+}
+```
+
+```xml
+<errors type="array">
+  <error>Redmine could not build the activities. ...</error>
+  <error>NoMethodError (activity_infos_controller.rb:212)</error>
+</errors>
+```
 
 ### 422 Error Example
 

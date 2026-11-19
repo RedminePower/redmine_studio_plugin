@@ -960,6 +960,309 @@ end
 
 ---
 
+### [1-14]〜[1-22] の共通コード
+
+[1-14]〜[1-22] は、Redmine の中で API を呼び、その試験の中でだけ組み立ての処理を差し替えて失敗を作る（本番の処理には、試験のための切り替えを入れない）。各試験は、この共通コードのあとに試験の本体を続けて、1 つの `rails runner` で流す（差し替えは、その runner の中だけで効く）。
+
+流し方の注意:
+- 引用符を含むので、`rails runner '{code}'` ではなく、コードをファイルにして `rails runner <ファイル>` で流す
+- ファイルは、プラグインのフォルダの外（例: コンテナの `/tmp`）に置く。プラグインのフォルダの下に置くと、例外の場所として試験のファイルの行が選ばれ、期待と合わなくなる
+- production 環境で流す（クラスを読み直す環境では、差し替えが外れて FAIL になることがある）
+
+```ruby
+# [1-14]〜[1-22] の共通コード（各試験はこのあとに本体を続けて 1 つの rails runner で流す）
+# 試験のデータ：author が 2020-01-07 にチケットを 3 つ作る（活動 3 件）。終わったら消す
+require 'stringio'
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+Project.where('identifier LIKE ?', 'ais-%').each(&:destroy)
+User.where('login LIKE ?', 'ais_author_%').each(&:destroy)
+Role.where('name LIKE ?', 'AIS_%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+pr = Project.new(name: "AIS_#{sfx}", identifier: "ais-#{sfx}", is_public: false)
+pr.enabled_module_names = %w[issue_tracking]
+pr.trackers = [Tracker.first]
+pr.save!
+author = User.new(login: "ais_author_#{sfx}", firstname: 'AIS', lastname: 'author', mail: "ais_author_#{sfx}@example.com", status: 1)
+author.password = author.password_confirmation = 'password123'
+author.save!
+role = Role.create!(name: "AIS_#{sfx}", permissions: [:view_issues, :add_issues], assignable: true)
+Member.create!(principal: author, project: pr, roles: [role])
+issues = %w[a b c].map do |n|
+  Issue.create!(project: pr, tracker: pr.trackers.first, subject: "AIS_#{n}_#{sfx}", author: author,
+                status: IssueStatus.first, priority: IssuePriority.default || IssuePriority.active.first)
+end
+Issue.where(id: issues.map(&:id)).update_all(created_on: Time.utc(2020, 1, 7, 11), updated_on: Time.utc(2020, 1, 7, 11))
+cleanup = -> {
+  User.current = admin
+  Project.find_by(id: pr.id)&.destroy
+  author.destroy if User.exists?(author.id)
+  role.destroy if Role.exists?(role.id)
+}
+# Redmine の中で API を呼ぶ（管理者の API キー）。アプリに直接渡すので、サブディレクトリの下で動く環境でもパスは前に何も付けない
+call = ->(fmt) {
+  s = ActionDispatch::Integration::Session.new(Rails.application)
+  s.get "/activity_infos.#{fmt}?user_id=#{author.id}&from=2020-01-07&to=2020-01-07",
+        headers: { 'X-Redmine-API-Key' => admin.api_key }
+  [s.response.status, s.response.body]
+}
+# この試験の中だけ、組み立てを差し替える（本番の処理には切り替えを入れない）
+fail_on = ->(&blk) {
+  ActivityInfosController.prepend(Module.new do
+    define_method(:build_activity_info) do |event, *rest|
+      instance_exec(event, &blk)
+      super(event, *rest)
+    end
+  end)
+}
+```
+
+---
+
+### [1-14] 活動 1 件の組み立てに失敗すると、その 1 件を飛ばして残りを返す（JSON）
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  fail_on.call { |e| raise NoMethodError, 'AIS test' if e.is_a?(Issue) && e.id == issues[1].id }
+  status, body = call.call('json')
+  j = JSON.parse(body)
+  ids = j['activity_infos'].map { |a| a['issue_id'] }
+  ok = status == 200 && ids.sort == [issues[0].id, issues[2].id].sort && j['skipped_count'] == 1 &&
+       j['skipped_errors'].to_s.match?(/\ANoMethodError \(activity_infos_controller\.rb:\d+\)\z/)
+  puts ok ? 'PASS' : "FAIL: status=#{status} ids=#{ids} skipped_count=#{j['skipped_count']} skipped_errors=#{j['skipped_errors']}"
+ensure
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（200 で、失敗させたチケット b を除く 2 件が返り、`skipped_count` が 1、`skipped_errors` が `NoMethodError (activity_infos_controller.rb:行)`）
+
+---
+
+### [1-15] 活動 1 件の組み立てに失敗すると、その 1 件を飛ばして残りを返す（XML）
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  fail_on.call { |e| raise NoMethodError, 'AIS test' if e.is_a?(Issue) && e.id == issues[1].id }
+  status, body = call.call('xml')
+  doc = Nokogiri::XML(body)
+  root = doc.root
+  ids = doc.xpath('/activity_infos/activity_info/issue_id').map { |n| n.text.to_i }
+  ok = status == 200 && root.name == 'activity_infos' && ids.sort == [issues[0].id, issues[2].id].sort &&
+       root['skipped_count'] == '1' && root['skipped_errors'].to_s.match?(/\ANoMethodError \(activity_infos_controller\.rb:\d+\)\z/)
+  puts ok ? 'PASS' : "FAIL: status=#{status} ids=#{ids} skipped_count=#{root && root['skipped_count']} skipped_errors=#{root && root['skipped_errors']}"
+ensure
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（200 で、2 件が返り、`<activity_infos>` の属性に `skipped_count="1"` と `skipped_errors` が付く）
+
+---
+
+### [1-16] 活動 1 件の組み立ての中で「レコードが無い」が出ても、API 全体を 404 にせず、その 1 件を飛ばす
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  fail_on.call { |e| raise ActiveRecord::RecordNotFound, 'AIS test' if e.is_a?(Issue) && e.id == issues[1].id }
+  status, body = call.call('json')
+  j = JSON.parse(body)
+  ids = (j['activity_infos'] || []).map { |a| a['issue_id'] }
+  ok = status == 200 && ids.sort == [issues[0].id, issues[2].id].sort && j['skipped_count'] == 1 &&
+       j['skipped_errors'].to_s.match?(/\AActiveRecord::RecordNotFound \(activity_infos_controller\.rb:\d+\)\z/)
+  puts ok ? 'PASS' : "FAIL: status=#{status} ids=#{ids} skipped_errors=#{j['skipped_errors']}"
+ensure
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（200 で 2 件が返り、`skipped_errors` が `ActiveRecord::RecordNotFound (…)`）
+
+---
+
+### [1-17] 全件の組み立てに失敗すると、空の一覧ではなく 500 を返し、本文に例外の説明を入れる
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  fail_on.call { |e| raise NoMethodError, 'AIS test' }
+  js, jb = call.call('json')
+  xs, xb = call.call('xml')
+  jerr = (JSON.parse(jb)['errors'] rescue nil)
+  xerr = Nokogiri::XML(xb).xpath('/errors/error').map(&:text)
+  pat = /\ANoMethodError \(activity_infos_controller\.rb:\d+\)\z/
+  ok = js == 500 && jerr.is_a?(Array) && jerr.size == 2 && !jerr[0].to_s.empty? && jerr[1].match?(pat) &&
+       xs == 500 && xerr.size == 2 && !xerr[0].to_s.empty? && xerr[1].match?(pat)
+  puts ok ? 'PASS' : "FAIL: json=#{js} #{jerr.inspect} xml=#{xs} #{xerr.inspect}"
+ensure
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（JSON・XML とも 500 で、`errors` に、利用者への案内の文と `NoMethodError (activity_infos_controller.rb:行)` の 2 つ）
+
+---
+
+### [1-18] 活動の一覧を取る所で失敗すると、500 を返し、本文に例外の説明を入れる
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  Redmine::Activity::Fetcher.prepend(Module.new do
+    def events(*args)
+      raise RuntimeError, 'AIS test'
+    end
+  end)
+  io = StringIO.new
+  old_logger = ActivityInfosController.logger
+  ActivityInfosController.logger = Logger.new(io)
+  js, jb = call.call('json')
+  xs, xb = call.call('xml')
+  jerr = (JSON.parse(jb)['errors'] rescue nil)
+  xerr = Nokogiri::XML(xb).xpath('/errors/error').map(&:text)
+  pat = /\ARuntimeError \(activity_infos_controller\.rb:\d+\)\z/
+  logged = io.string.include?("[ActivityInfos] failed: user_id=#{author.id} from=2020-01-07 to=2020-01-07 RuntimeError: AIS test")
+  ok = js == 500 && jerr.is_a?(Array) && jerr.size == 2 && !jerr[0].to_s.empty? && jerr[1].match?(pat) &&
+       xs == 500 && xerr.size == 2 && !xerr[0].to_s.empty? && xerr[1].match?(pat) && logged
+  puts ok ? 'PASS' : "FAIL: json=#{js} #{jerr.inspect} xml=#{xs} #{xerr.inspect} logged=#{logged}"
+ensure
+  ActivityInfosController.logger = old_logger if old_logger
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（JSON・XML とも 500 で、`errors` に、案内の文と `RuntimeError (activity_infos_controller.rb:行)` の 2 つ。ログに `[ActivityInfos] failed: user_id=… from=… to=… RuntimeError: …` の行がある）
+
+---
+
+### [1-19] 活動 1 件の組み立ての中でデータベースの例外が出たときは、飛ばさずに 500 を返す
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  fail_on.call { |e| raise ActiveRecord::StatementInvalid, 'AIS test' if e.is_a?(Issue) && e.id == issues[1].id }
+  status, body = call.call('json')
+  jerr = (JSON.parse(body)['errors'] rescue nil)
+  ok = status == 500 && jerr.is_a?(Array) && jerr.size == 2 &&
+       jerr[1].match?(/\AActiveRecord::StatementInvalid \(activity_infos_controller\.rb:\d+\)\z/)
+  puts ok ? 'PASS' : "FAIL: status=#{status} errors=#{jerr.inspect}"
+ensure
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（200 で欠けた結果を返さず、500 で `errors` に、案内の文と `ActiveRecord::StatementInvalid (…)` の 2 つ）
+
+---
+
+### [1-20] 書き出しの途中で失敗すると、500 を返し、本文に中の例外の説明を入れる
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  # 書き出しの途中で失敗させる：1 件の親チケット階層を、配列でない値にする
+  target = issues[1].id
+  ActivityInfosController.prepend(Module.new do
+    define_method(:build_activity_info) do |event, *rest|
+      info = super(event, *rest)
+      info[:ticket_tree] = nil if info && info[:issue_id] == target
+      info
+    end
+  end)
+  js, jb = call.call('json')
+  xs, xb = call.call('xml')
+  jerr = (JSON.parse(jb)['errors'] rescue nil)
+  xerr = Nokogiri::XML(xb).xpath('/errors/error').map(&:text)
+  pat = /\ANoMethodError \(index\.api\.rsb:\d+\)\z/
+  ok = js == 500 && jerr.is_a?(Array) && jerr.size == 2 && !jerr[0].to_s.empty? && jerr[1].match?(pat) &&
+       xs == 500 && xerr.size == 2 && !xerr[0].to_s.empty? && xerr[1].match?(pat)
+  puts ok ? 'PASS' : "FAIL: json=#{js} #{jerr.inspect} #{jb[0, 120]} xml=#{xs} #{xerr.inspect}"
+ensure
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（JSON・XML とも 500 で、`errors` に、Rails が包んだ例外ではなく中の `NoMethodError (index.api.rsb:行)` が、案内の文のあとに 1 つ）
+
+---
+
+### [1-21] 飛ばした活動をログに残す（文脈つき。スタックトレースは例外の種類ごとに 1 回）
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  # 2 件を同じ種類の例外で失敗させ、ログを読む
+  fail_ids = [issues[1].id, issues[2].id]
+  fail_on.call { |e| raise NoMethodError, 'AIS test' if e.is_a?(Issue) && fail_ids.include?(e.id) }
+  io = StringIO.new
+  old_logger = ActivityInfosController.logger
+  ActivityInfosController.logger = Logger.new(io)
+  status, body = call.call('json')
+  j = JSON.parse(body)
+  log = io.string
+  ctx = "user_id=#{author.id} from=2020-01-07 to=2020-01-07"
+  has_ctx = fail_ids.all? { |id| log.include?("[ActivityInfos] skipped: #{ctx} Issue##{id} NoMethodError") }
+  # スタックトレースは種類ごとに 1 回だけ（index の行は 1 本のスタックトレースに 1 回だけ出る）
+  traces = log.lines.count { |l| l.include?('activity_infos_controller.rb:') && l.rstrip.end_with?("index'") }
+  # 同じ種類・同じ場所の失敗は、説明を重ねない
+  one_desc = j['skipped_count'] == 2 && j['skipped_errors'].to_s.match?(/\ANoMethodError \(activity_infos_controller\.rb:\d+\)\z/)
+  ok = status == 200 && has_ctx && traces == 1 && one_desc
+  puts ok ? 'PASS' : "FAIL: status=#{status} has_ctx=#{has_ctx} traces=#{traces} skipped=#{j['skipped_count']} #{j['skipped_errors']}\n#{log[0, 600]}"
+ensure
+  ActivityInfosController.logger = old_logger if old_logger
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（失敗させた 2 件とも、`[ActivityInfos] skipped: user_id=… from=… to=… Issue#… NoMethodError` の行があり、スタックトレースは 1 回だけ。応答は `skipped_count` が 2 で、`skipped_errors` は説明 1 つ）
+
+---
+
+### [1-22] 種類の違う例外で 2 件を飛ばすと、説明を 2 つつなぎ、スタックトレースも種類ごとに書く
+
+**確認方法:**（共通コードのあとに続ける）
+```ruby
+begin
+  b, c = issues[1].id, issues[2].id
+  fail_on.call do |e|
+    next unless e.is_a?(Issue)
+    raise NoMethodError, 'AIS test' if e.id == b
+    raise ArgumentError, 'AIS test' if e.id == c
+  end
+  io = StringIO.new
+  old_logger = ActivityInfosController.logger
+  ActivityInfosController.logger = Logger.new(io)
+  status, body = call.call('json')
+  j = JSON.parse(body)
+  descs = j['skipped_errors'].to_s.split(', ')
+  classes = descs.map { |d| d[/\A\S+/] }.sort
+  traces = io.string.lines.count { |l| l.include?('activity_infos_controller.rb:') && l.rstrip.end_with?("index'") }
+  ok = status == 200 && j['activity_infos'].size == 1 && j['skipped_count'] == 2 &&
+       classes == %w[ArgumentError NoMethodError] && descs.all? { |d| d.match?(/ \(activity_infos_controller\.rb:\d+\)\z/) } && traces == 2
+  puts ok ? 'PASS' : "FAIL: status=#{status} skipped=#{j['skipped_count']} errors=#{j['skipped_errors']} traces=#{traces}"
+ensure
+  ActivityInfosController.logger = old_logger if old_logger
+  cleanup.call
+end
+```
+
+**期待結果:**
+- `PASS`（200 で 1 件が返り、`skipped_count` が 2、`skipped_errors` は `NoMethodError (…)` と `ArgumentError (…)` を `, ` でつないだもの。スタックトレースは 2 本）
+
+---
+
 ## 2. HTTP テスト
 
 **実行方法:**
@@ -1328,6 +1631,20 @@ $response.Content -match '<activity_infos'
 
 **期待結果:**
 - レスポンスに `<activity_infos` タグが含まれる
+
+---
+
+### [2-20] 何も飛ばしていないときは、飛ばしたことを表す属性・キーを出さない
+
+**確認方法:**
+```powershell
+$json = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.json?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$xml = Invoke-WebRequest -Uri '{BaseUrl}/activity_infos.xml?user_id={AuthorId}&from=2020-01-07&to=2020-01-07' -Headers @{'X-Redmine-API-Key'='{ApiKey}'}
+$json.StatusCode -eq 200 -and $xml.StatusCode -eq 200 -and $json.Content -notmatch 'skipped_' -and $xml.Content -notmatch 'skipped_'
+```
+
+**期待結果:**
+- `True`（JSON にも XML にも `skipped_count`・`skipped_errors` が無い）
 
 ---
 
