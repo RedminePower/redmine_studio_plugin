@@ -4090,7 +4090,8 @@ $a = @($r.Json.studio_setting_assignments)
 
 設定・履歴・割り当ての返事にある利用者の欄（`created_by`・`updated_by`・`deleted_by`・`changed_by`・`assigned_by`・`user`）は、どれも同じ扱いにする。
 見る人から Redmine で見えない人は `id` だけを返し、`name` を省く。管理者には全員の名前を出す。
-admin が作って更新し、割り当て、消した設定を、admin が見えない vis_limited と、admin が見える vis_member と、admin が読み比べる。
+一時的な管理者が作って更新し、割り当て、消した設定を、その管理者が見えない vis_limited と、見える vis_member と、admin が読み比べる。
+一時的な管理者はどのプロジェクトのメンバーにもしないので、環境の admin がどのプロジェクトに入っていても、vis_limited からは見えない。
 ロック中の人は、管理者でない人からは見えない（Redmine で見えるのは有効な人だけ）。そこで、一時的な利用者に設定を作らせ、ロックする前と後で読み比べる。
 
 **確認方法:**
@@ -4106,23 +4107,26 @@ function Send-As($key, $method, $path, $body = $null) {
 }
 # 利用者の欄が、その人の id で、名前があるか（name）・id だけか（id）・欄が無いか違う人か（missing）
 function Get-Kind($ref, $uid) { if ($ref.id -ne $uid) { 'missing' } elseif ($ref.name) { 'name' } else { 'id' } }
-$AdminUserId = (Send-As $AdminKey GET '/users/current.json').Json.user.id
 $LimitedUserId = (Send-As $LimitedKey GET '/users/current.json').Json.user.id
-# 前提：vis_limited から admin は見えず、vis_member からは見える
-"pre $((Send-As $LimitedKey GET "/users/$AdminUserId.json").Status) $((Send-As $MemberKey GET "/users/$AdminUserId.json").Status)"
+# 一時的な管理者（どのプロジェクトのメンバーでもない）を作り、設定を操作する人にする
+$al = "sshttp_actor_$(Get-Random)"
+$ActorId = (Send-As $AdminKey POST '/users.json' @{ user = @{ login = $al; firstname = 'Actor'; lastname = 'Names'; mail = "$al@example.com"; password = "Pw-$(Get-Random)-x9"; admin = $true } }).Json.user.id
+$ActorKey = (Send-As $AdminKey GET "/users/$ActorId.json").Json.user.api_key
+# 前提：vis_limited から一時的な管理者は見えず、vis_member からは見える
+"pre $((Send-As $LimitedKey GET "/users/$ActorId.json").Status) $((Send-As $MemberKey GET "/users/$ActorId.json").Status)"
 
-# admin が作って更新し（履歴ができる）、vis_member と vis_limited を割り当てる。もう 1 つ作って論理削除する
+# 一時的な管理者が作って更新し（履歴ができる）、vis_member と vis_limited を割り当てる。もう 1 つ作って論理削除する
 $st = "sshttp_names_$(Get-Random)"
 $new = { param($key, $name) (Send-As $key POST '/studio_settings.json' @{ studio_setting = @{ name = $name; schema_type = $st; scope_type = 'global'; payload = '{}'; schema_version = 0 } }).Json.studio_setting }
-$g = & $new $AdminKey 'Names'
-Send-As $AdminKey PUT "/studio_settings/$($g.id).json" @{ studio_setting = @{ payload = '{"a":1}' }; expected_version = $g.version } | Out-Null
-foreach ($u in $MemberId, $LimitedUserId) { Send-As $AdminKey POST "/studio_settings/$($g.id)/users/$u.json" | Out-Null }
-$hver = @((Send-As $AdminKey GET "/studio_settings/$($g.id)/histories.json").Json.studio_setting_histories)[0].version
-$d = & $new $AdminKey 'Names_Deleted'
-Send-As $AdminKey DELETE "/studio_settings/$($d.id).json" | Out-Null
+$g = & $new $ActorKey 'Names'
+Send-As $ActorKey PUT "/studio_settings/$($g.id).json" @{ studio_setting = @{ payload = '{"a":1}' }; expected_version = $g.version } | Out-Null
+foreach ($u in $MemberId, $LimitedUserId) { Send-As $ActorKey POST "/studio_settings/$($g.id)/users/$u.json" | Out-Null }
+$hver = @((Send-As $ActorKey GET "/studio_settings/$($g.id)/histories.json").Json.studio_setting_histories)[0].version
+$d = & $new $ActorKey 'Names_Deleted'
+Send-As $ActorKey DELETE "/studio_settings/$($d.id).json" | Out-Null
 
-# 返事の中の admin の欄を、見る人ごとに並べる（追加・置き換えは、今ある割り当てをそのまま返す依頼にする）
-function Get-AdminRefs($key) {
+# 返事の中の一時的な管理者の欄を、見る人ごとに並べる（追加・置き換えは、今ある割り当てをそのまま返す依頼にする）
+function Get-ActorRefs($key) {
     $show = (Send-As $key GET "/studio_settings/$($g.id).json?include=assignments").Json.studio_setting
     $list = @((Send-As $key GET "/studio_settings.json?schema_type=$st&include=assignments").Json.studio_settings) | Where-Object id -eq $g.id
     $del = (Send-As $key GET "/studio_settings/$($d.id).json").Json.studio_setting
@@ -4142,14 +4146,14 @@ function Get-AdminRefs($key) {
         'users.assigned_by' = $users[0].assigned_by
         'add.assigned_by' = $add.assigned_by; 'replace.assigned_by' = $rep[0].assigned_by
     }
-    ($refs.Keys | ForEach-Object { "$_=$(Get-Kind $refs[$_] $AdminUserId)" }) -join ' '
+    ($refs.Keys | ForEach-Object { "$_=$(Get-Kind $refs[$_] $ActorId)" }) -join ' '
 }
-"limited: $(Get-AdminRefs $LimitedKey)"
-"member: $(Get-AdminRefs $MemberKey)"
-"admin: $(Get-AdminRefs $AdminKey)"
+"limited: $(Get-ActorRefs $LimitedKey)"
+"member: $(Get-ActorRefs $MemberKey)"
+"admin: $(Get-ActorRefs $AdminKey)"
 # 本人の割り当て一覧の assigned_by と、見える相手（user）の名前
 $mine = @((Send-As $LimitedKey GET "/users/$LimitedUserId/studio_settings.json").Json.studio_setting_assignments) | Where-Object setting_id -eq $g.id
-"mine assigned_by=$(Get-Kind $mine.assigned_by $AdminUserId) user=$(Get-Kind $mine.user $LimitedUserId)"
+"mine assigned_by=$(Get-Kind $mine.assigned_by $ActorId) user=$(Get-Kind $mine.user $LimitedUserId)"
 
 # ロック中の人：一時的な利用者に設定を作らせ、ロックする前と後で vis_member と admin が読む
 $tl = "sshttp_tmp_$(Get-Random)"
@@ -4162,17 +4166,17 @@ $after = Get-Kind (Send-As $MemberKey GET "/studio_settings/$($l.id).json").Json
 $byAdmin = Get-Kind (Send-As $AdminKey GET "/studio_settings/$($l.id).json").Json.studio_setting.created_by $tu.id
 "locked before=$before after=$after admin=$byAdmin"
 
-# 後片付け（設定は物理削除、一時的な利用者は削除）
-"cleanup: " + ((@($g.id, $d.id, $l.id | ForEach-Object { (Send-As $AdminKey DELETE "/studio_settings/$_.json?force=1").Status }) + (Send-As $AdminKey DELETE "/users/$($tu.id).json").Status) -join ',')
+# 後片付け（設定は物理削除、一時的な利用者と一時的な管理者は削除）
+"cleanup: " + ((@($g.id, $d.id, $l.id | ForEach-Object { (Send-As $AdminKey DELETE "/studio_settings/$_.json?force=1").Status }) + @($tu.id, $ActorId | ForEach-Object { (Send-As $AdminKey DELETE "/users/$_.json").Status })) -join ',')
 ```
 
 **期待結果:**
-- `pre 404 200`（vis_limited から admin は見えず、vis_member からは見える）
+- `pre 404 200`（vis_limited から一時的な管理者は見えず、vis_member からは見える）
 - `limited:` の 13 項目がすべて `id`（名前を出さない）
 - `member:`・`admin:` の 13 項目がすべて `name`
-- `mine assigned_by=id user=name`（割り当てた admin の名前は出さず、見える相手〔自分〕の名前は出す）
+- `mine assigned_by=id user=name`（割り当てた一時的な管理者の名前は出さず、見える相手〔自分〕の名前は出す）
 - `locked before=name after=id admin=name`（ロックされると、管理者でない人には名前を出さない。管理者には出す）
-- `cleanup: 204,204,204,204`
+- `cleanup: 204,204,204,204,204`
 
 ### [2-23] /users/:id/studio_settings：自分 or admin のみ
 
