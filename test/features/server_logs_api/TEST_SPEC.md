@@ -56,6 +56,7 @@ Thin の環境は、公式イメージに `thin` を足したイメージで、`
 | `production.log.3.gz` | root の持ち物・モード 600 | 並ばない（読めない） |
 | `empty.log` | 空 | 並ぶ（`fingerprint: "0:"`） |
 | `small.log` | `small file\n`（11 バイト） | 並ぶ |
+| `ログ.log` | `日本語\n`（日本語の名前） | 並ぶ・読める |
 | `fake.gz` | gzip でない中身 | 並ぶ（`compressed` を省く） |
 | `production.log.fifo` | `mkfifo` | 並ばない |
 | `production.log.link` | `/etc/passwd` へのシンボリックリンク | 並ばない |
@@ -244,6 +245,36 @@ puts got == names.values ? '[1-9] OK' : "[1-9] NG: #{got.inspect}"
 
 **期待結果:** `SERVER_SOFTWARE` から決まる。gem が読み込まれているだけ（Puma の定数がある）では `puma` にならない
 
+### [1-10] ログフォルダーが無いとき
+
+`config.paths['log']` を無いフォルダーに変えて `path`・`list`・`current_log_file_name` を呼び、元に戻してからもう一度 `path` を呼ぶ（スクリプトの中だけで変え、`ensure` で戻す）。
+
+**期待結果:** 無いときは `nil`・`[]`・`nil`。戻した後は `log` の realpath に決まる（無かったことを覚えたままにしない）
+
+### [1-11] 印のバイト数の上限
+
+```ruby
+dir = Dir.mktmpdir
+File.binwrite(File.join(dir, 'a.log'), 'x' * 10)
+r = LD.send(:with_open, dir, 'a.log') { |f| [LD.same_fingerprint?(f, LD.fingerprint(f)), LD.same_fingerprint?(f, "#{10**12}:"), LD.same_fingerprint?(f, '4097:')] }
+FileUtils.rm_rf(dir)
+puts r == [true, false, false] ? '[1-11] OK' : "[1-11] NG: #{r.inspect}"
+```
+
+**期待結果:** 一覧の印は一致し、4096 を超えるバイト数の印はファイルを読まずに「違う」になる
+
+### [1-12] ロックのファイルが一部だけ開けないとき
+
+`ReadSlots.lock_path` をスクリプトの中で差し替え、枠 0 は開ける場所、枠 1 は無いフォルダーの中にする。続けて `acquire` を 3 回呼ぶ（2 回目は 1 回目を持ったまま、3 回目の前に 1 回目を閉じる）。最後に両方とも開けない場所にして `acquire` を呼ぶ。
+
+**期待結果:** `File`・`:busy`・`File`・`:uncounted`。開けない枠があっても、開けた枠で数え続ける。どの枠も開けないときだけ数えずに読む
+
+### [1-13] Puma.stats からの同時に処理できる数
+
+`::Puma.stats_hash` をスクリプトの中で差し替え、1 つのプロセスの形（`{ max_threads: 5 }`）と、ワーカーが 2 つの形（`worker_status` にそれぞれ `max_threads: 3`）で `AppServerInfo.capacity_from_stats` を呼ぶ。
+
+**期待結果:** 5 と 6
+
 ---
 
 ## 2. HTTP テスト
@@ -261,7 +292,7 @@ $j.server_logs.files | Format-Table name, size, updated_on, fingerprint, compres
 
 **期待結果:**
 - 200。`log_file` が `production.log`
-- 並ぶのは `empty.log`・`fake.gz`・`production.log`・`production.log.1`・`production.log.2.gz`・`small.log` だけ（フェーズ 0 の表の「並ばない」ものは無い）
+- 並ぶのは `ログ.log`・`empty.log`・`fake.gz`・`production.log`・`production.log.1`・`production.log.2.gz`・`small.log` だけ（フェーズ 0 の表の「並ばない」ものは無い）
 - `empty.log` の `fingerprint` が `"0:"`、`size` が 0
 - `production.log.1` の `fingerprint` が `4096:` ＋ `head -c 4096 production.log.1 | sha256sum`
 - `production.log.2.gz` の `fingerprint` が `4096:` ＋ `zcat production.log.2.gz | head -c 4096 | sha256sum`、`compressed` が `true`
@@ -302,6 +333,8 @@ do {
 - gzip なし：`Content-Encoding` が無く、1 回に 1 MB まで。中身が一致する
 - gzip あり：展開した中身が一致する。返った量は `length` 以下
 - 終わりを超える `length` は、ファイルの終わりで切れる（`X-Server-Log-Length` が残りのバイト数）
+- `Accept-Encoding: gzip;q=0, identity` では圧縮しない（`Content-Encoding` が無い）
+- `ログ.log`（`name` は URL エンコードして渡す）が読め、中身が `日本語\n`
 
 ### [2-5] 圧縮されたファイルは圧縮し直さない
 
@@ -338,7 +371,7 @@ $r.Status; ($r.Text | ConvertFrom-Json).fingerprint; Get-Header $r 'X-Server-Log
 
 ### [2-8] 422
 
-`offset` が無い・`-1`・`abc`・`1.5`、`length` が `0`・`-5`、`name` が無い、`fingerprint` が `xyz`。
+`offset` が無い・`-1`・`abc`・`1.5`、`length` が `0`・`-5`、`name` が無い、`fingerprint` が `xyz`・`4097:`・`5000000000:`・`99999999999999999999:`（バイト数が 4096 を超える印で、ファイル全体を読ませない）。
 
 **期待結果:** どれも 422 で `{"errors":[…]}`
 
@@ -368,6 +401,7 @@ $r.Status; ($r.Text | ConvertFrom-Json).fingerprint; Get-Header $r 'X-Server-Log
 - API キーが無い・無効は 401（`WWW-Authenticate` が付く）、管理者でないと 403。どれも本文が `{"errors":[…]}`
 - `.xml` は 404。拡張子なしは 200 で JSON
 - 本体の「認証が必要」（`login_required`）を入れた状態でも、API キーが無いときは 401 の JSON
+- 本体の「REST による Web サービスを有効にする」を切った状態では、管理者の API キーでも 401 の JSON
 
 ### [2-11] 429（同時に 2 つまで）
 
@@ -380,14 +414,14 @@ MSYS_NO_PATHCONV=1 docker exec -u redmine -w /usr/src/redmine {Container} ruby -
 **期待結果:**
 - ロックを 2 つ持っている間：`content.json` は 429、`Retry-After: 2`、本文 `{"errors":[…]}`。`server_logs.json`（一覧）は 200
 - ロックを 1 つだけ持っている間：200
-- 16 MB の読み出しを 8 本同時に送ると、200 と 429 だけが返り、200 が 1 本以上ある（Puma のスレッドどうしでも数えられる）
+- 16 MB の読み出しを 8 本同時に送ると、200 と 429 だけが返り、200 が 1 本以上ある。Puma では 429 も 1 本以上ある（同じプロセスのスレッドどうしでも数えられる）。Thin は 1 本ずつ順に処理するので、すべて 200 でよい
 
 ### [2-12] 読み出しを続けている間も、ほかのリクエストが止まらない
 
 1 本の流れで `content.json` を `offset` を進めながら読み続け、その間に別の流れで `GET /projects.json` を 0.05 秒おきに 40 回送り、かかった時間を測る。読み出しの前にも 10 回測っておく。
 
 **期待結果:**
-- Puma・Thin とも、読み出しの間の `/projects.json` がいちばん長くても 2 秒未満（目安は、読み出し 1 回にかかる時間＋ふだんの時間）
+- Puma・Thin とも、読み出しの間の `/projects.json` がいちばん長くても 1 秒未満（目安は、読み出し 1 回にかかる時間＋ふだんの時間。数十〜百ミリ秒）
 - 測った時間（読み出し 1 回の中央値・最大、`/projects.json` の中央値・最大）を結果に書く
 
 ### [2-13] Info API の追加項目
@@ -399,7 +433,8 @@ MSYS_NO_PATHCONV=1 docker exec -u redmine -w /usr/src/redmine {Container} ruby -
 ```
 
 **期待結果:**
-- 管理者：`app_server.name` が動いているサーバー（`puma` または `thin`）。`capacity` は Puma なら 1 以上の整数、Thin なら `null`。`log_level` が `info`
+- 管理者：`app_server.name` が動いているサーバー（`puma` または `thin`）。`capacity` は Puma なら「ワーカーの数（0 なら 1）× 最大スレッド数」と同じ、Thin なら `null`。`log_level` が `info`
+- Puma の設定を変えて確かめる：1 つの環境で `config/puma.rb` に `workers 2` と `threads 1, 3` を書いて再起動し、`capacity` が 6 になること。`threads 2, 4` だけなら 4。ワーカーを分けたこの状態でも [2-11] を流し、プロセスをまたいで 2 つまでに数えられること（終わったら消して再起動する）
 - 管理者でない：`app_server`・`log_level` の項目そのものが無い（ほかの項目はある）
 - XML でも管理者にだけ `<app_server>`・`<log_level>` が出る
 

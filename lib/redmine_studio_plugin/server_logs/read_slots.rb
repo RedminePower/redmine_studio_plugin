@@ -26,22 +26,37 @@ module RedmineStudioPlugin
         end
       end
 
-      # 取れたロックのファイル・ふさがっていれば :busy・数えられなければ :uncounted
+      # 取れたロックのファイル・ふさがっていれば :busy・どの枠のファイルも開けなければ :uncounted。
+      # 開けない枠は飛ばし、開けた枠だけで数える
       def acquire
+        opened_any = false
+        error = nil
         SLOTS.times do |i|
-          file = File.open(lock_path(i), File::RDWR | File::CREAT, 0o644)
-          begin
-            return file if file.flock(File::LOCK_EX | File::LOCK_NB)
-          rescue StandardError
-            file.close
-            raise
+          file = try_lock(i)
+          case file
+          when File then return file
+          when :busy then opened_any = true
+          else error = file
           end
-          file.close
         end
-        :busy
-      rescue SystemCallError, IOError, NotImplementedError => e
-        warn_once(e)
+        return :busy if opened_any
+
+        warn_once(error)
         :uncounted
+      end
+
+      # 取れたロックのファイル・ふさがっていれば :busy・開けなければその例外
+      def try_lock(index)
+        file = File.open(lock_path(index), File::RDWR | File::CREAT, 0o644)
+        locked = false
+        begin
+          locked = file.flock(File::LOCK_EX | File::LOCK_NB)
+        ensure
+          file.close unless locked
+        end
+        locked ? file : :busy
+      rescue SystemCallError, IOError, NotImplementedError => e
+        e
       end
 
       def lock_path(index)

@@ -30,16 +30,17 @@ module RedmineStudioPlugin
 
       module_function
 
-      # ログフォルダーの実際の場所。無い・決められないときは nil
+      # ログフォルダーの実際の場所。無い・決められないときは nil（次に使うときに決め直す）
       def path
-        return @path if defined?(@path)
+        return @path if @path
 
-        @path = begin
-          File.realpath(File.dirname(Rails.application.config.paths['log'].first))
-        rescue StandardError => e
+        @path = File.realpath(File.dirname(Rails.application.config.paths['log'].first))
+      rescue StandardError => e
+        unless @path_warned
+          @path_warned = true
           Rails.logger.warn "server_logs: log directory is not available: #{e.class} #{e.message}"
-          nil
         end
+        nil
       end
 
       # 今 Redmine のロガーが書いているファイルの名前。ファイルに書いていない・ログフォルダーの外なら nil
@@ -104,9 +105,11 @@ module RedmineStudioPlugin
         format_fingerprint(head)
       end
 
-      # 渡された印が、今のファイルと同じか
+      # 渡された印が、今のファイルと同じか。印の対象は FINGERPRINT_BYTES まで（それより長い印は一覧が返さない）
       def same_fingerprint?(file, expected)
         bytes = expected.split(':', 2).first.to_i
+        return false if bytes > FINGERPRINT_BYTES
+
         head = read_head(file, bytes)
         return false if head.nil? || head.bytesize < bytes
 
@@ -152,24 +155,34 @@ module RedmineStudioPlugin
         Gem.win_platform?
       end
 
-      # 名前のファイルを開き、普通のファイル・ハードリンクが 1 つ・開く前と同じもの、を確かめてから yield する
+      # 名前のファイルを開き、普通のファイル・ハードリンクが 1 つ・開く前と同じもの、を確かめてから yield する。
+      # 開けない・確かめで外れたときは nil。開いた後の読み出しのエラーは、そのまま呼ぶ側へ上げる（404 に化けさせない）
       def with_open(dir, name)
-        file_path = File.join(dir, name)
-        before = File.lstat(file_path)
-        return nil unless before.file? && before.nlink == 1
+        io, st = open_checked(File.join(dir, name))
+        return nil if io.nil?
 
-        io = File.new(file_path, OPEN_FLAGS)
         begin
-          st = io.stat
-          return nil unless st.file? && st.nlink == 1 && same_file?(before, st)
-
           opened = OpenedFile.new(utf8(name), io, st.size, st.mtime, false)
           opened.compressed = gzip?(opened)
           yield opened
         ensure
           io.close
         end
+      end
+
+      # 開いて確かめた [io, stat]。開けない・確かめで外れたときは nil
+      def open_checked(file_path)
+        before = File.lstat(file_path)
+        return nil unless before.file? && before.nlink == 1
+
+        io = File.new(file_path, OPEN_FLAGS)
+        st = io.stat
+        return [io, st] if st.file? && st.nlink == 1 && same_file?(before, st)
+
+        io.close
+        nil
       rescue SystemCallError, IOError
+        io&.close
         nil
       end
 

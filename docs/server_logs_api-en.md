@@ -99,7 +99,7 @@ Returns the given byte range of the given file as it is (a compressed file is re
 | `name` | ○ | Must exactly match a `name` in the list (case-insensitive on Windows servers) |
 | `offset` | ○ | The position to start reading (bytes, an integer of 0 or more) |
 | `length` | | The amount to read (bytes, an integer of 1 or more). 16 MB if omitted. It may be shortened by the limits below |
-| `fingerprint` | | The fingerprint from the list. When given, the fingerprint of the current file is taken again over the same number of bytes and compared. If they differ, 409 is returned. 409 is also returned when the current file is shorter than that number of bytes |
+| `fingerprint` | | The fingerprint from the list (do not pass it when it was `null` in the list). When given, the fingerprint of the current file is taken again over the same number of bytes and compared. If they differ, 409 is returned. 409 is also returned when the current file is shorter than that number of bytes |
 
 ### Limits of one response
 
@@ -113,7 +113,7 @@ The response can be shorter than requested, so read the rest by moving `offset`.
 ### Response (success)
 
 - Status 200. The body is the bytes of the range (`Content-Type: application/octet-stream`)
-- If the request's `Accept-Encoding` contains `gzip` and the file is not compressed, the body is gzip-compressed (`Content-Encoding: gzip`). A compressed file is not compressed again
+- If the request's `Accept-Encoding` contains `gzip` (not with `q=0`) and the file is not compressed, the body is gzip-compressed (`Content-Encoding: gzip`). A compressed file is not compressed again
 - When `offset` is the size of the file or more, 200 with an empty body
 
 | Header | Description |
@@ -132,7 +132,7 @@ The end of the file is reached when `offset + X-Server-Log-Length >= X-Server-Lo
 | 403 | Not a system administrator |
 | 404 | `name` is not in the list (not listed, removed, or outside the log folder). It can be told apart from the 404 of an older plugin without this API by whether the body is JSON |
 | 409 | `fingerprint` differs from the current file. The header `X-Server-Log-Size` has the current size and `fingerprint` in the body has the current fingerprint |
-| 422 | `name` is missing, `offset` or `length` is not an integer, is negative, or (`length`) is 0, or `fingerprint` has a wrong form |
+| 422 | `name` is missing, `offset` or `length` is not an integer, is negative, or (`length`) is 0, or `fingerprint` has a wrong form (including a number of bytes over 4096) |
 | 429 | Two reads are already running. The header `Retry-After: 2` (seconds). Wait that many seconds and try again |
 
 ```json

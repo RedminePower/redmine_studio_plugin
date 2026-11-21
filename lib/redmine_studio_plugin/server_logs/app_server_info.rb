@@ -45,10 +45,16 @@ module RedmineStudioPlugin
         capacity_from_config || capacity_from_stats
       end
 
+      # puma コマンドで起動したときは Puma.cli_config、rails server で起動したときは
+      # Puma.stats の元になる runner が、設定の値（options）を持っている。
+      # ワーカーを分けて動かすときの Puma.stats は、ワーカーの中では起動したときの古い写しなので、設定の値を先に使う
       def capacity_from_config
-        return nil unless defined?(::Puma) && ::Puma.respond_to?(:cli_config) && ::Puma.cli_config
+        return nil unless defined?(::Puma)
 
-        options = ::Puma.cli_config.options
+        options = (::Puma.cli_config.options if ::Puma.respond_to?(:cli_config) && ::Puma.cli_config)
+        options ||= ::Puma.instance_variable_get(:@get_stats)&.instance_variable_get(:@options)
+        return nil if options.nil?
+
         max_threads = options[:max_threads].to_i
         return nil if max_threads <= 0
 

@@ -72,13 +72,30 @@ class ServerLogsController < ApplicationController
     if params.key?(:length) && !params[:length].to_s.match?(LENGTH_FORMAT)
       errors << 'length must be an integer of 1 or more'
     end
-    if params.key?(:fingerprint) && !params[:fingerprint].to_s.match?(FINGERPRINT_FORMAT)
+    if params.key?(:fingerprint) && !valid_fingerprint?(params[:fingerprint])
       errors << 'fingerprint is invalid'
     end
     return render_json_errors(422, *errors) if errors.any?
 
     length = params.key?(:length) ? params[:length].to_i : RedmineStudioPlugin::ServerLogs::RangeReader::DEFAULT_LENGTH
     [params[:offset].to_i, length, params[:fingerprint]]
+  end
+
+  # 一覧が返す形（対象は 4096 バイトまで）だけを受け付ける。大きなバイト数でファイル全体を読ませない
+  def valid_fingerprint?(value)
+    value.is_a?(String) && value.match?(FINGERPRINT_FORMAT) &&
+      value.split(':', 2).first.to_i <= RedmineStudioPlugin::ServerLogs::LogDirectory::FINGERPRINT_BYTES
+  end
+
+  # gzip を受け付けるか（q=0 は断りの意味なので除く）
+  def accept_gzip?
+    request.headers['Accept-Encoding'].to_s.split(',').any? do |part|
+      coding, *opts = part.strip.split(';').map(&:strip)
+      next false unless coding.to_s.casecmp?('gzip') || coding == '*'
+
+      q = opts.find { |o| o.start_with?('q=') }
+      q.nil? || q.delete_prefix('q=').to_f.positive?
+    end
   end
 
   # 開いたファイルから範囲を読んで返す。戻り値は with_slot / open_file に :not_found でないことを伝えるための true
@@ -94,8 +111,7 @@ class ServerLogsController < ApplicationController
       return true
     end
 
-    gzip = request.headers['Accept-Encoding'].to_s.match?(/\bgzip\b/i)
-    result = RedmineStudioPlugin::ServerLogs::RangeReader.read(file, offset, length, gzip: gzip)
+    result = RedmineStudioPlugin::ServerLogs::RangeReader.read(file, offset, length, gzip: accept_gzip?)
 
     response.headers['X-Server-Log-Length'] = result.length.to_s
     if result.gzipped
