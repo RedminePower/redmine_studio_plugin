@@ -26,4 +26,12 @@ api.info do
       end
     end
   end
+
+  if @info.key?(:app_server)
+    api.app_server do
+      api.name @info[:app_server][:name]
+      api.capacity @info[:app_server][:capacity]
+    end
+    api.log_level @info[:log_level]
+  end
 end

@@ -10,6 +10,12 @@ config_path = File.join(plugin_root, 'config', 'integrated_plugins.yml')
 config = YAML.load_file(config_path)
 integrated_plugins = config['integrated_plugins'] || []
 
+# Server Logs API (パッチを当てないので、競合があっても読み込む)
+require_relative 'lib/redmine_studio_plugin/server_logs/log_directory'
+require_relative 'lib/redmine_studio_plugin/server_logs/read_slots'
+require_relative 'lib/redmine_studio_plugin/server_logs/range_reader'
+require_relative 'lib/redmine_studio_plugin/server_logs/app_server_info'
+
 # Check for conflicting plugins (integrated plugins that still exist)
 plugins_dir = Rails.root.join('plugins')
 conflicting_plugins = integrated_plugins.select do |plugin|

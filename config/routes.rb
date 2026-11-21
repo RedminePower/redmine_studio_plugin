@@ -16,6 +16,10 @@ Rails.application.routes.draw do
   # Cache Bundle
   get 'cache_bundle', to: 'cache_bundles#show'
 
+  # Server Logs (JSON only)
+  get 'server_logs', to: 'server_logs#index', defaults: { format: 'json' }, constraints: { format: 'json' }
+  get 'server_logs/content', to: 'server_logs#content', defaults: { format: 'json' }, constraints: { format: 'json' }
+
   # Issues Bulk Write (create/update multiple issues in one request)
   post 'issues/bulk_write', to: 'issues_bulk_write#create'
 

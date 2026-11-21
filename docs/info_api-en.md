@@ -60,10 +60,17 @@ Response:
         "id": "redmine_studio_plugin",
         "version": "1.1.4"
       }
-    ]
+    ],
+    "app_server": {
+      "name": "puma",
+      "capacity": 5
+    },
+    "log_level": "info"
   }
 }
 ```
+
+`app_server` and `log_level` are returned only to system administrators (for other users, the fields are not returned at all).
 
 ---
 
@@ -82,6 +89,8 @@ Response:
 | `text_formatting` | string | Text formatting (textile, common_mark, etc.) |
 | `scm` | array | List of installed SCMs |
 | `plugins` | array | List of installed plugins |
+| `app_server` | object | The running application server (system administrators only) |
+| `log_level` | string / null | The log level (`debug`, `info`, `warn`, `error`, `fatal` or `unknown`). `null` if it cannot be taken (system administrators only). With `warn` or higher, the per-request lines (Started, Completed) are not written to the log |
 
 ### scm Array
 
@@ -98,3 +107,12 @@ Note: Only SCMs with retrievable version information are included
 |-------|------|-------------|
 | `id` | string | Plugin ID |
 | `version` | string | Plugin version |
+
+### app_server (system administrators only)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | `puma`, `passenger`, `thin`, `unicorn`, `webrick` or `unknown`. Decided from the request's `SERVER_SOFTWARE` and constants that exist only when running on that server |
+| `capacity` | integer / null | The number of requests that can be processed at the same time. For Puma, from the settings (number of workers x max threads), or from `Puma.stats` if the settings cannot be read. `null` when unknown (Thin, Passenger, Unicorn, WEBrick, etc.) |
+
+Fields that cannot be taken are `null`; `/info` itself does not fail.
