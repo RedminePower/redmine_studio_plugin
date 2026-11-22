@@ -41,7 +41,9 @@ HTTP テストは PowerShell 7 以上で流す（`-SkipHttpErrorCheck` など、
 
 ### 対象の Redmine と Ruby
 
-本テストは Redmine **5.x / 6.x / 7.x** の 3 メジャーバージョンで実施する。加えて、**5.x は、対応するいちばん古い Ruby（`CONTRIBUTING.md`「対応する Ruby」。今は Redmine 5.0 が動く Ruby 2.5）で動かした Redmine でも流す**。Redmine の公式の Docker イメージは新しい Ruby で動くため、5.x の環境だけでは、古い Ruby でだけ起きる不具合（新しい Ruby で増えたメソッドを呼んで落ちるなど）に気づけない。リリースの前の定型テストでは、この環境を `5.x-oldest-ruby` として、ほかの 3 つと並べて記録する。
+本テストは Redmine **5.x / 6.x / 7.x** の 3 メジャーバージョンで実施する。加えて、**5.x は、対応するいちばん古い Ruby（`CONTRIBUTING.md`「対応する Ruby」。今は Redmine 5.0 が動く Ruby 2.5）で動かした Redmine でも流す**。Redmine の公式の Docker イメージは新しい Ruby で動くため、5.x の環境だけでは、古い Ruby でだけ起きる不具合（新しい Ruby で増えたメソッドを呼んで落ちるなど）に気づけない。リリースの前の定型テストでは、この環境を `5.x-oldest-ruby` として、`5.x`・`6.x`・`7.x` と並べて記録する。
+
+この環境は公式のイメージには無いので、公式の Redmine 5.0 のイメージから Redmine の中身を写し、いちばん古い Ruby の公式イメージの上で gem を入れ直して作る（古い Ruby で入らない gem は、`Gemfile.local` で版を固定する）。本物の cron での自動クローズの確かめと、Puma・Thin の両方での確かめは、この環境では省き、`5.x` で行う。
 
 | 環境の名前 | Redmine | Ruby |
 |---|---|---|

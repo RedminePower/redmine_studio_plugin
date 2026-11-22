@@ -2,7 +2,7 @@
 # 公式の Ruby のイメージで .github/scripts/oldest_ruby_check.rb を動かす。検査の中身はスクリプトの先頭を参照。
 #
 # 手元での確認（Docker）:
-#   git ls-files > .files.txt
+#   git -c core.quotePath=false ls-files > .files.txt
 #   docker run --rm -v "$PWD:/src" -w /src ruby:2.5 ruby .github/scripts/oldest_ruby_check.rb --files-from .files.txt
 name: Oldest Ruby
 
@@ -25,7 +25,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: List files
-        run: git ls-files > "$RUNNER_TEMP/files.txt"
+        # quotePath=false: names with non-ASCII letters are listed as they are (not quoted), so they are checked too
+        run: git -c core.quotePath=false ls-files > "$RUNNER_TEMP/files.txt"
 
       - name: Self-test
         run: docker run --rm -v "$PWD:/src" -w /src "ruby:$OLDEST_RUBY" ruby .github/scripts/oldest_ruby_check.rb --self-test

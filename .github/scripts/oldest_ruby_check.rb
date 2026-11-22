@@ -6,9 +6,14 @@
 #   ruby .github/scripts/oldest_ruby_check.rb            # check the files tracked by git
 #   ruby .github/scripts/oldest_ruby_check.rb --self-test
 #
-# 1. Syntax: every Ruby file is compiled by this Ruby. Newer syntax (numbered block parameters, endless ranges, ...) fails here.
-# 2. Methods: newer core methods compile fine and only fail when they are called, so their calls are searched for.
-#    A line can opt out with the comment "oldest-ruby-ok" (e.g. when the receiver is our own object that defines the method).
+# 1. Syntax: every Ruby file is compiled by this Ruby. Newer syntax (endless ranges, pattern matching, ...) fails here.
+# 2. Calls: some newer things compile fine and only fail when they run, so they are searched for in the tokens:
+#    newer core methods (NEWER_METHODS), numbered block parameters (_1, 2.7), to_h with a block (2.6),
+#    and Integer(..., exception:) and friends (2.6).
+#    A line can opt out with the comment "oldest-ruby-ok" (e.g. when the receiver is our own object, or a Set, that defines the method).
+#    In an ERB template, put <%# oldest-ruby-ok %> on the same line.
+# Not found: methods that only got new arguments (e.g. Hash#merge with two or more hashes, 2.6). The release test on the
+# oldest Ruby covers them (test/README.md).
 
 require 'ripper'
 require 'open3'
@@ -27,6 +32,7 @@ module OldestRubyCheck
     'tally' => '2.7 (Enumerable#tally; use group_by + count)',
     'intersection' => '2.7 (Array#intersection; use &)',
     'produce' => '2.7 (Enumerator.produce)',
+    'bind_call' => '2.7 (UnboundMethod#bind_call; use bind(obj).call)',
     'intersect?' => '3.1 (Array#intersect?; use (a & b).any?)'
   }.freeze
 
@@ -57,13 +63,15 @@ module OldestRubyCheck
     [Problem.new(file, line, "syntax error on Ruby #{RUBY_VERSION}: #{e.message.lines.first.to_s.strip}")]
   end
 
-  # Finds ".name" / "&.name" calls of the newer methods, and Integer(..., exception: ...) calls.
-  def method_problems(file, source, line_offset = 0)
+  # Finds the newer calls in the tokens. opt_lines are the lines checked for the opt-out comment (the template's own lines for ERB).
+  def method_problems(file, source, opt_lines = nil, line_offset = 0)
     tokens = Ripper.lex(source)
-    lines = source.lines
+    lines = opt_lines || source.lines
     problems = []
     tokens.each_with_index do |((line, _col), type, text), i|
-      if %i[on_period on_op].include?(type) && ['.', '&.'].include?(text)
+      if type == :on_ident && text =~ /\A_[1-9]\z/ && !(tokens[i - 1] && ['.', '&.', 'def'].include?(tokens[i - 1][2]))
+        problems << Problem.new(file, line + line_offset, "numbered block parameter #{text} is not in Ruby 2.5 (added in 2.7; name the parameter)") unless opted_out?(lines, line)
+      elsif %i[on_period on_op].include?(type) && ['.', '&.'].include?(text)
         # the name may be on the next line when the line ends with "."
         j = i + 1
         j += 1 while tokens[j] && %i[on_sp on_ignored_nl on_nl on_comment].include?(tokens[j][1])
@@ -73,6 +81,14 @@ module OldestRubyCheck
         name = name_token[2]
         mark = tokens[j + 1]
         name += mark[2] if mark && %w[? !].include?(mark[2]) && mark[0] == [name_token[0][0], name_token[0][1] + name.length]
+        if name == 'to_h'
+          k = j + 1
+          k += 1 while tokens[k] && tokens[k][1] == :on_sp
+          if tokens[k] && (tokens[k][1] == :on_lbrace || (tokens[k][1] == :on_kw && tokens[k][2] == 'do'))
+            problems << Problem.new(file, line + line_offset, 'to_h with a block is not in Ruby 2.5 (added in 2.6; use map { ... }.to_h)') unless opted_out?(lines, line)
+          end
+          next
+        end
         next unless NEWER_METHODS.key?(name)
 
         problems << Problem.new(file, line + line_offset, "#{name} is not in Ruby 2.5 (added in #{NEWER_METHODS[name]})") unless opted_out?(lines, line)
@@ -106,7 +122,7 @@ module OldestRubyCheck
 
   def check_file(file, source)
     if erb_file?(file)
-      method_problems(file, erb_ruby(source))
+      method_problems(file, erb_ruby(source), source.lines)
     else
       syntax_problems(file, source) + method_problems(file, source)
     end
@@ -142,22 +158,29 @@ module OldestRubyCheck
       'Integer(s, exception: false)' => 1,
       'Integer(s)' => 0,
       'foo(Integer(s), exception: false)' => 0,
-      'def filter_map; end' => 0
+      'def filter_map; end' => 0,
+      'list.each { p _1 }' => 1,
+      'x._1 + y' => 0,
+      'list.map { |x| [x.id, x] }.to_h' => 0,
+      'list.to_h { |x| [x.id, x] }' => 1,
+      "list.to_h do |x|\n  [x.id, x]\nend" => 1,
+      'list.to_h' => 0
     }
     failures = cases.reject { |src, n| method_problems('t.rb', src).size == n }
     failures.each { |src, n| puts "self-test: expected #{n} problem(s) for #{src.inspect}, got #{method_problems('t.rb', src).size}" }
 
-    erb = "<% list.each do |x| %>\n<%= x.name %>\n<%# x.tally %>\n<%= list.filter_map(&:id).size %>\n<% end %>\n"
-    erb_lines = method_problems('t.erb', erb_ruby(erb)).map(&:line)
+    erb = "<% list.each do |x| %>\n<%= x.name %>\n<%# x.tally %>\n<%= list.filter_map(&:id).size %>\n" \
+          "<%= list.tally.size %><%# oldest-ruby-ok %>\n<% end %>\n"
+    erb_lines = check_file('t.erb', erb).map(&:line)
     unless erb_lines == [4]
       failures[:erb] = 1
-      puts "self-test: expected an ERB problem on line 4, got #{erb_lines.inspect}"
+      puts "self-test: expected an ERB problem on line 4 only, got #{erb_lines.inspect}"
     end
 
-    syntax = syntax_problems('t.rb', "[1, 2].each { p _1 }\n(1..).each { break }\n")
-    if RUBY_VERSION < '2.7' && syntax.empty?
+    # endless ranges are new syntax in 2.6, so the oldest Ruby (2.5) rejects them when compiling
+    if RUBY_VERSION < '2.6' && syntax_problems('t.rb', "(1..).each { break }\n").empty?
       failures[:syntax] = 1
-      puts 'self-test: expected a syntax problem for numbered parameters'
+      puts 'self-test: expected a syntax problem for an endless range'
     end
 
     puts "self-test: #{failures.empty? ? 'OK' : "#{failures.size} failure(s)"}"
