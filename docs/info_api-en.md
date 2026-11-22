@@ -70,7 +70,7 @@ Response:
 }
 ```
 
-`app_server` and `log_level` are returned only to system administrators (for other users, the fields are not returned at all).
+`app_server` and `log_level` are returned only to system administrators (for other users, the fields are not returned at all). With a browser sign-in token, as with the Server Logs API, they are returned only for tokens of the Redmine Studio sign-in application and only if the user is a system administrator in the user settings.
 
 ---
 

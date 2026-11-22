@@ -15,6 +15,7 @@ require_relative 'lib/redmine_studio_plugin/server_logs/log_directory'
 require_relative 'lib/redmine_studio_plugin/server_logs/read_slots'
 require_relative 'lib/redmine_studio_plugin/server_logs/range_reader'
 require_relative 'lib/redmine_studio_plugin/server_logs/app_server_info'
+require_relative 'lib/redmine_studio_plugin/server_logs/admin_access'
 
 # Check for conflicting plugins (integrated plugins that still exist)
 plugins_dir = Rails.root.join('plugins')

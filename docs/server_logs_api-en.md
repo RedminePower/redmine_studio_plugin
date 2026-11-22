@@ -15,7 +15,7 @@ Only JSON is supported (no XML).
 
 ## Permissions
 
-Only system administrators can use this API.
+Only system administrators can use this API. When the request comes with a browser sign-in token (OAuth), Redmine itself does not treat the user as an administrator (the token has no `admin` scope); only for tokens issued to the Redmine Studio sign-in application, the API is available if the user is a system administrator in the user settings. Tokens of other applications cannot use it.
 
 | Status | When |
 |--------|------|

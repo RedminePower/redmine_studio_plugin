@@ -459,6 +459,45 @@ MSYS_NO_PATHCONV=1 docker exec {Container} bash -c 'cd /usr/src/redmine/tmp && f
 
 **期待結果:** `content.json` は 200 で読める（数えずに読む）。`production.log` に `server_logs: concurrent read limit is disabled` の警告が 1 回だけ出る。終わったらロックのファイルを消す
 
+### [2-16] ブラウザでサインインした鍵（6.x・7.x のみ）
+
+サインインの鍵（OAuth のアクセストークン）には、権限範囲に `admin` が無い。Redmine は、この鍵で来たシステム管理者を `User#admin?` で管理者として扱わない。ログの API と `/info` の追加項目は、Redmine Studio のサインイン用アプリが発行した鍵に限り、ユーザーの設定（admin の列）で判定する（`RedmineStudioPlugin::ServerLogs::AdminAccess`）。サインインは Redmine 6.1 からなので、5.x では流さない。
+
+Runner で鍵を 3 つ作り、コンテナの中のファイルに書く（チャットや結果には鍵を書かない）。
+
+```ruby
+admin = User.find_by_login('{Username}')
+user = User.find({UserId})
+studio = RedmineStudioPlugin::OauthClient::AppRegistrar.registered_application
+other = Doorkeeper::Application.find_by(name: 'Other App') ||
+        Doorkeeper::Application.create!(name: 'Other App', redirect_uri: 'http://127.0.0.1/', scopes: 'view_issues', confidential: false)
+mk = ->(app, owner, scopes) { t = Doorkeeper::AccessToken.create!(application_id: app.id, resource_owner_id: owner.id, scopes: scopes, expires_in: 3600); t.plaintext_token || t.token }
+File.write('/tmp/server_logs_tokens.json', { studio_admin: mk.(studio, admin, studio.scopes.to_s), other_admin: mk.(other, admin, 'view_issues'),
+                                             studio_user: mk.(studio, user, studio.scopes.to_s) }.to_json)
+```
+
+```powershell
+$t = docker exec {Container} cat /tmp/server_logs_tokens.json | ConvertFrom-Json
+foreach ($k in 'studio_admin', 'other_admin', 'studio_user') {
+  $h = @{ Authorization = "Bearer $($t.$k)" }
+  $logs = (Invoke-WebRequest '{BaseUrl}/server_logs.json' -Headers $h -SkipHttpErrorCheck).StatusCode
+  $info = (Invoke-WebRequest '{BaseUrl}/info.json' -Headers $h -SkipHttpErrorCheck).Content | ConvertFrom-Json
+  $me = (Invoke-WebRequest '{BaseUrl}/users/current.json' -Headers $h -SkipHttpErrorCheck).Content | ConvertFrom-Json
+  "$k logs=$logs app_server=$([bool]$info.info.app_server) me.admin=$($me.user.admin)"
+}
+```
+
+**期待結果:**
+
+| 鍵 | `server_logs.json` | `/info` の `app_server`・`log_level` | `/users/current` の `admin` |
+|---|---|---|---|
+| Studio のサインイン用アプリ・システム管理者 | 200（`content.json` も 200） | ある | false（Redmine 本体の扱いのまま） |
+| ほかのアプリ・システム管理者 | 403 | 無い | false |
+| Studio のサインイン用アプリ・管理者でない | 403 | 無い | false |
+
+- API キーで来たときは、[2-10]・[2-13] と同じ（管理者は 200、管理者でないと 403）
+- 終わったら、作った鍵と `Other App` を消し、`/tmp/server_logs_tokens.json` を消す
+
 ---
 
 ## テスト実行方法
