@@ -1,0 +1,34 @@
+# プラグインの Ruby のコードが、対応するいちばん古い Ruby でも動く書き方かを検査する（CONTRIBUTING.md「対応する Ruby」）。
+# 公式の Ruby のイメージで .github/scripts/oldest_ruby_check.rb を動かす。検査の中身はスクリプトの先頭を参照。
+#
+# 手元での確認（Docker）:
+#   git ls-files > .files.txt
+#   docker run --rm -v "$PWD:/src" -w /src ruby:2.5 ruby .github/scripts/oldest_ruby_check.rb --files-from .files.txt
+name: Oldest Ruby
+
+on:
+  push:
+    branches: [master, 'v*_dev']
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # 対応するいちばん古い Ruby（README の「対応 Redmine」のうち、いちばん古い Redmine が動く Ruby）
+      OLDEST_RUBY: '2.5'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List files
+        run: git ls-files > "$RUNNER_TEMP/files.txt"
+
+      - name: Self-test
+        run: docker run --rm -v "$PWD:/src" -w /src "ruby:$OLDEST_RUBY" ruby .github/scripts/oldest_ruby_check.rb --self-test
+
+      - name: Check
+        run: docker run --rm -v "$PWD:/src" -v "$RUNNER_TEMP:/list" -w /src "ruby:$OLDEST_RUBY" ruby .github/scripts/oldest_ruby_check.rb --files-from /list/files.txt
