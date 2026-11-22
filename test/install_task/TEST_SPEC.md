@@ -43,6 +43,7 @@ DB マイグレーションと cron 登録のテストは `features/auto_close/T
 |------|-------------|
 | 設定移行あり | `redmine_subtask_list_accordion: Migrated N setting(s): key1, key2` |
 | 設定移行なし | `redmine_subtask_list_accordion: No settings to migrate (not installed or no settings).` |
+| 設定が空・読めない | `redmine_subtask_list_accordion: No settings to migrate (empty settings).` |
 | 設定移行済み | `redmine_subtask_list_accordion: Settings already migrated or using defaults.` |
 | プラグイン削除時 | `Removing {plugin}...` → `{plugin} removed.` |
 | プラグインなし | `{plugin} not found (already removed or not installed).` |
@@ -119,9 +120,9 @@ crontab は Redmine が動いている機械で `crontab -l` を流して控え�
 
 **期待結果:** `Phase 0 done` が出る（PowerShell は止まらずに終わる）。統合済みプラグインのフォルダが plugins の中に 1 つも無い（もともと無ければ何も移さない）。移せなかったときは `FAILED` などで止まるので、先へ進まない
 
-### フェーズ 1: Runner テスト（[1-1]・[1-2]・[2-1]〜[2-8]）
+### フェーズ 1: Runner テスト（[1-1]・[1-2]・[2-1]〜[2-10]）
 
-[1-1]・[1-2]・[2-1]〜[2-8] を順に並べた 1 本の Ruby スクリプトを作り、先頭に「Runner スクリプトの共通部分」を置く。リポジトリにスクリプトは置かない（この仕様書から作る）。
+[1-1]・[1-2]・[2-1]〜[2-10] を順に並べた 1 本の Ruby スクリプトを作り、先頭に「Runner スクリプトの共通部分」を置く。リポジトリにスクリプトは置かない（この仕様書から作る）。
 
 スクリプトはファイルにしてコンテナにコピーして流す。`rails runner '...'` にコードを直接渡すと、`!` や引用符の扱いで壊れやすい。
 
@@ -556,6 +557,72 @@ puts "[2-7] expand_all: #{new_settings['subtask_list_accordion_expand_all'] == t
 
 ---
 
+### [2-9] subtask_list_accordion: 設定として読めない値の場合 → エラーにならずスキップ
+
+**事前条件:**
+- `Setting` テーブルに、YAML としては読めるが設定（ハッシュ）にならない値、または値の変換に失敗する YAML が直接格納されている
+
+**確認方法:**
+```ruby
+{ 'text' => 'just text', 'array' => "- a
+- b", 'bad value' => 'expand_all: !!float abc' }.each do |label, text|
+  write_legacy_setting(text)
+  begin
+    output = run_install
+    puts "[2-9] #{label}: No exception raised: true"
+    puts "[2-9] #{label}: empty settings: #{output.include?('No settings to migrate (empty settings)')}"
+  rescue => e
+    puts "[2-9] #{label}: No exception raised: false (#{e.message})"
+  end
+end
+```
+
+**期待結果:**
+- 出力がすべて `true`（3 つとも例外が発生せず、出力に `No settings to migrate (empty settings)` が含まれる）
+
+---
+
+### [2-10] subtask_list_accordion: 設定画面から保存した形の場合 → 移行される
+
+**背景:**
+Redmine のプラグイン設定画面から保存した値は、`ActiveSupport::HashWithIndifferentAccess` として DB に入る（YAML の先頭に `!ruby/hash:ActiveSupport::HashWithIndifferentAccess` が付き、値は `'true'` などの文字列になる）。
+
+**事前条件:**
+- DB に、設定画面から保存した形の旧プラグインの設定値が存在する
+
+**確認方法:**
+```ruby
+legacy_settings = {
+  'enable_server_scripting_mode' => 'false',
+  'expand_all' => 'true',
+  'collapsed_trackers' => 'test',
+  'collapsed_tracker_ids' => ['1', '2']
+}.with_indifferent_access
+write_legacy_setting(legacy_settings.to_yaml)
+puts "[2-10] saved as HashWithIndifferentAccess: #{Setting.find_by(name: 'plugin_redmine_subtask_list_accordion')[:value].include?('HashWithIndifferentAccess')}"
+
+# 新設定から対象キーを削除（移行をテストするため）
+new_settings = (Setting.plugin_redmine_studio_plugin || {}).dup
+SUBTASK_KEYS.each { |key| new_settings.delete(key) }
+Setting.plugin_redmine_studio_plugin = new_settings
+
+# タスク実行
+output = run_install
+
+# 確認
+new_settings = Setting.plugin_redmine_studio_plugin
+puts "[2-10] enable_server_scripting_mode: #{new_settings['subtask_list_accordion_enable_server_scripting_mode'] == 'false'}"
+puts "[2-10] expand_all: #{new_settings['subtask_list_accordion_expand_all'] == 'true'}"
+puts "[2-10] collapsed_trackers: #{new_settings['subtask_list_accordion_collapsed_trackers'] == 'test'}"
+puts "[2-10] collapsed_tracker_ids: #{new_settings['subtask_list_accordion_collapsed_tracker_ids'] == ['1', '2']}"
+puts "[2-10] Migrated 4: #{output.include?('Migrated 4 setting(s)')}"
+```
+
+**期待結果:**
+- 出力がすべて `true`（設定画面から保存した形でも、各設定値が移行され、出力に `Migrated 4 setting(s)` が含まれる）
+
+---
+
 ### [2-8] 後処理: テスト前の設定に戻す
 
 「Runner スクリプトの共通部分」で控えた値に戻す。
@@ -601,6 +668,6 @@ Rake タスクは一度実行すると「実行済み」としてマークされ
 Claude が TEST_SPEC.md の仕様に基づいて以下の順序でテストを実行する:
 
 1. フェーズ 0: 統合済みプラグインのフォルダを plugins の外へ移し、crontab を控える
-2. フェーズ 1: Runner スクリプト（共通部分＋[1-1]・[1-2]・[2-1]〜[2-8]）を流す
+2. フェーズ 1: Runner スクリプト（共通部分＋[1-1]・[1-2]・[2-1]〜[2-10]）を流す
 3. フェーズ 2: ログの確認（[1-3]）
 4. フェーズ 3: 移したフォルダを戻し、crontab が控えと同じことを確かめる
