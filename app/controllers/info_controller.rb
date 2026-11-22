@@ -16,7 +16,7 @@ class InfoController < ApplicationController
   private
 
   def gather_info
-    {
+    info = {
       redmine_version: Redmine::VERSION.to_s,
       ruby_version: "#{RUBY_VERSION}-p#{RUBY_PATCHLEVEL} (#{RUBY_RELEASE_DATE}) [#{RUBY_PLATFORM}]",
       rails_version: Rails::VERSION::STRING,
@@ -29,6 +29,12 @@ class InfoController < ApplicationController
       scm: gather_scm_info,
       plugins: gather_plugins_info
     }
+    # サーバーの種類・同時に処理できる数・ログのレベルは、システム管理者のときだけ返す
+    if User.current.admin?
+      info[:app_server] = RedmineStudioPlugin::ServerLogs::AppServerInfo.app_server(request&.env || {})
+      info[:log_level] = RedmineStudioPlugin::ServerLogs::AppServerInfo.log_level
+    end
+    info
   end
 
   def gather_scm_info

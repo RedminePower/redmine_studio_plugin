@@ -25,6 +25,7 @@
 | `features/oauth_client_api/TEST_SPEC.md` | OAuth クライアント情報 API・ブラウザサインイン支援（前段 Basic ゲート下のトークン取得パッチ含む）テスト |
 | `features/status_background/TEST_SPEC.md` | Status Background（ステータスによるチケットの背景色）テスト |
 | `features/time_entry_summaries/TEST_SPEC.md` | Time Entry Summaries API（作業時間の要約）テスト |
+| `features/server_logs_api/TEST_SPEC.md` | Server Logs API（ログのファイルの一覧・範囲のバイト）と Info API の追加項目テスト |
 
 ## テストの種類
 
@@ -161,3 +162,4 @@ Claude に以下のように依頼してください:
 - `cache_bundle のテストを実行してください`
 - `oauth_client_api のテストを実行してください`
 - `time_entry_summaries のテストを実行してください`
+- `server_logs_api のテストを実行してください`
