@@ -30,7 +30,8 @@ class InfoController < ApplicationController
       plugins: gather_plugins_info
     }
     # サーバーの種類・同時に処理できる数・ログのレベルは、システム管理者のときだけ返す
-    if User.current.admin?
+    # （Redmine Studio のサインインの鍵で来たシステム管理者も含む。AdminAccess）
+    if RedmineStudioPlugin::ServerLogs::AdminAccess.allowed?(User.current, request)
       info[:app_server] = RedmineStudioPlugin::ServerLogs::AppServerInfo.app_server(request&.env || {})
       info[:log_level] = RedmineStudioPlugin::ServerLogs::AppServerInfo.log_level
     end

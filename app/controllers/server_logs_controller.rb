@@ -60,7 +60,7 @@ class ServerLogsController < ApplicationController
     if !User.current.logged?
       response.headers['WWW-Authenticate'] = 'Basic realm="Redmine API"'
       render_json_errors(401, 'authentication required')
-    elsif !User.current.admin?
+    elsif !RedmineStudioPlugin::ServerLogs::AdminAccess.allowed?(User.current, request)
       render_json_errors(403, 'administrator required')
     end
   end
