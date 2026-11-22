@@ -62,7 +62,7 @@ module RedmineStudioPlugin
         dir = path
         return [] if dir.nil?
 
-        children_of(dir).sort.filter_map do |name|
+        children_of(dir).sort.map do |name|
           next unless valid_name?(name)
 
           with_open(dir, name) do |file|
@@ -75,7 +75,7 @@ module RedmineStudioPlugin
             entry[:compressed] = true if file.compressed
             entry
           end
-        end
+        end.compact
       end
 
       # 一覧に並ぶ名前のうち、name に一致するもの（Windows では大文字・小文字を区別しない）。無ければ nil
@@ -227,7 +227,7 @@ module RedmineStudioPlugin
       def logger_file_paths
         loggers = [Rails.logger]
         loggers += Rails.logger.broadcasts if Rails.logger.respond_to?(:broadcasts)
-        loggers.filter_map do |logger|
+        loggers.map do |logger|
           logdev = logger.instance_variable_get(:@logdev)
           next if logdev.nil?
 
@@ -236,7 +236,7 @@ module RedmineStudioPlugin
           elsif logdev.respond_to?(:dev) && logdev.dev.is_a?(File)
             logdev.dev.path
           end
-        end
+        end.compact
       end
     end
   end
