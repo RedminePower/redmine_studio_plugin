@@ -495,7 +495,9 @@ foreach ($k in 'studio_admin', 'other_admin', 'studio_user') {
 | ほかのアプリ・システム管理者 | 403 | 無い | false |
 | Studio のサインイン用アプリ・管理者でない | 403 | 無い | false |
 
-- API キーで来たときは、[2-10]・[2-13] と同じ（管理者は 200、管理者でないと 403）
+- Studio のサインイン用アプリ・システム管理者の鍵で `GET {BaseUrl}/cache_bundle.json` を呼ぶと、`users` の自分の行に `admin: true` がある（アプリはこの値で、サインインのシステム管理者に左の一覧のサーバー診断を出す）
+- 期限を過ぎた鍵・取り消した鍵は、Redmine 本体が先に断る（401）。ログの API の 403 にはならない
+- API キーで来たときは、[2-10]・[2-13] と同じ（管理者は 200 で `/info` に `app_server`・`log_level` がある、管理者でないと 403）
 - 終わったら、作った鍵と `Other App` を消し、`/tmp/server_logs_tokens.json` を消す
 
 ---
