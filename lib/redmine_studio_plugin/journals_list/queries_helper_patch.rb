@@ -56,11 +56,12 @@ module RedmineStudioPlugin
         # ヘッダー行の各セル
         note_link = link_to(note_number.to_s, issue_path(issue, anchor: "note-#{note_number}"))
         author_name = journal.user ? journal.user.name : '?'
-        author_link = journal.user ? link_to(author_name, user_path(journal.user)) : '?'
+        # 書いた人・担当者のリンクは本体と同じ作り方にする（グループはグループのページ。ロック中のユーザーは管理者にだけリンク）
+        author_link = journal.user ? link_to_user(journal.user) : '?'
         date_str = format_time(journal.created_on)
         date_sort_key = journal.created_on.strftime('%Y-%m-%d %H:%M:%S')
         status_name = journal.instance_variable_get(:@cumulative_status_name) || ''
-        assigned_to_id = journal.instance_variable_get(:@cumulative_assigned_to_id)
+        assigned_to = journal.instance_variable_get(:@cumulative_assigned_to)
         assigned_to_name = journal.instance_variable_get(:@cumulative_assigned_to_name) || ''
         first_line = journal.notes.to_s.split(/\r?\n/).reject(&:blank?).first.to_s.truncate(100)
 
@@ -92,7 +93,7 @@ module RedmineStudioPlugin
           content_tag(:td, author_link, class: 'jl-author') +
           content_tag(:td, date_str, class: 'jl-date') +
           content_tag(:td, h(status_name), class: 'jl-status') +
-          content_tag(:td, assigned_to_id ? link_to(assigned_to_name, user_path(assigned_to_id)) : '', class: 'jl-assigned-to') +
+          content_tag(:td, assigned_to ? link_to_principal(assigned_to) : '', class: 'jl-assigned-to') +
           content_tag(:td, h(first_line), class: 'jl-preview') +
           content_tag(:td, show_link + hide_link, class: 'jl-toggle')
         end

@@ -14,7 +14,7 @@ api.array :studio_setting_histories, api_meta(:total_count => @total_count, :off
       api.comment history.comment
       api.is_current history.is_current
       api.changed_on history.changed_on
-      api.changed_by(:id => history.changed_by.id, :name => history.changed_by.name) unless history.changed_by.nil?
+      api_user_ref(api, :changed_by, history.changed_by)
       api.payload history.payload if @include_payload
     end
   end

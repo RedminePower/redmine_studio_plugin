@@ -54,4 +54,7 @@ When Teams chat opens, the following content is automatically filled in:
 
 An alert dialog displays an error message in the following cases:
 
-- When the user's email address cannot be retrieved
+- When the user's email address cannot be retrieved ("The email address of this user cannot be retrieved." is shown; the same applies to users not visible to the logged-in user and to locked users)
+- When the user hides their email address ("This user does not make their email address public, so a Teams chat cannot be opened." is shown)
+
+As with the Redmine users API, the email address of a user who hides it is returned only to administrators. Administrators can open a Teams chat even with a user who hides their email address.

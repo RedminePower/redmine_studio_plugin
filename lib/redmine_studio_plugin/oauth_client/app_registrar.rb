@@ -3,7 +3,7 @@
 module RedmineStudioPlugin
   module OauthClient
     # サインイン用の OAuth アプリ登録を自己修復する。
-    # Redmine 起動のたびに「未登録なら登録／スコープ定義がズレていれば追従」を行う。
+    # Redmine 起動のたびに「未登録なら登録／二重に登録されていれば 1 つにまとめる／スコープ定義がズレていれば追従」を行う。
     # 公開クライアント（confidential=false）は管理画面から作れないためプログラム登録が必須。
     # ループバックのリダイレクト URI はポート差を Doorkeeper が許容するため、パスだけ固定して登録する。
     module AppRegistrar
@@ -19,10 +19,11 @@ module RedmineStudioPlugin
       end
 
       # 登録済みのサインイン用アプリ。未登録・非対応なら nil。
+      # 同時の起動で二重に登録されたときも、いちばん古いものを正とする
       def registered_application
         return nil unless available?
 
-        Doorkeeper::Application.find_by(name: APP_NAME)
+        canonical_application
       end
 
       # 起動時に呼ぶ自己修復登録。失敗しても起動は妨げない。
@@ -30,8 +31,7 @@ module RedmineStudioPlugin
         return unless available?
 
         desired = ScopeProvider.scope_names.map(&:to_s).sort
-        app = Doorkeeper::Application.find_by(name: APP_NAME)
-        if app.nil?
+        unless canonical_application
           # 未登録なら公開クライアントとして新規登録する
           Doorkeeper::Application.create!(
             name: APP_NAME,
@@ -39,13 +39,54 @@ module RedmineStudioPlugin
             scopes: desired.join(' '),
             confidential: false
           )
-        elsif app.scopes.all.sort != desired
+        end
+        # 名前に重複を禁じる仕組みが無いので、同時に起動したほかのプロセスも作っていることがある。
+        # 作った後も、すでに二重になっている環境も、ここで 1 つにまとめる
+        app = merge_duplicates
+        warn_other_same_name_apps(app)
+        if app.scopes.all.sort != desired
           # スコープ定義が変わっていたら登録側を追従させる（将来の権限追加の反映）
           app.update!(scopes: desired.join(' '))
         end
       rescue => e
         # マイグレーション前・DB 未接続・同時起動の競合など。登録失敗で起動を止めない
         Rails.logger.warn "[redmine_studio_plugin] OAuth client registration skipped: #{e.class}: #{e.message}"
+      end
+
+      # サインイン用アプリと見なすもの（作るときと同じ名前・リダイレクト先の公開クライアント）を古い順に。
+      # 管理者が画面から同じ名前で作った、設定の違うアプリは含めない（消さない・正にしない）
+      def signin_applications
+        Doorkeeper::Application.where(name: APP_NAME, redirect_uri: REDIRECT_URI, confidential: false).order(:id)
+      end
+
+      # サインイン用アプリのうち、いちばん古いもの。
+      def canonical_application
+        signin_applications.first
+      end
+
+      # サインイン用アプリが複数あれば、いちばん古いものに 1 つにまとめて、それを返す。
+      # ほかのアプリで発行したトークン・認可コードは古いものへ付け替える。
+      # アプリは client_id を毎回 /oauth_client から取り直すので、付け替えておけばトークンの更新もそのまま通る。
+      def merge_duplicates
+        apps = signin_applications.to_a
+        keep = apps.shift
+        return keep if keep.nil? || apps.empty?
+
+        ids = apps.map(&:id)
+        Doorkeeper::Application.transaction do
+          Doorkeeper.config.access_token_model.where(application_id: ids).update_all(application_id: keep.id)
+          Doorkeeper.config.access_grant_model.where(application_id: ids).update_all(application_id: keep.id)
+          Doorkeeper::Application.where(id: ids).delete_all
+        end
+        keep
+      end
+
+      # 同じ名前で設定の違うアプリ（管理者が作ったもの）は手を付けず、知らせだけ残す
+      def warn_other_same_name_apps(app)
+        others = Doorkeeper::Application.where(name: APP_NAME).where.not(id: app.id).pluck(:id)
+        return if others.empty?
+
+        Rails.logger.warn "[redmine_studio_plugin] OAuth applications named '#{APP_NAME}' with other settings are left as they are: #{others.join(', ')}"
       end
 
       # 6.1 以上かつ Doorkeeper の oauth_applications テーブルが使えるときだけ動く。

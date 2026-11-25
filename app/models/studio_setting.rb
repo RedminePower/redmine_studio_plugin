@@ -8,47 +8,172 @@ class StudioSetting < ActiveRecord::Base
   has_many :assignments, class_name: 'StudioSettingAssignment', foreign_key: 'setting_id', dependent: :destroy
   has_many :histories, class_name: 'StudioSettingHistory', dependent: :destroy
 
+  # 本人の設定（1 人に 1 種類 1 つ・持ち主は scope_id の利用者）
+  SCOPE_GLOBAL = 'global'
+  SCOPE_USER = 'user'
+  SCOPE_PROJECT = 'project'
+  SCOPE_TYPES = [SCOPE_GLOBAL, SCOPE_PROJECT, SCOPE_USER].freeze
+
+  # 文字列の列（string 型）の長さの上限。超えた値は、データベースによっては保存の時点で 500 になるので、検証で 422 にする
+  MAX_STRING_LENGTH = 255
+
+  # 長さ・プロジェクトの実在は、その値を書くときだけ確かめる（前からある行は、ほかの項目の更新や論理削除をそのまま通す）
   validates :name, presence: true
+  validates :name, length: { maximum: MAX_STRING_LENGTH }, if: :will_save_change_to_name?
   validates :schema_type, presence: true
+  validates :schema_type, length: { maximum: MAX_STRING_LENGTH }, if: :will_save_change_to_schema_type?
   validates :scope_type, presence: true
+  # 大文字小文字の違う値（'USER' など）を通すと、本人の設定の守りが効かないレコードになるので、決まった値だけを受ける
+  validates :scope_type, inclusion: { in: SCOPE_TYPES }, allow_blank: true
   validates :schema_version, presence: true, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+  validates :scope_id, presence: true, if: :user_scope?
+  validates :scope_id, presence: true, if: :project_reference_changed?
+  # 検証の前に重複を見つける（作成の API ではコントローラーが今ある設定を 409 で返す）。
+  # 確かめた直後に別の端末が作った場合は、データベースの重複禁止の索引（schema_type, owner_id）で止まる
+  validates :schema_type, uniqueness: { scope: :owner_id }, if: :user_scope?
+  validate :owner_must_be_user, on: :create, if: :user_scope?
+  validate :project_must_exist, if: :project_reference_changed?
+  validate :user_scope_immutable, on: :update
 
   scope :not_deleted, -> { where(deleted_on: nil) }
   scope :deleted, -> { where.not(deleted_on: nil) }
 
-  # global は全ログインユーザーに可視。project は当該プロジェクトのメンバーのみ。admin は全件。
+  # global は全ログインユーザーに可視。project は当該プロジェクトのメンバーのみ。
+  # user は、その人から持ち主が Redmine で見えるもの（visible_owners）だけ。admin は全件。
   scope :visible, ->(user = User.current) {
     next all if user&.admin?
 
     project_ids = user ? user.projects.pluck(:id) : []
-    # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）
-    where("scope_type = ? OR (scope_type = ? AND scope_id IN (?))",
-          'global', 'project', project_ids.presence || [-1])
+    # 空配列は IN (-1) にして無マッチにする（.or の構造互換問題を避けるため SQL 文字列で組む）。
+    # ほかの表と結合しても列がぶつからないよう、表の名前を付ける
+    where("#{table_name}.scope_type = ? OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (?))" \
+          " OR (#{table_name}.scope_type = ? AND #{table_name}.scope_id IN (?))",
+          SCOPE_GLOBAL, SCOPE_PROJECT, project_ids.presence || [-1], SCOPE_USER, visible_owners(user).select(:id))
   }
 
+  # その人から Redmine で見える利用者（User.visible。本人を含み、有効な人だけ）。本人の設定を読めるかはこれで決める。
+  # User.visible は匿名ユーザーも返しうるので、利用者（type 'User'）に絞る。
+  # ログインしていなければ誰も見えない（User.none は Rails 6.1 で IN () という壊れた SQL になるので、1 = 0 で空にする）
+  def self.visible_owners(user)
+    return User.where('1 = 0') unless user&.logged?
+
+    User.visible(user).where(type: 'User')
+  end
+
+  before_validation :sync_owner_id
   before_create :set_timestamps
   before_update :update_timestamps
+  before_update :increment_version
 
   def deleted?
     deleted_on.present?
   end
 
-  def visible?(user = User.current)
-    return true if user&.admin?
-    return true if scope_type == 'global'
-
-    scope_type == 'project' && scope_id.present? && user&.member_of?(Project.find_by(id: scope_id))
+  def user_scope?
+    scope_type == SCOPE_USER
   end
 
-  def soft_delete(user, comment: nil)
-    self.deleted_on = Time.current
-    self.deleted_by = user
-    if save
-      create_history('delete', user, comment: comment)
-      true
-    else
-      false
+  def project_scope?
+    scope_type == SCOPE_PROJECT
+  end
+
+  # project の範囲で、プロジェクトを付ける・付け替える保存か（作成、または scope_id・scope_type を変える）
+  def project_reference_changed?
+    project_scope? && (new_record? || will_save_change_to_scope_id? || will_save_change_to_scope_type?)
+  end
+
+  # 範囲を変える保存か（scope_type を変える、または project のままほかのプロジェクトへ付け替える）。
+  # global・user の scope_id は範囲に関わらないので見ない
+  def scope_reference_changed?
+    will_save_change_to_scope_type? || (project_scope? && will_save_change_to_scope_id?)
+  end
+
+  def visible?(user = User.current)
+    return true if user&.admin?
+    return true if scope_type == SCOPE_GLOBAL
+    # 本人の設定は、その人から持ち主が Redmine で見えるときだけ（見えない持ち主の、設定の名前と中身を出さない）
+    return self.class.visible_owners(user).where(id: scope_id).exists? if user_scope?
+
+    project_scope? && scope_id.present? && user&.member_of?(Project.find_by(id: scope_id))
+  end
+
+  # 書き換え（更新・削除・割り当て・履歴の操作）ができるか。
+  # 本人の設定は本人と管理者だけ。ほかの範囲は従来どおり見える人なら書ける。
+  def editable?(user = User.current)
+    return user.present? && user.logged? && (user.admin? || scope_id == user.id) if user_scope?
+
+    visible?(user)
+  end
+
+  # 持ち主と種類で本人の設定を引く（削除済みも含む）
+  def self.find_user_setting(owner_id, schema_type)
+    find_by(scope_type: SCOPE_USER, owner_id: owner_id, schema_type: schema_type)
+  end
+
+  # 作る。保存と履歴の作成を 1 つの取引で行う。
+  # 戻り値は :created（作った）・:exists（本人の設定が既にある）・:invalid（検証で断られた。errors 付き）。
+  # 本人の設定は、先に今ある設定を確かめる（2 台同時の初回保存など）。
+  # 確かめた直後に別の端末が作った場合は、検証かデータベースの重複禁止の索引で断られるので、そのときも :exists にする
+  def create_with_history(user, comment: nil)
+    return :exists if user_scope? && existing_user_setting
+
+    saved = false
+    self.class.transaction do
+      saved = save
+      create_history('create', user, comment: comment) if saved
     end
+    return :created if saved
+
+    user_scope? && existing_user_setting ? :exists : :invalid
+  rescue ActiveRecord::RecordNotUnique
+    raise unless user_scope?
+
+    :exists
+  end
+
+  # 同じ持ち主・同じ種類の、今ある本人の設定（無ければ nil）
+  def existing_user_setting
+    self.class.find_user_setting(scope_id, schema_type)
+  end
+
+  # 更新する。行を押さえてから attrs を当てて保存し、履歴も同じ取引の中で作る。
+  # expected_version を添えたときは、押さえた後で今の版と比べる（版の確認と保存の間に別の書き込みが入らないように）。
+  # 戻り値は :saved・:conflict（版が古い）・:forbidden（管理者でないのに範囲を変えようとした）・:invalid（検証で断られた。errors 付き）
+  def update_with_history(attrs, user, expected_version: nil, comment: nil)
+    result = :invalid
+    self.class.transaction do
+      lock!
+      if !expected_version.nil? && version != expected_version
+        result = :conflict
+        raise ActiveRecord::Rollback
+      end
+
+      self.attributes = attrs
+      # 範囲を変えられるのは管理者だけ（変えると、前の範囲の版の中身が新しい範囲の人に見えるため）
+      if scope_reference_changed? && !user.admin?
+        result = :forbidden
+        raise ActiveRecord::Rollback
+      end
+      self.updated_by = user
+      if save
+        # 削除の取り消しは復元の API だけで行う（attrs に deleted_on は入れない）
+        create_history('update', user, comment: comment)
+        result = :saved
+      end
+    end
+    result
+  end
+
+  # 行を押さえてから書く（同時の更新と版の数がぶつからないように）。履歴も同じ取引の中で作る
+  def soft_delete(user, comment: nil)
+    saved = false
+    with_lock do
+      self.deleted_on = Time.current
+      self.deleted_by = user
+      saved = save
+      create_history('delete', user, comment: comment) if saved
+    end
+    saved
   end
 
   # Create a history record
@@ -57,6 +182,9 @@ class StudioSetting < ActiveRecord::Base
   # @param comment [String, nil] Optional comment
   # @param restored_from_version [Integer, nil] Version number when restoring
   def create_history(change_type, user, comment: nil, restored_from_version: nil)
+    # 本人の設定は自動保存で頻繁に書かれるので、履歴を残さない
+    return if user_scope?
+
     self.class.transaction do
       # Mark previous current history as not current
       histories.where(is_current: true).update_all(is_current: false)
@@ -91,55 +219,35 @@ class StudioSetting < ActiveRecord::Base
     history = histories.find_by(version: version)
     return false unless history
 
-    # Determine change_type based on current state
-    was_deleted = deleted?
-    change_type = was_deleted ? 'undelete' : 'restore'
+    saved = false
+    # 行を押さえてから書く（同時の更新と版の数がぶつからないように）。履歴も同じ取引の中で作る
+    with_lock do
+      # Determine change_type based on current state
+      was_deleted = deleted?
+      change_type = was_deleted ? 'undelete' : 'restore'
 
-    # Restore payload and schema_version from history
-    # Note: name is NOT restored (user may have customized it)
-    self.payload = history.payload
-    self.schema_version = history.schema_version
-    self.updated_by = user
-    self.updated_on = Time.current
+      # Restore payload and schema_version from history
+      # Note: name is NOT restored (user may have customized it)
+      self.payload = history.payload
+      self.schema_version = history.schema_version
+      self.updated_by = user
+      self.updated_on = Time.current
 
-    # If was deleted, also clear deletion info
-    if was_deleted
-      self.deleted_on = nil
-      self.deleted_by = nil
+      # If was deleted, also clear deletion info
+      if was_deleted
+        self.deleted_on = nil
+        self.deleted_by = nil
+      end
+
+      saved = save
+      create_history(change_type, user, comment: comment, restored_from_version: version) if saved
     end
-
-    if save
-      create_history(change_type, user, comment: comment, restored_from_version: version)
-      true
-    else
-      false
-    end
+    saved
   end
 
-  # Get the current (latest) history version number
-  def current_version
+  # 履歴の最新の通し番号（設定の version＝書き込みのたびに進む数とは別物）
+  def current_history_version
     histories.maximum(:version) || 0
-  end
-
-  def as_json(options = {})
-    result = {
-      id: id,
-      name: name,
-      schema_type: schema_type,
-      scope_type: scope_type,
-      scope_id: scope_id,
-      schema_version: schema_version,
-      created_on: created_on,
-      updated_on: updated_on,
-      deleted_on: deleted_on
-    }
-    # 標準 Redmine API のパターンに合わせて、nil の場合はプロパティを省略
-    result[:created_by] = { id: created_by.id, name: created_by.name } if created_by
-    result[:updated_by] = { id: updated_by.id, name: updated_by.name } if updated_by
-    result[:deleted_by] = { id: deleted_by.id, name: deleted_by.name } if deleted_by
-    result[:payload] = payload if options[:include_payload]
-    result[:assignments] = assignments.map(&:as_json) if options[:include_assignments]
-    result
   end
 
   private
@@ -151,5 +259,38 @@ class StudioSetting < ActiveRecord::Base
 
   def update_timestamps
     self.updated_on = Time.current
+  end
+
+  # 書き込みが成功するたびに 1 進める（作成時は既定値の 1）
+  def increment_version
+    self.version = (version || 0) + 1
+  end
+
+  # 持ち主の正は scope_id。owner_id は重複禁止の索引（schema_type, owner_id）のための写しで、本人の設定のときだけ持つ。ほかの範囲は NULL
+  def sync_owner_id
+    self.owner_id = user_scope? ? scope_id : nil
+  end
+
+  # 本人の設定の持ち主は、実在する利用者（グループ・匿名は除く）
+  def owner_must_be_user
+    return if scope_id.blank?
+
+    errors.add(:scope_id, :user_not_found) unless User.where(id: scope_id, type: 'User').exists?
+  end
+
+  # project の範囲は、実在するプロジェクトに付ける（無いと、どのプロジェクトにも属さない設定が残る）
+  def project_must_exist
+    return if scope_id.blank?
+
+    errors.add(:scope_id, :project_not_found) unless Project.where(id: scope_id).exists?
+  end
+
+  # 本人の設定は、範囲・持ち主・種類を変えない。ほかの範囲を本人の設定に変えることもしない
+  def user_scope_immutable
+    if scope_type_changed? && (scope_type_was == SCOPE_USER || scope_type == SCOPE_USER)
+      errors.add(:scope_type, :invalid)
+    elsif user_scope? && (scope_id_changed? || schema_type_changed?)
+      errors.add(:base, 'scope_id and schema_type of a user setting cannot be changed')
+    end
   end
 end

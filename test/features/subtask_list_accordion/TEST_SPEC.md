@@ -122,47 +122,173 @@ puts "subtask_list_accordion_collapsed_tracker_ids: #{defaults['subtask_list_acc
 
 ## 2. HTTP テスト
 
+**実行方法:**
+PowerShell 7 で画面（HTML）を取得して確かめる。画面は API キーでは開けないため、各試験の頭でログインしたセッションを作る。
+`{BaseUrl}`・`{Username}`・`{Password}`（管理者）・`{Container}` は実行環境から注入する（プレースホルダの契約は `test/README.md`）。
+設定（プラグインの設定・関連チケットの表示設定）を変える試験は、`{Container}` の Runner で設定を変え、`finally` で元の値に戻す。
+
+**用意（HTTP テストの前に 1 回）:**
+試験に使うデータを Runner で作る（前回の残りがあれば先に消す）。
+- 非公開のプロジェクト（トラッカー 3 つ）と、そのメンバーの非管理ユーザー（パスワードはその場で作る）
+- アコーディオンで描かれる親チケット（子 3 件。トラッカーは 1 つ目・2 つ目・3 つ目。1 つ目の子に孫 1 件）
+- コアのまま描かれる親チケット（子 2 件、孫なし）
+
+最後の行の値を、各試験の `{UserLogin}`・`{UserPassword}`・`{ParentId}`・`{Child1Id}`・`{Child2Id}`・`{Child3Id}`・`{GrandchildId}`・`{CoreParentId}`・`{Tracker1Id}`・`{Tracker2Id}` に入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+Project.where('identifier LIKE ?', 'sla-%').order(lft: :desc).each(&:destroy)
+User.where('login LIKE ?', 'sla_%').each(&:destroy)
+Role.where('name LIKE ?', 'SLA_%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+pw = SecureRandom.hex(8)
+t1, t2, t3 = Tracker.order(:position).first(3)
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+role = Role.create!(name: "SLA_#{sfx}", permissions: [:view_issues, :add_issues, :edit_issues, :manage_subtasks])
+pr = Project.new(name: "SLA_#{sfx}", identifier: "sla-#{sfx}", is_public: false)
+pr.enabled_module_names = %w[issue_tracking]
+pr.trackers = [t1, t2, t3]
+pr.save!
+user = User.new(login: "sla_user_#{sfx}", firstname: 'SLA', lastname: 'User', mail: "sla_user_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+user.password = user.password_confirmation = pw
+user.save!
+Member.create!(principal: user, project: pr, roles: [role])
+mk = ->(name, tracker, parent = nil) {
+  Issue.create!(project: pr, tracker: tracker, subject: "SLA_#{name}_#{sfx}", author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+parent = mk.call('Parent', t1)
+c1 = mk.call('Child1', t1, parent)
+c2 = mk.call('Child2', t2, parent)
+c3 = mk.call('Child3', t3, parent)
+g = mk.call('Grandchild', t1, c1)
+core = mk.call('CoreParent', t1)
+mk.call('CoreChild1', t2, core)
+mk.call('CoreChild2', t3, core)
+puts({ UserLogin: user.login, UserPassword: pw, ParentId: parent.id, Child1Id: c1.id, Child2Id: c2.id, Child3Id: c3.id,
+       GrandchildId: g.id, CoreParentId: core.id, Tracker1Id: t1.id, Tracker2Id: t2.id }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+Project.where('identifier LIKE ?', 'sla-%').order(lft: :desc).each(&:destroy)
+User.where('login LIKE ?', 'sla_%').each(&:destroy)
+Role.where('name LIKE ?', 'SLA_%').each(&:destroy)
+puts 'cleaned'
+```
+
+各試験で使う部品（試験ごとに同じものを書く）:
+- `Login`: ログイン画面の `authenticity_token` を取り、ログインしたセッションを返す
+- `RowClass`: 子チケット一覧の `<tr id="issue-N">` が `collapse` / `expand` のどちらのクラスを持つかを返す（行が無ければ `none`）
+- `Rails`: `{Container}` で Runner のコードを 1 行流す（何も返らなければ 3 回までやり直す）
+- `SetSla`: プラグインの設定を変える。試験の頭で元の値（`$orig`）を覚え、`finally` で戻す
+
+※ Redmine 6.0 以降は JavaScript のファイル名に digest が付く（`subtask_list_accordion-1a2b3c4d.js`）ため、ファイル名は `(-[0-9a-f]+)?\.js` で照合する。
+
 ### [2-1] チケット画面にアコーディオン用クラスが出力される
 
-**前提条件:**
-- 孫チケットを持つ親チケットが存在すること（アコーディオンは孫チケットがある場合のみ有効）
+孫チケットを持つ親チケット（`{ParentId}`）にだけアコーディオンが付き、孫の無い親チケット（`{CoreParentId}`）には付かない。
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
-$response.Content -match "accordion_control"
+$BaseUrl = '{BaseUrl}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+$s = Login '{UserLogin}' '{UserPassword}'
+$acc = (Invoke-WebRequest -Uri "$BaseUrl/issues/{ParentId}" -WebSession $s -UseBasicParsing).Content
+$core = (Invoke-WebRequest -Uri "$BaseUrl/issues/{CoreParentId}" -WebSession $s -UseBasicParsing).Content
+"accordion: $($acc -match 'accordion_control') core: $($core -match 'accordion_control')"
 ```
 
-**期待結果:** `True`
+**期待結果:** `accordion: True core: False`
 
 ### [2-2] サーバーモード時に JavaScript が読み込まれる
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
-$response.Content -match "subtask_list_accordion\.js"
+$BaseUrl = '{BaseUrl}'
+$Container = '{Container}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+# 何も返らなかったとき（DB が使用中で落ちたときなど）は 3 回までやり直す
+function Rails([string]$code) {
+    for ($n = 0; $n -lt 3; $n++) {
+        $r = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1
+        if ($r) { return $r }
+    }
+}
+$keys = '%w[subtask_list_accordion_enable_server_scripting_mode subtask_list_accordion_expand_all subtask_list_accordion_collapsed_tracker_ids]'
+function SetSla([string]$assign) { Rails "s = Setting.plugin_redmine_studio_plugin.dup; $assign; Setting.plugin_redmine_studio_plugin = s; puts 'set'" | Out-Null }
+$orig = Rails "puts [Setting.plugin_redmine_studio_plugin.slice(*$keys).to_json].pack('m0')"
+if (-not $orig) { throw '設定を読めなかった' }
+try {
+    SetSla "s['subtask_list_accordion_enable_server_scripting_mode'] = true"
+    $s = Login '{UserLogin}' '{UserPassword}'
+    $html = (Invoke-WebRequest -Uri "$BaseUrl/issues/{ParentId}" -WebSession $s -UseBasicParsing).Content
+    "server_js: $($html -match 'subtask_list_accordion(-[0-9a-f]+)?\.js') client_js: $($html -match 'subtask_list_accordion_client(-[0-9a-f]+)?\.js')"
+} finally {
+    Rails "o = JSON.parse('$orig'.unpack1('m0')); s = Setting.plugin_redmine_studio_plugin.dup; $keys.each { |k| if o.key?(k) then s[k] = o[k] else s.delete(k) end }; Setting.plugin_redmine_studio_plugin = s; puts 'restored'"
+}
 ```
 
-**期待結果:** `True`（サーバーモード有効時）
+**期待結果:**
+- `server_js: True client_js: False`（サーバーモード有効時）
+- 最後に `restored`
 
 ### [2-3] コンテキストメニューにアコーディオン項目が含まれる
 
+チケット画面かどうかは `back_url` の `/issues/{ID}` で判定するため、`back_url` を渡す。チケット画面以外（`back_url=/issues`）では出ない。
+
 **確認方法:**
 ```powershell
-$session = # ログインセッション取得
-# Note: back_url パラメータで /issues/{ID} パターンを渡す必要がある（チケット画面判定に使用）
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/context_menu?ids[]={ID}&back_url=/issues/{ID}" -WebSession $session -UseBasicParsing
-$response.Content -match "selectedTreeOpen"
+$BaseUrl = '{BaseUrl}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+$s = Login '{UserLogin}' '{UserPassword}'
+$onIssue = (Invoke-WebRequest -Uri "$BaseUrl/issues/context_menu?ids[]={Child1Id}&back_url=/issues/{ParentId}" -WebSession $s -UseBasicParsing).Content
+$onList = (Invoke-WebRequest -Uri "$BaseUrl/issues/context_menu?ids[]={Child1Id}&back_url=/issues" -WebSession $s -UseBasicParsing).Content
+"issue_page: $($onIssue -match 'selectedTreeOpen') list_page: $($onList -match 'selectedTreeOpen')"
 ```
 
-**期待結果:** `True`
+**期待結果:** `issue_page: True list_page: False`
 
 ### [2-4] 管理画面でプラグイン設定が表示される
 
 **確認方法:**
 ```powershell
-$session = # admin でログインセッション取得
-$response = Invoke-WebRequest -Uri "{BaseUrl}/settings/plugin/redmine_studio_plugin" -WebSession $session -UseBasicParsing
+$BaseUrl = '{BaseUrl}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+$s = Login '{Username}' '{Password}'
+$response = Invoke-WebRequest -Uri "$BaseUrl/settings/plugin/redmine_studio_plugin" -WebSession $s -UseBasicParsing -MaximumRedirection 0 -SkipHttpErrorCheck
 $response.StatusCode
 ```
 
@@ -172,15 +298,21 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$session = # admin でログインセッション取得
-$response = Invoke-WebRequest -Uri "{BaseUrl}/settings/plugin/redmine_studio_plugin" -WebSession $session -UseBasicParsing
-$html = $response.Content
-# サーバースクリプトモード設定
-$html -match "subtask_list_accordion_enable_server_scripting_mode"
-# デフォルト展開設定
-$html -match "subtask_list_accordion_expand_all"
-# 収縮させるトラッカー設定（複数選択リスト）
-$html -match "subtask_list_accordion_collapsed_tracker_ids"
+$BaseUrl = '{BaseUrl}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+$s = Login '{Username}' '{Password}'
+$html = (Invoke-WebRequest -Uri "$BaseUrl/settings/plugin/redmine_studio_plugin" -WebSession $s -UseBasicParsing).Content
+# サーバースクリプトモード設定・デフォルト展開設定・収縮させるトラッカー設定（複数選択リスト）
+"server_mode: $($html -match 'subtask_list_accordion_enable_server_scripting_mode')"
+"expand_all: $($html -match 'subtask_list_accordion_expand_all')"
+"collapsed_trackers: $($html -match 'subtask_list_accordion_collapsed_tracker_ids')"
 ```
 
 **期待結果:** すべて `True`
@@ -189,318 +321,254 @@ $html -match "subtask_list_accordion_collapsed_tracker_ids"
 
 **確認方法:**
 ```powershell
-$session = # admin でログインセッション取得
-$response = Invoke-WebRequest -Uri "{BaseUrl}/my/account" -WebSession $session -UseBasicParsing
-$response.Content -match "subtasks_default_expand_limit_upper"
+$BaseUrl = '{BaseUrl}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+$s = Login '{UserLogin}' '{UserPassword}'
+$response = Invoke-WebRequest -Uri "$BaseUrl/my/account" -WebSession $s -UseBasicParsing
+$response.Content -match 'subtasks_default_expand_limit_upper'
 ```
 
 **期待結果:** `True`
 
 ### [2-7] 収縮させるトラッカー設定の動作確認
 
-**テストケース A: collapsed_tracker_ids が空の場合**
+`subtask_list_accordion_expand_all` を `true` にしたうえで、`subtask_list_accordion_collapsed_tracker_ids` を次の 3 とおりに変え、親チケット（`{ParentId}`）の子チケット行のクラスを見る。
 
-**前提条件:**
-- `subtask_list_accordion_expand_all` 設定が `true` であること
-- `subtask_list_accordion_collapsed_tracker_ids` が空であること
-
-**確認方法:**
-```ruby
-# 設定を変更
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = true
-settings['subtask_list_accordion_collapsed_tracker_ids'] = []
-Setting.plugin_redmine_studio_plugin = settings
-```
-
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
-# すべての子チケットが expand クラスを持つことを確認
-$response.Content -match "issue-{子チケットID}.*expand"
-```
-
-**期待結果:** すべての子チケットが `expand` クラスを持つ（収縮対象なし）
-
----
-
-**テストケース B: collapsed_tracker_ids が1件の場合**
-
-**前提条件:**
-- `subtask_list_accordion_expand_all` 設定が `true` であること
-- `subtask_list_accordion_collapsed_tracker_ids` に特定のトラッカーIDが1件設定されていること
-- そのトラッカーの子チケットを持つ親チケットが存在すること
+- テストケース A: 空
+- テストケース B: 1 件（1 つ目のトラッカー `{Tracker1Id}`。子 1 がこのトラッカー）
+- テストケース C: 複数件（1 つ目・2 つ目のトラッカー。子 1・子 2 がこのトラッカー）
 
 **確認方法:**
-```ruby
-# 設定を変更
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = true
-settings['subtask_list_accordion_collapsed_tracker_ids'] = [Tracker.first.id.to_s]
-Setting.plugin_redmine_studio_plugin = settings
-
-# 対象トラッカーのチケットID
-target_tracker_id = Tracker.first.id
-```
-
 ```powershell
-# 親チケットを表示し、対象トラッカーの子チケットに collapse クラスが付与されていることを確認
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
-# 対象トラッカーの子チケット行に "collapse" クラスがあることを確認
-$response.Content -match "issue-{子チケットID}.*collapse"
+$BaseUrl = '{BaseUrl}'
+$Container = '{Container}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+function RowClass($html, $id) {
+    # 6.0 以降は id="issue-N"、5.x は class の中の issue-N で行を見分ける
+    $tag = [regex]::Match($html, "<tr [^>]*\bissue-$id\b[^>]*>").Value
+    if ($tag -match 'class="[^"]*\bcollapse\b') { 'collapse' } elseif ($tag -match 'class="[^"]*\bexpand\b') { 'expand' } else { 'none' }
+}
+# 何も返らなかったとき（DB が使用中で落ちたときなど）は 3 回までやり直す
+function Rails([string]$code) {
+    for ($n = 0; $n -lt 3; $n++) {
+        $r = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1
+        if ($r) { return $r }
+    }
+}
+$keys = '%w[subtask_list_accordion_enable_server_scripting_mode subtask_list_accordion_expand_all subtask_list_accordion_collapsed_tracker_ids]'
+function SetSla([string]$assign) { Rails "s = Setting.plugin_redmine_studio_plugin.dup; $assign; Setting.plugin_redmine_studio_plugin = s; puts 'set'" | Out-Null }
+$orig = Rails "puts [Setting.plugin_redmine_studio_plugin.slice(*$keys).to_json].pack('m0')"
+if (-not $orig) { throw '設定を読めなかった' }
+try {
+    $s = Login '{UserLogin}' '{UserPassword}'
+    function Rows() {
+        $html = (Invoke-WebRequest -Uri "$BaseUrl/issues/{ParentId}" -WebSession $s -UseBasicParsing).Content
+        "child1=$(RowClass $html {Child1Id}) child2=$(RowClass $html {Child2Id}) child3=$(RowClass $html {Child3Id})"
+    }
+    $base = "s['subtask_list_accordion_enable_server_scripting_mode'] = true; s['subtask_list_accordion_expand_all'] = true"
+    SetSla "$base; s['subtask_list_accordion_collapsed_tracker_ids'] = []"
+    "A: $(Rows)"
+    SetSla "$base; s['subtask_list_accordion_collapsed_tracker_ids'] = ['{Tracker1Id}']"
+    "B: $(Rows)"
+    SetSla "$base; s['subtask_list_accordion_collapsed_tracker_ids'] = ['{Tracker1Id}', '{Tracker2Id}']"
+    "C: $(Rows)"
+} finally {
+    Rails "o = JSON.parse('$orig'.unpack1('m0')); s = Setting.plugin_redmine_studio_plugin.dup; $keys.each { |k| if o.key?(k) then s[k] = o[k] else s.delete(k) end }; Setting.plugin_redmine_studio_plugin = s; puts 'restored'"
+}
 ```
 
 **期待結果:**
-- 対象トラッカーの子チケットは `collapse` クラスを持つ
-- 対象外のトラッカーの子チケットは `expand` クラスを持つ
-
----
-
-**テストケース C: collapsed_tracker_ids が複数件の場合**
-
-**前提条件:**
-- `subtask_list_accordion_expand_all` 設定が `true` であること
-- `subtask_list_accordion_collapsed_tracker_ids` に複数のトラッカーIDが設定されていること
-- それらのトラッカーの子チケットを持つ親チケットが存在すること
-
-**確認方法:**
-```ruby
-# 設定を変更（最初の2つのトラッカーを収縮対象に設定）
-tracker_ids = Tracker.limit(2).pluck(:id).map(&:to_s)
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = true
-settings['subtask_list_accordion_collapsed_tracker_ids'] = tracker_ids
-Setting.plugin_redmine_studio_plugin = settings
-```
-
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
-# 対象トラッカーの子チケット行に "collapse" クラスがあることを確認
-$response.Content -match "issue-{子チケットID_tracker1}.*collapse"
-$response.Content -match "issue-{子チケットID_tracker2}.*collapse"
-```
-
-**期待結果:**
-- 指定した複数のトラッカーの子チケットがすべて `collapse` クラスを持つ
-- 対象外のトラッカーの子チケットは `expand` クラスを持つ
-
-**後処理:**
-```ruby
-# 設定を元に戻す
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = false
-settings['subtask_list_accordion_collapsed_tracker_ids'] = []
-Setting.plugin_redmine_studio_plugin = settings
-```
+- `A: child1=expand child2=expand child3=expand`（収縮対象なし）
+- `B: child1=collapse child2=expand child3=expand`（対象トラッカーの子だけ `collapse`、対象外は `expand`）
+- `C: child1=collapse child2=collapse child3=expand`（指定した複数のトラッカーの子がすべて `collapse`、対象外は `expand`）
+- 最後に `restored`
 
 ### [2-8] デフォルト展開設定の動作確認
 
-**テストケース A: expand_all=true の場合**
+親チケット（`{ParentId}`）の子孫は 4 件（子 3 件＋孫 1 件）。次の 4 とおりで、子チケット（子 1）の行のクラスを見る。
+ユーザー設定 `subtasks_default_expand_limit_upper` は、用意で作ったユーザーのものを変える（後片付けでユーザーごと消える）。
 
-**前提条件:**
-- `subtask_list_accordion_expand_all` 設定が `true` であること
-- `subtask_list_accordion_collapsed_tracker_ids` が空であること
-
-**確認方法:**
-```ruby
-# 設定を変更
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = true
-settings['subtask_list_accordion_collapsed_tracker_ids'] = []
-Setting.plugin_redmine_studio_plugin = settings
-```
-
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
-# すべての子チケットが expand クラスを持つことを確認
-$response.Content -match "issue-{子チケットID}.*expand"
-```
-
-**期待結果:** すべての子チケットが `expand` クラスを持つ
-
----
-
-**テストケース B: expand_all=false の場合（子チケット数が上限以下）**
-
-**前提条件:**
-- `subtask_list_accordion_expand_all` 設定が `false` であること
-- ユーザーの `subtasks_default_expand_limit_upper` が子チケット数以上であること
+- テストケース A: `expand_all=true`、`collapsed_tracker_ids` は空
+- テストケース B: `expand_all=false`、上限 100（子孫の数が上限以下）
+- テストケース C: `expand_all=false`、上限 1（子孫の数が上限超過）
+- テストケース D: `expand_all=false`、上限 0
 
 **確認方法:**
-```ruby
-# 設定を変更
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = false
-Setting.plugin_redmine_studio_plugin = settings
-
-# ユーザー設定を変更（上限を大きく設定）
-User.current.pref.subtasks_default_expand_limit_upper = 100
-User.current.pref.save
-```
-
 ```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
-# 子チケットが expand クラスを持つことを確認
-$response.Content -match "issue-{子チケットID}.*expand"
-```
-
-**期待結果:** 子チケットが `expand` クラスを持つ
-
----
-
-**テストケース C: expand_all=false の場合（子チケット数が上限超過）**
-
-**前提条件:**
-- `subtask_list_accordion_expand_all` 設定が `false` であること
-- ユーザーの `subtasks_default_expand_limit_upper` が子チケット数未満であること
-
-**確認方法:**
-```ruby
-# ユーザー設定を変更（上限を小さく設定）
-User.current.pref.subtasks_default_expand_limit_upper = 1
-User.current.pref.save
-```
-
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
-# 子チケットが collapse クラスを持つことを確認
-$response.Content -match "issue-{子チケットID}.*collapse"
-```
-
-**期待結果:** 子チケットが `collapse` クラスを持つ
-
----
-
-**テストケース D: expand_all=false の場合（上限が0）**
-
-**前提条件:**
-- `subtask_list_accordion_expand_all` 設定が `false` であること
-- ユーザーの `subtasks_default_expand_limit_upper` が `0` であること
-
-**確認方法:**
-```ruby
-# 設定を変更
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = false
-Setting.plugin_redmine_studio_plugin = settings
-
-# ユーザー設定を変更（上限を0に設定）
-User.current.pref.subtasks_default_expand_limit_upper = 0
-User.current.pref.save
-```
-
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
-# 子チケットが collapse クラスを持つことを確認（上限0なので常に折りたたみ）
-$response.Content -match "issue-{子チケットID}.*collapse"
-```
-
-**期待結果:** 子チケットが `collapse` クラスを持つ（上限0のため、子チケットが1件以上あれば常に折りたたみ）
-
-**後処理:**
-```ruby
-# 設定を元に戻す
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_expand_all'] = false
-Setting.plugin_redmine_studio_plugin = settings
-
-User.current.pref.subtasks_default_expand_limit_upper = 10  # デフォルト値
-User.current.pref.save
-```
-
-### [2-9] サーバーモード無効時の動作確認
-
-**前提条件:**
-- `subtask_list_accordion_enable_server_scripting_mode` 設定が `false` であること
-
-**確認方法:**
-```ruby
-# 設定を変更
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_enable_server_scripting_mode'] = false
-Setting.plugin_redmine_studio_plugin = settings
-```
-
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -UseBasicParsing
-# クライアントモードの JS が読み込まれることを確認
-$response.Content -match "subtask_list_accordion_client\.js"
+$BaseUrl = '{BaseUrl}'
+$Container = '{Container}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+function RowClass($html, $id) {
+    # 6.0 以降は id="issue-N"、5.x は class の中の issue-N で行を見分ける
+    $tag = [regex]::Match($html, "<tr [^>]*\bissue-$id\b[^>]*>").Value
+    if ($tag -match 'class="[^"]*\bcollapse\b') { 'collapse' } elseif ($tag -match 'class="[^"]*\bexpand\b') { 'expand' } else { 'none' }
+}
+# 何も返らなかったとき（DB が使用中で落ちたときなど）は 3 回までやり直す
+function Rails([string]$code) {
+    for ($n = 0; $n -lt 3; $n++) {
+        $r = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1
+        if ($r) { return $r }
+    }
+}
+$keys = '%w[subtask_list_accordion_enable_server_scripting_mode subtask_list_accordion_expand_all subtask_list_accordion_collapsed_tracker_ids]'
+function SetSla([string]$assign) { Rails "s = Setting.plugin_redmine_studio_plugin.dup; $assign; Setting.plugin_redmine_studio_plugin = s; puts 'set'" | Out-Null }
+function SetLimit([int]$n) { Rails "p = User.find_by!(login: '{UserLogin}').pref; p.subtasks_default_expand_limit_upper = $n; p.save!; puts 'set'" | Out-Null }
+$orig = Rails "puts [Setting.plugin_redmine_studio_plugin.slice(*$keys).to_json].pack('m0')"
+if (-not $orig) { throw '設定を読めなかった' }
+try {
+    $s = Login '{UserLogin}' '{UserPassword}'
+    function Child1() { RowClass (Invoke-WebRequest -Uri "$BaseUrl/issues/{ParentId}" -WebSession $s -UseBasicParsing).Content {Child1Id} }
+    $server = "s['subtask_list_accordion_enable_server_scripting_mode'] = true"
+    SetSla "$server; s['subtask_list_accordion_expand_all'] = true; s['subtask_list_accordion_collapsed_tracker_ids'] = []"
+    "A: $(Child1)"
+    SetSla "$server; s['subtask_list_accordion_expand_all'] = false"
+    SetLimit 100
+    "B: $(Child1)"
+    SetLimit 1
+    "C: $(Child1)"
+    SetLimit 0
+    "D: $(Child1)"
+} finally {
+    Rails "o = JSON.parse('$orig'.unpack1('m0')); s = Setting.plugin_redmine_studio_plugin.dup; $keys.each { |k| if o.key?(k) then s[k] = o[k] else s.delete(k) end }; Setting.plugin_redmine_studio_plugin = s; puts 'restored'"
+}
 ```
 
 **期待結果:**
-- `subtask_list_accordion_client.js` が読み込まれる
-- `subtask_list_accordion.js`（サーバーモード用）は読み込まれない
+- `A: expand`（すべての子チケットが `expand`）
+- `B: expand`（子孫の数が上限以下）
+- `C: collapse`（子孫の数が上限超過）
+- `D: collapse`（上限 0 のため、子チケットが 1 件以上あれば常に折りたたみ）
+- 最後に `restored`
 
-**後処理:**
-```ruby
-# 設定を元に戻す
-settings = Setting.plugin_redmine_studio_plugin
-settings['subtask_list_accordion_enable_server_scripting_mode'] = true
-Setting.plugin_redmine_studio_plugin = settings
+### [2-9] サーバーモード無効時の動作確認
+
+**確認方法:**
+```powershell
+$BaseUrl = '{BaseUrl}'
+$Container = '{Container}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+# 何も返らなかったとき（DB が使用中で落ちたときなど）は 3 回までやり直す
+function Rails([string]$code) {
+    for ($n = 0; $n -lt 3; $n++) {
+        $r = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1
+        if ($r) { return $r }
+    }
+}
+$keys = '%w[subtask_list_accordion_enable_server_scripting_mode subtask_list_accordion_expand_all subtask_list_accordion_collapsed_tracker_ids]'
+function SetSla([string]$assign) { Rails "s = Setting.plugin_redmine_studio_plugin.dup; $assign; Setting.plugin_redmine_studio_plugin = s; puts 'set'" | Out-Null }
+$orig = Rails "puts [Setting.plugin_redmine_studio_plugin.slice(*$keys).to_json].pack('m0')"
+if (-not $orig) { throw '設定を読めなかった' }
+try {
+    SetSla "s['subtask_list_accordion_enable_server_scripting_mode'] = false"
+    $s = Login '{UserLogin}' '{UserPassword}'
+    $html = (Invoke-WebRequest -Uri "$BaseUrl/issues/{ParentId}" -WebSession $s -UseBasicParsing).Content
+    # クライアントモードの JS が読み込まれ、サーバーモード用の JS は読み込まれない
+    "client_js: $($html -match 'subtask_list_accordion_client(-[0-9a-f]+)?\.js') server_js: $($html -match 'subtask_list_accordion(-[0-9a-f]+)?\.js')"
+} finally {
+    Rails "o = JSON.parse('$orig'.unpack1('m0')); s = Setting.plugin_redmine_studio_plugin.dup; $keys.each { |k| if o.key?(k) then s[k] = o[k] else s.delete(k) end }; Setting.plugin_redmine_studio_plugin = s; puts 'restored'"
+}
 ```
+
+**期待結果:**
+- `client_js: True server_js: False`
+- 最後に `restored`
 
 ### [2-10] 子チケット一覧がコアの表示設定に追随する
 
 アコーディオンの一覧はコアの描画（`render_descendants_tree`）を後加工して出力するため、
-列・ヘッダ行・ボタン列は常にコアと一致する。
+列・ヘッダ行・ボタン列は常にコアと一致する。サーバーモードを有効にして、次の 3 つを確かめる。
 
-**テストケース A: 表示設定の反映（Redmine 6.0 以降のみ）**
-
-**前提条件:**
-- 孫チケットを持つ親チケットが存在すること
-
-**確認方法:**
-```ruby
-# 関連チケット一覧の表示設定を変更
-Setting.display_related_issues_table_headers = 1
-Setting.related_issues_default_columns = %w[status priority assigned_to]
-```
-
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
-$html = $response.Content
-# ヘッダ行が出力される
-$html -match 'thead class="related-issues"'
-# 設定した列が出力される
-$html -match 'td class="priority'
-```
-
-**期待結果:** いずれも `True`（ヘッダ行と設定どおりの列が表示される）
-
-**後処理:**
-```ruby
-# 設定を元に戻す
-Setting.display_related_issues_table_headers = 0
-Setting.related_issues_default_columns = %w[status assigned_to start_date due_date done_ratio]
-```
-
-**テストケース B: 列構成がコア描画と一致する**
-
-**前提条件:**
-- 孫チケットを持つ親チケット（アコーディオン描画）と、子のみの親チケット（コア描画）が存在すること
+- テストケース B: 列構成がコア描画と一致する。孫ありの親チケット（`{ParentId}`、アコーディオン描画）と子のみの親チケット（`{CoreParentId}`、コア描画）の子チケット一覧（`#issue_tree` 内）の td クラスの種類を比べる
+- テストケース C: アコーディオン属性（`cs` / `ce` / `rank`・`treearrow`）が付く
+- テストケース A: 表示設定の反映（Redmine 6.0 以降のみ）。関連チケット一覧の表示設定（ヘッダ行あり・列は status / priority / assigned_to）に変えると、ヘッダ行と設定どおりの列が出る。設定は `finally` で元の値に戻す
 
 **確認方法:**
 ```powershell
-# 両チケットの子チケット一覧（#issue_tree 内）の td クラスの種類を抽出して比較する
-# 注: done_ratio 列の進捗バーは入れ子の <table> を含むため、抽出は "relations" の div までを範囲にする
-$accCols  = # 孫ありチケットの td class 一覧（重複除去）
-$coreCols = # 孫なしチケットの td class 一覧（重複除去）
-Compare-Object $accCols $coreCols
+$BaseUrl = '{BaseUrl}'
+$Container = '{Container}'
+function Login($login, $password) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString($login))&password=$([uri]::EscapeDataString($password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+# 何も返らなかったとき（DB が使用中で落ちたときなど）は 3 回までやり直す
+function Rails([string]$code) {
+    for ($n = 0; $n -lt 3; $n++) {
+        $r = docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $code 2>$null | Select-Object -Last 1
+        if ($r) { return $r }
+    }
+}
+$keys = '%w[subtask_list_accordion_enable_server_scripting_mode subtask_list_accordion_expand_all subtask_list_accordion_collapsed_tracker_ids]'
+function SetSla([string]$assign) { Rails "s = Setting.plugin_redmine_studio_plugin.dup; $assign; Setting.plugin_redmine_studio_plugin = s; puts 'set'" | Out-Null }
+$orig = Rails "puts [Setting.plugin_redmine_studio_plugin.slice(*$keys).to_json].pack('m0')"
+if (-not $orig) { throw '設定を読めなかった' }
+# 関連チケット一覧の表示設定（Redmine 6.0 以降だけにある。無い版は none）
+$origCore = Rails "puts Setting.respond_to?(:related_issues_default_columns) ? [{ h: Setting.display_related_issues_table_headers, c: Setting.related_issues_default_columns }.to_json].pack('m0') : 'none'"
+try {
+    SetSla "s['subtask_list_accordion_enable_server_scripting_mode'] = true"
+    $s = Login '{UserLogin}' '{UserPassword}'
+    function Page($id) { (Invoke-WebRequest -Uri "$BaseUrl/issues/$id" -WebSession $s -UseBasicParsing).Content }
+    # 子チケット一覧（#issue_tree の form の中）の td class の種類
+    function TreeCols($html) {
+        $i = $html.IndexOf('id="issue_tree"'); $j = $html.IndexOf('</form>', $i)
+        [regex]::Matches($html.Substring($i, $j - $i), '<td class="([^"]*)"') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+    }
+    $acc = Page {ParentId}
+    $accCols = TreeCols $acc
+    $coreCols = TreeCols (Page {CoreParentId})
+    "B: same_columns=$($null -eq (Compare-Object $accCols $coreCols)) columns=$($accCols -join ',')"
+    "C: attrs=$($acc -match ' cs="\d+" ce="\d+" rank="\d+"') treearrow=$($acc -match 'span class="treearrow"')"
+    if ($origCore -eq 'none') {
+        'A: SKIP（Redmine 6.0 より前）'
+    } else {
+        Rails "Setting.display_related_issues_table_headers = 1; Setting.related_issues_default_columns = %w[status priority assigned_to]; puts 'set'" | Out-Null
+        $html = Page {ParentId}
+        "A: thead=$($html -match 'thead class="related-issues"') priority=$($html -match 'td class="priority')"
+    }
+} finally {
+    if ($origCore -and $origCore -ne 'none') {
+        Rails "o = JSON.parse('$origCore'.unpack1('m0')); Setting.display_related_issues_table_headers = o['h']; Setting.related_issues_default_columns = o['c']; puts 'restored'"
+    }
+    Rails "o = JSON.parse('$orig'.unpack1('m0')); s = Setting.plugin_redmine_studio_plugin.dup; $keys.each { |k| if o.key?(k) then s[k] = o[k] else s.delete(k) end }; Setting.plugin_redmine_studio_plugin = s; puts 'restored'"
+}
 ```
 
-**期待結果:** 差分なし（Redmine 5.x では両者とも start_date / due_date 列を含む固定列）
-
-**テストケース C: アコーディオン属性の付与**
-
-**確認方法:**
-```powershell
-$response = Invoke-WebRequest -Uri "{BaseUrl}/issues/{親チケットID}" -WebSession $session -UseBasicParsing
-$html = $response.Content
-# 各行に開閉用の属性・クラスが付与される
-$html -match ' cs="\d+" ce="\d+" rank="\d+"'
-$html -match 'span class="treearrow"'
-```
-
-**期待結果:** いずれも `True`
+**期待結果:**
+- `B: same_columns=True`（差分なし。Redmine 5.x では両者とも start_date / due_date 列を含む固定列）
+- `C: attrs=True treearrow=True`
+- `A: thead=True priority=True`（Redmine 6.0 以降。5.x は `A: SKIP`）
+- 最後に `restored`（6.0 以降は 2 行）
 
 ---
 

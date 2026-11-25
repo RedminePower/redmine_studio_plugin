@@ -1,0 +1,22 @@
+api.studio_setting_versions do
+  # 本人の設定：id（書き込み先）と、保存のたびに進む版
+  api.array :own do
+    @own_settings.each do |setting|
+      api.studio_setting do
+        api.id setting.id
+        api.schema_type setting.schema_type
+        api.version setting.version
+      end
+    end
+  end
+
+  # ids で頼んだ設定のうち読めるもの（範囲は問わない）：変わったかどうかは版で見る
+  api.array :team do
+    @team_settings.each do |setting|
+      api.studio_setting do
+        api.id setting.id
+        api.version setting.version
+      end
+    end
+  end
+end

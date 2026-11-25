@@ -16,6 +16,10 @@ Rails.application.routes.draw do
   # Cache Bundle
   get 'cache_bundle', to: 'cache_bundles#show'
 
+  # Server Logs (JSON only)
+  get 'server_logs', to: 'server_logs#index', defaults: { format: 'json' }, constraints: { format: 'json' }
+  get 'server_logs/content', to: 'server_logs#content', defaults: { format: 'json' }, constraints: { format: 'json' }
+
   # Issues Bulk Write (create/update multiple issues in one request)
   post 'issues/bulk_write', to: 'issues_bulk_write#create'
 
@@ -36,6 +40,10 @@ Rails.application.routes.draw do
 
   # Studio Settings
   resources :studio_settings, only: [:index, :show, :create, :update, :destroy] do
+    collection do
+      # 版だけを返す軽い問い合わせ（中身は返さない）
+      post 'versions', to: 'studio_settings#versions'
+    end
     member do
       get 'users', to: 'studio_setting_users#index'
       put 'users', to: 'studio_setting_users#replace'

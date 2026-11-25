@@ -1,0 +1,2 @@
+en:
+  error_activity_infos_failed: Redmine could not build the activities. Please try again later, and if the problem persists, contact your Redmine administrator (the cause is recorded in the Redmine log).

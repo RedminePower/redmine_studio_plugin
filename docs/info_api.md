@@ -60,10 +60,17 @@ Redmine の環境情報を取得。
         "id": "redmine_studio_plugin",
         "version": "1.1.4"
       }
-    ]
+    ],
+    "app_server": {
+      "name": "puma",
+      "capacity": 5
+    },
+    "log_level": "info"
   }
 }
 ```
+
+`app_server` と `log_level` は、システム管理者のときだけ返す（ほかのユーザーには項目ごと返さない）。ブラウザでサインインした鍵のときは、Server Logs API と同じく、Redmine Studio のサインイン用アプリの鍵に限り、ユーザーの設定がシステム管理者なら返す。
 
 ---
 
@@ -82,6 +89,8 @@ Redmine の環境情報を取得。
 | `text_formatting` | string | テキスト書式（textile, common_mark など） |
 | `scm` | array | インストール済み SCM の一覧 |
 | `plugins` | array | インストール済みプラグインの一覧 |
+| `app_server` | object | 動いているアプリケーションサーバー（システム管理者のときだけ） |
+| `log_level` | string / null | ログのレベル（`debug`・`info`・`warn`・`error`・`fatal`・`unknown`）。取れなければ `null`（システム管理者のときだけ）。`warn` 以上だと、リクエストごとの行（Started・Completed）がログに出ない |
 
 ### scm 配列
 
@@ -98,3 +107,12 @@ Redmine の環境情報を取得。
 |-----------|-----|------|
 | `id` | string | プラグイン ID |
 | `version` | string | プラグインのバージョン |
+
+### app_server（システム管理者のときだけ）
+
+| フィールド | 型 | 説明 |
+|-----------|-----|------|
+| `name` | string | `puma`・`passenger`・`thin`・`unicorn`・`webrick`・`unknown`。リクエストの `SERVER_SOFTWARE` と、そのサーバーで動いているときだけある定数で決める |
+| `capacity` | integer / null | 同時に処理できるリクエストの数。Puma は設定の値（ワーカーの数 × 最大スレッド数）、取れなければ `Puma.stats` から取る。Thin・Passenger・Unicorn・WEBrick など、分からないときは `null` |
+
+取れない項目は `null` にし、`/info` そのものは失敗させない。

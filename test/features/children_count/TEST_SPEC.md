@@ -32,6 +32,8 @@
 
 ## 1. Runner テスト
 
+チケットを作る試験は、試験の中でプロジェクト（とユーザー・ロール）を作り、終わったら `ensure` で消す。前からあるデータには頼らない。
+
 ### [1-1] Issue パッチ適用確認
 
 **確認方法:**
@@ -106,13 +108,37 @@ puts "label_children_count_others: #{I18n.t(:label_children_count_others, count:
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-7_NoChildren')
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-7_NoChildren', author: user_a)
-
-puts "count: #{parent.children_count_value}"
+  puts "count: #{parent.children_count_value}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:** `count: 0`
@@ -121,17 +147,41 @@ puts "count: #{parent.children_count_value}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-8_Parent')
+  mk_issue.call('CC_1-8_Child1', parent)
+  mk_issue.call('CC_1-8_Child2', parent)
+  mk_issue.call('CC_1-8_Child3', parent)
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-8_Parent', author: user_a)
-child1 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-8_Child1', author: user_a, parent_issue_id: parent.id)
-child2 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-8_Child2', author: user_a, parent_issue_id: parent.id)
-child3 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-8_Child3', author: user_a, parent_issue_id: parent.id)
-
-fresh = Issue.find(parent.id)
-puts "count: #{fresh.children_count_value}"
+  fresh = Issue.find(parent.id)
+  puts "count: #{fresh.children_count_value}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:** `count: 3`
@@ -140,18 +190,42 @@ puts "count: #{fresh.children_count_value}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-9_Parent')
+  child = mk_issue.call('CC_1-9_Child', parent)
+  mk_issue.call('CC_1-9_Grandchild', child)
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-9_Parent', author: user_a)
-child = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-9_Child', author: user_a, parent_issue_id: parent.id)
-grandchild = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-9_Grandchild', author: user_a, parent_issue_id: child.id)
-
-fresh_parent = Issue.find(parent.id)
-fresh_child = Issue.find(child.id)
-puts "parent_count: #{fresh_parent.children_count_value}"
-puts "child_count: #{fresh_child.children_count_value}"
+  fresh_parent = Issue.find(parent.id)
+  fresh_child = Issue.find(child.id)
+  puts "parent_count: #{fresh_parent.children_count_value}"
+  puts "child_count: #{fresh_child.children_count_value}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:**
@@ -162,21 +236,45 @@ puts "child_count: #{fresh_child.children_count_value}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-10_Parent')
+  child1 = mk_issue.call('CC_1-10_Child1', parent)
+  child2 = mk_issue.call('CC_1-10_Child2', parent)
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-10_Parent', author: user_a)
-child1 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-10_Child1', author: user_a, parent_issue_id: parent.id)
-child2 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-10_Child2', author: user_a, parent_issue_id: parent.id)
-
-fresh = Issue.find(parent.id)
-tooltip = fresh.children_tooltip
-puts "tooltip:"
-puts tooltip
-puts "---"
-puts "contains_child1: #{tooltip.include?("##{child1.id} CC_1-10_Child1")}"
-puts "contains_child2: #{tooltip.include?("##{child2.id} CC_1-10_Child2")}"
+  fresh = Issue.find(parent.id)
+  tooltip = fresh.children_tooltip
+  puts "tooltip:"
+  puts tooltip
+  puts "---"
+  puts "contains_child1: #{tooltip.include?("##{child1.id} CC_1-10_Child1")}"
+  puts "contains_child2: #{tooltip.include?("##{child2.id} CC_1-10_Child2")}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:**
@@ -189,23 +287,47 @@ puts "contains_child2: #{tooltip.include?("##{child2.id} CC_1-10_Child2")}"
 ```ruby
 # 期待値が日本語のため、直前のケースのロケール（[1-6] が :en に変更）に依存しないよう明示する
 I18n.locale = :ja
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-11_Parent')
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-11_Parent', author: user_a)
+  # 12 件の子チケットを作成
+  12.times do |i|
+    mk_issue.call("CC_1-11_Child_#{i + 1}", parent)
+  end
 
-# 12 件の子チケットを作成
-12.times do |i|
-  Issue.create(project: project, tracker: project.trackers.first, subject: "CC_1-11_Child_#{i + 1}", author: user_a, parent_issue_id: parent.id)
+  fresh = Issue.find(parent.id)
+  tooltip = fresh.children_tooltip
+  lines = tooltip.split("\n")
+  puts "total_lines: #{lines.size}"
+  puts "last_line: #{lines.last}"
+  puts "count: #{fresh.children_count_value}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
 end
-
-fresh = Issue.find(parent.id)
-tooltip = fresh.children_tooltip
-lines = tooltip.split("\n")
-puts "total_lines: #{lines.size}"
-puts "last_line: #{lines.last}"
-puts "count: #{fresh.children_count_value}"
 ```
 
 **期待結果:**
@@ -217,21 +339,45 @@ puts "count: #{fresh.children_count_value}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-12_Parent')
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-12_Parent', author: user_a)
+  long_subject = 'あ' * 40  # 40 文字
+  mk_issue.call(long_subject, parent)
 
-long_subject = 'あ' * 40  # 40 文字
-child = Issue.create(project: project, tracker: project.trackers.first, subject: long_subject, author: user_a, parent_issue_id: parent.id)
+  fresh = Issue.find(parent.id)
+  tooltip = fresh.children_tooltip
+  puts "tooltip: #{tooltip}"
 
-fresh = Issue.find(parent.id)
-tooltip = fresh.children_tooltip
-puts "tooltip: #{tooltip}"
-
-expected_truncated = ('あ' * 30) + '...'
-puts "contains_truncated: #{tooltip.include?(expected_truncated)}"
+  expected_truncated = ('あ' * 30) + '...'
+  puts "contains_truncated: #{tooltip.include?(expected_truncated)}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:**
@@ -241,19 +387,43 @@ puts "contains_truncated: #{tooltip.include?(expected_truncated)}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-13_Parent')
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-13_Parent', author: user_a)
+  exact_subject = 'い' * 30  # ちょうど 30 文字
+  mk_issue.call(exact_subject, parent)
 
-exact_subject = 'い' * 30  # ちょうど 30 文字
-child = Issue.create(project: project, tracker: project.trackers.first, subject: exact_subject, author: user_a, parent_issue_id: parent.id)
-
-fresh = Issue.find(parent.id)
-tooltip = fresh.children_tooltip
-puts "ends_with_dots: #{tooltip.end_with?('...')}"
-puts "contains_exact: #{tooltip.include?(exact_subject)}"
+  fresh = Issue.find(parent.id)
+  tooltip = fresh.children_tooltip
+  puts "ends_with_dots: #{tooltip.end_with?('...')}"
+  puts "contains_exact: #{tooltip.include?(exact_subject)}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:**
@@ -263,53 +433,67 @@ puts "contains_exact: #{tooltip.include?(exact_subject)}"
 ### [1-14] visibility 適用: 権限のない子はカウントに含まれない
 
 **前提条件:**
-- 別プロジェクトに子チケットを作成するため、`Setting.cross_project_subtasks = 'system'` に一時的に設定（テスト後に元に戻す）
+- 別プロジェクトに子チケットを作成するため、`Setting.cross_project_subtasks = 'system'` に一時的に設定（`ensure` で元に戻す）
 
 **確認方法:**
 ```ruby
-# 非表示プロジェクト（is_public: false、メンバー外）を用意し、
-# その配下の子チケットがカウントされないことを確認
-
+# 一般ユーザー（guest）がメンバーのプロジェクトに親と子 1 件、メンバーでない非公開プロジェクトに子 1 件を作り、
+# guest から見えない子がカウントされないことを確認する
 orig_setting = Setting.cross_project_subtasks
 Setting.cross_project_subtasks = 'system'
-
-User.current = User.find(1)  # admin
-project_public = Project.first
-
-private_proj = Project.where(is_public: false, name: 'CC_1-14_Private').first
-unless private_proj
-  private_proj = Project.create(name: 'CC_1-14_Private', identifier: "cc_1_14_private_#{Time.now.to_i}", is_public: false)
-  private_proj.trackers = project_public.trackers
-  private_proj.enabled_module_names = ['issue_tracking']
-  private_proj.save
-end
-
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
 admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  private_proj = mk_project.call('private')
 
-parent = Issue.create(project: project_public, tracker: project_public.trackers.first, subject: 'CC_1-14_Parent', author: admin)
-visible_child = Issue.create(project: project_public, tracker: project_public.trackers.first, subject: 'CC_1-14_Visible', author: admin, parent_issue_id: parent.id)
-hidden_child = Issue.create(project: private_proj, tracker: private_proj.trackers.first, subject: 'CC_1-14_Hidden', author: admin, parent_issue_id: parent.id)
+  parent = mk_issue.call('CC_1-14_Parent')
+  mk_issue.call('CC_1-14_Visible', parent)
+  mk_issue.call('CC_1-14_Hidden', parent, private_proj)
 
-# 一般ユーザー（非メンバー）視点でカウント
-guest = User.find_by(login: 'cc_guest_user')
-unless guest
-  guest = User.new(login: 'cc_guest_user', firstname: 'CC', lastname: 'Guest', mail: 'cc_guest@example.com', status: 1)
-  guest.password = 'password123'
-  guest.password_confirmation = 'password123'
-  guest.save
+  # guest は project のメンバー（チケットを見られるロール）で、private_proj のメンバーではない
+  role = Role.create!(name: "CC_Viewer_#{sfx}", permissions: [:view_issues], issues_visibility: 'all')
+  made_roles << role
+  guest = User.new(login: "cc_guest_#{sfx}", firstname: 'CC', lastname: 'Guest', mail: "cc_guest_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+  guest.password = guest.password_confirmation = SecureRandom.hex(8)
+  guest.save!
+  made_users << guest
+  Member.create!(principal: guest, project: project, roles: [role])
+
+  User.current = guest
+  fresh = Issue.find(parent.id)
+  count = fresh.children_count_value
+  puts "guest_count: #{count}"
+
+  # admin 視点では両方カウントされる
+  User.current = admin
+  admin_count = Issue.find(parent.id).children_count_value
+  puts "admin_count: #{admin_count}"
+ensure
+  Setting.cross_project_subtasks = orig_setting
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
 end
-
-User.current = guest
-fresh = Issue.find(parent.id)
-count = fresh.children_count_value
-puts "guest_count: #{count}"
-
-# admin 視点では両方カウントされる
-User.current = User.find(1)
-admin_count = Issue.find(parent.id).children_count_value
-puts "admin_count: #{admin_count}"
-
-Setting.cross_project_subtasks = orig_setting
 ```
 
 **期待結果:**
@@ -320,18 +504,51 @@ Setting.cross_project_subtasks = orig_setting
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_Parent')
+  mk_issue.call('CC_Child1', parent)
+  mk_issue.call('CC_Child2', parent)
+  mk_issue.call('CC_Single')
 
-q = IssueQuery.new(name: 'test_1_15', filters: {})
-q.column_names = [:id, :subject, :children_count]
-issues = q.issues(limit: 5)
+  q = IssueQuery.new(name: 'test_1_15', filters: {}, project: project)
+  q.column_names = [:id, :subject, :children_count]
+  issues = q.issues(limit: 5)
 
-preloaded = issues.select { |i| i.instance_variable_defined?(:@children_count_value) }
-puts "preloaded: #{preloaded.size}"
-puts "total: #{issues.size}"
+  preloaded = issues.select { |i| i.instance_variable_defined?(:@children_count_value) }
+  puts "preloaded: #{preloaded.size}"
+  puts "total: #{issues.size}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
-**期待結果:** `preloaded` と `total` が同じ値
+**期待結果:**
+- `preloaded: 4`
+- `total: 4`（`preloaded` と `total` が同じ値）
 
 ### [1-15b] プリロード時に children_items もセットされる
 
@@ -339,77 +556,162 @@ children_count カラム表示時に children_items (子チケット一覧) が�
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_Parent')
+  mk_issue.call('CC_Child1', parent)
+  mk_issue.call('CC_Child2', parent)
+  mk_issue.call('CC_Single')
 
-q = IssueQuery.new(name: 'test_1_15b', filters: {})
-q.column_names = [:id, :subject, :children_count]
-issues = q.issues(limit: 5)
+  q = IssueQuery.new(name: 'test_1_15b', filters: {}, project: project)
+  q.column_names = [:id, :subject, :children_count]
+  issues = q.issues(limit: 5)
 
-with_count = issues.select { |i| i.instance_variable_defined?(:@children_count_value) }
-with_items = issues.select { |i| i.instance_variable_defined?(:@children_items) }
-puts "with_count: #{with_count.size}"
-puts "with_items: #{with_items.size}"
-puts "total: #{issues.size}"
-puts "tooltip_ok: #{issues.all? { |i| i.children_tooltip.is_a?(String) }}"
+  with_count = issues.select { |i| i.instance_variable_defined?(:@children_count_value) }
+  with_items = issues.select { |i| i.instance_variable_defined?(:@children_items) }
+  puts "with_count: #{with_count.size}"
+  puts "with_items: #{with_items.size}"
+  puts "total: #{issues.size}"
+  puts "tooltip_ok: #{issues.all? { |i| i.children_tooltip.is_a?(String) }}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:**
-- `with_count`、`with_items`、`total` がすべて同じ値（プリロードで両方セット済み）
+- `with_count: 4`、`with_items: 4`、`total: 4`（すべて同じ値。プリロードで両方セット済み）
 - `tooltip_ok: true`（children_items から導出したツールチップが文字列で得られる）
 
 ### [1-16] ソート実行確認（joins_for_order_statement）
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_Parent')
+  mk_issue.call('CC_Child1', parent)
+  mk_issue.call('CC_Child2', parent)
+  mk_issue.call('CC_Single')
 
-q = IssueQuery.new(name: 'test_1_16', filters: {})
-q.column_names = [:id, :children_count]
-q.sort_criteria = [['children_count', 'desc']]
+  q = IssueQuery.new(name: 'test_1_16', filters: {}, project: project)
+  q.column_names = [:id, :children_count]
+  q.sort_criteria = [['children_count', 'desc']]
 
-# ソート実行でエラーが出ないことを確認
-issues = q.issues(limit: 5)
-puts "sort_ok: true"
-puts "count: #{issues.size}"
+  # ソート実行でエラーが出ないことを確認
+  issues = q.issues(limit: 5)
+  puts "sort_ok: true"
+  puts "count: #{issues.size}"
+  puts "first_is_parent: #{issues.first&.id == parent.id}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:**
 - `sort_ok: true`（エラーなし）
-- `count:` 0以上の数値
+- `count: 4`
+- `first_is_parent: true`（子 2 件の親が先頭）
 
 ### [1-16b] ソート結果の順序検証（多い順）
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  # 子の数が異なる 3 つの親を作成
+  parent_3 = mk_issue.call('CC_1-16b_Parent3')
+  3.times { |i| mk_issue.call("CC_1-16b_P3_C#{i + 1}", parent_3) }
 
-# 子の数が異なる 3 つの親を作成
-parent_3 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-16b_Parent3', author: user_a)
-3.times { |i| Issue.create(project: project, tracker: project.trackers.first, subject: "CC_1-16b_P3_C#{i + 1}", author: user_a, parent_issue_id: parent_3.id) }
+  parent_1 = mk_issue.call('CC_1-16b_Parent1')
+  mk_issue.call('CC_1-16b_P1_C1', parent_1)
 
-parent_1 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-16b_Parent1', author: user_a)
-Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-16b_P1_C1', author: user_a, parent_issue_id: parent_1.id)
+  parent_5 = mk_issue.call('CC_1-16b_Parent5')
+  5.times { |i| mk_issue.call("CC_1-16b_P5_C#{i + 1}", parent_5) }
 
-parent_5 = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-16b_Parent5', author: user_a)
-5.times { |i| Issue.create(project: project, tracker: project.trackers.first, subject: "CC_1-16b_P5_C#{i + 1}", author: user_a, parent_issue_id: parent_5.id) }
+  # desc ソートで取得し、並び順を確認（件名で絞ると、この 3 件だけになる）
+  q = IssueQuery.new(name: 'test_1_16b', filters: {}, project: project)
+  q.column_names = [:id, :subject, :children_count]
+  q.sort_criteria = [['children_count', 'desc']]
+  q.add_filter('subject', '~', ['CC_1-16b_Parent'])
 
-# desc ソートで取得し、3 件中の並び順を確認
-q = IssueQuery.new(name: 'test_1_16b', filters: {})
-q.column_names = [:id, :subject, :children_count]
-q.sort_criteria = [['children_count', 'desc']]
-q.add_filter('subject', '~', ['CC_1-16b_Parent'])
+  results = q.issues
+  ordered_ids = results.map(&:id)
+  puts "order: #{ordered_ids.inspect}"
 
-results = q.issues
-ordered_ids = results.map(&:id)
-puts "order: #{ordered_ids.inspect}"
-
-# parent_5 → parent_3 → parent_1 の順になっていること
-idx_5 = ordered_ids.index(parent_5.id)
-idx_3 = ordered_ids.index(parent_3.id)
-idx_1 = ordered_ids.index(parent_1.id)
-puts "desc_order_ok: #{idx_5 < idx_3 && idx_3 < idx_1}"
+  # parent_5 → parent_3 → parent_1 の順になっていること
+  puts "desc_order_ok: #{ordered_ids == [parent_5.id, parent_3.id, parent_1.id]}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:** `desc_order_ok: true`（子チケットの多い親から順に並ぶ）
@@ -428,15 +730,39 @@ puts "default_order: #{col.default_order}"
 
 **確認方法:**
 ```ruby
-User.current = User.find(1)
-project = Project.first
-user_a = User.find(1)
+# 試験のデータをその場で作る（終わったら消す）
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+User.current = admin
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+made_projects, made_users, made_roles = [], [], []
+mk_project = ->(name) {
+  pr = Project.new(name: "CC_#{name}_#{sfx}", identifier: "cc-#{name}-#{sfx}", is_public: false)
+  pr.enabled_module_names = %w[issue_tracking]
+  pr.trackers = [tracker]
+  pr.save!
+  made_projects << pr
+  pr
+}
+project = nil
+mk_issue = ->(subject, parent = nil, pr = project) {
+  Issue.create!(project: pr, tracker: tracker, subject: subject, author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+begin
+  project = mk_project.call('main')
+  parent = mk_issue.call('CC_1-18_NoChildren')
 
-parent = Issue.create(project: project, tracker: project.trackers.first, subject: 'CC_1-18_NoChildren', author: user_a)
-
-fresh = Issue.find(parent.id)
-puts "tooltip: '#{fresh.children_tooltip}'"
-puts "is_empty: #{fresh.children_tooltip.empty?}"
+  fresh = Issue.find(parent.id)
+  puts "tooltip: '#{fresh.children_tooltip}'"
+  puts "is_empty: #{fresh.children_tooltip.empty?}"
+ensure
+  User.current = admin
+  made_projects.reverse_each { |pr| Project.find_by(id: pr.id)&.destroy }
+  made_users.each { |u| u.destroy if User.exists?(u.id) }
+  made_roles.each { |r| r.destroy if Role.exists?(r.id) }
+end
 ```
 
 **期待結果:**
@@ -446,15 +772,59 @@ puts "is_empty: #{fresh.children_tooltip.empty?}"
 
 ## 2. HTTP テスト
 
+**実行方法:**
+PowerShell 7 でチケット一覧（HTML / CSV）を、管理者でログインしたセッションで取得する（画面・CSV は Basic 認証を受け付けないため、各試験の頭でログインする）。
 HTTP 例の `{BaseUrl}`・`{Username}`・`{Password}`（管理者）は実行環境から注入する（プレースホルダの契約は `test/README.md`）。
+表示の中身を見る試験は、用意で作ったプロジェクト（`/projects/{ProjectIdentifier}/issues`）の一覧に絞って、前からあるチケットに左右されないようにする。
+
+**用意（HTTP テストの前に 1 回）:**
+試験に使うデータを Runner で作る（前回の残りがあれば先に消す）。
+- 非公開のプロジェクトに、子チケットを 2 件持つ親チケット（`{ParentIssueId}`）と、子のないチケット 1 件
+
+最後の行の値を、各試験の `{ProjectIdentifier}`・`{ParentIssueId}` に入れる。
+
+```ruby
+admin = User.find(1)
+User.current = admin
+# 前回の残りを消す
+Project.where('identifier LIKE ?', 'cch-%').order(lft: :desc).each(&:destroy)
+sfx = SecureRandom.hex(3)
+tracker = Tracker.order(:position).first
+status = IssueStatus.where(is_closed: false).order(:position).first
+priority = IssuePriority.default || IssuePriority.active.first
+pr = Project.new(name: "CCH_#{sfx}", identifier: "cch-#{sfx}", is_public: false)
+pr.enabled_module_names = %w[issue_tracking]
+pr.trackers = [tracker]
+pr.save!
+mk = ->(name, parent = nil) {
+  Issue.create!(project: pr, tracker: tracker, subject: "CCH_#{name}_#{sfx}", author: admin, status: status, priority: priority, parent_issue_id: parent&.id)
+}
+parent = mk.call('Parent')
+mk.call('Child1', parent)
+mk.call('Child2', parent)
+mk.call('Single')
+puts({ ProjectIdentifier: pr.identifier, ParentIssueId: parent.id }.to_json)
+```
+
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+User.current = User.find(1)
+Project.where('identifier LIKE ?', 'cch-%').order(lft: :desc).each(&:destroy)
+puts 'cleaned'
+```
 
 ### [2-1] チケット一覧で children_count カラムを指定して表示できる
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count' `
-  -Credential $cred -AllowUnencryptedAuthentication
+  -WebSession $s -UseBasicParsing
 $response.StatusCode
 ```
 
@@ -464,9 +834,13 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1' `
-  -Credential $cred -AllowUnencryptedAuthentication
+  -WebSession $s -UseBasicParsing
 $response.Content -match 'children_count'
 ```
 
@@ -474,14 +848,17 @@ $response.Content -match 'children_count'
 
 ### [2-3] カウント値が 0 のチケットは span でレンダリングされる
 
-**前提条件:**
-- 子チケットがないチケットが存在すること
+用意で作った子のないチケットを使う。
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:asc' `
-  -Credential $cred -AllowUnencryptedAuthentication
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/projects/{ProjectIdentifier}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:asc' `
+  -WebSession $s -UseBasicParsing
 $response.Content -match '<span class="children-count">0</span>'
 ```
 
@@ -489,24 +866,34 @@ $response.Content -match '<span class="children-count">0</span>'
 
 ### [2-4] カウント値が 1 以上のチケットは a タグでリンクされる
 
-**前提条件:**
-- 子チケットがあるチケットが存在すること（[1-8] などで作成済み）
+用意で作った親チケット（子 2 件）を使う。
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
-  -Credential $cred -AllowUnencryptedAuthentication
-$response.Content -match 'class="children-count"[^>]*>\d+</a>'
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/projects/{ProjectIdentifier}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
+  -WebSession $s -UseBasicParsing
+$response.Content -match 'class="children-count"[^>]*>2</a>'
 ```
 
-**期待結果:** `True`
+**期待結果:** `True`（親チケットの子チケット数 2 がリンクで出る）
 
 ### [2-5] リンク先 URL に parent_id フィルタが含まれる
 
 **確認方法:**
 ```powershell
-# [2-4] と同じリクエスト結果を使う
+# [2-4] と同じリクエスト
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/projects/{ProjectIdentifier}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
+  -WebSession $s -UseBasicParsing
 $response.Content -match 'parent_id.*set_filter=1|set_filter=1.*parent_id'
 ```
 
@@ -515,38 +902,38 @@ $response.Content -match 'parent_id.*set_filter=1|set_filter=1.*parent_id'
 ### [2-5b] リンク先 URL はクロスプロジェクト（project_id を含まない）
 
 **前提条件:**
-- 特定のプロジェクト配下の一覧画面（プロジェクトスコープ）からアクセスする
+- 用意で作ったプロジェクト配下の一覧画面（プロジェクトスコープ）からアクセスする
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-
-# 任意のプロジェクト identifier を1つ取得（最初のプロジェクト）
-$projIdResponse = Invoke-RestMethod -Uri '{BaseUrl}/projects.json?limit=1' `
-  -Credential $cred -AllowUnencryptedAuthentication
-$projectId = $projIdResponse.projects[0].identifier
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+$projectId = '{ProjectIdentifier}'
 
 # プロジェクトスコープのチケット一覧を取得
 $response = Invoke-WebRequest -Uri "{BaseUrl}/projects/$projectId/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc" `
-  -Credential $cred -AllowUnencryptedAuthentication
+  -WebSession $s -UseBasicParsing
 
 # children-count クラスを持つ link の href を抽出
-$matches = [regex]::Matches($response.Content, 'href="([^"]+)"[^>]*class="children-count"')
-if ($matches.Count -eq 0) {
+$links = [regex]::Matches($response.Content, 'href="([^"]+)"[^>]*class="children-count"')
+if ($links.Count -eq 0) {
   # class が先・href が後のパターンも試す
-  $matches = [regex]::Matches($response.Content, 'class="children-count"[^>]*href="([^"]+)"')
+  $links = [regex]::Matches($response.Content, 'class="children-count"[^>]*href="([^"]+)"')
 }
 
 $hasProjectId = $false
-foreach ($m in $matches) {
-  $href = $m.Groups[1].Value
+foreach ($link in $links) {
+  $href = $link.Groups[1].Value
   # /issues? か /issues/? で始まり、/projects/{id}/issues ではないこと
   if ($href -match '/projects/[^/]+/issues') {
     $hasProjectId = $true
     break
   }
 }
-Write-Host "matched_links: $($matches.Count)"
+Write-Host "matched_links: $($links.Count)"
 Write-Host "any_link_has_project_scope: $hasProjectId"
 ```
 
@@ -558,7 +945,14 @@ Write-Host "any_link_has_project_scope: $hasProjectId"
 
 **確認方法:**
 ```powershell
-# [2-4] と同じリクエスト結果を使う
+# [2-4] と同じリクエスト
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/projects/{ProjectIdentifier}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
+  -WebSession $s -UseBasicParsing
 $response.Content -match 'title=".*#\d+'
 ```
 
@@ -568,9 +962,13 @@ $response.Content -match 'title=".*#\d+'
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
-  -Credential $cred -AllowUnencryptedAuthentication
+  -WebSession $s -UseBasicParsing
 $response.StatusCode
 ```
 
@@ -580,9 +978,13 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:asc' `
-  -Credential $cred -AllowUnencryptedAuthentication
+  -WebSession $s -UseBasicParsing
 $response.StatusCode
 ```
 
@@ -592,9 +994,13 @@ $response.StatusCode
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
 $response = Invoke-WebRequest -Uri '{BaseUrl}/issues.csv?set_filter=1&c[]=id&c[]=subject&c[]=children_count' `
-  -Credential $cred -AllowUnencryptedAuthentication
+  -WebSession $s -UseBasicParsing
 $response.StatusCode
 # CSV に HTML タグが混入していないことも確認
 $response.Content -notmatch '<span|<a '
@@ -606,14 +1012,17 @@ $response.Content -notmatch '<span|<a '
 
 ### [2-9b] CSV に数値が正しく出力される
 
-**前提条件:**
-- 子チケットがあるチケットが存在すること（[1-8] や [1-16b] で作成済み）
+用意で作ったプロジェクトの一覧を、子チケットの多い順に CSV で取る（先頭のデータ行は子 2 件の親チケット）。
 
 **確認方法:**
 ```powershell
-$cred = New-Object PSCredential('{Username}', (ConvertTo-SecureString '{Password}' -AsPlainText -Force))
-$response = Invoke-WebRequest -Uri '{BaseUrl}/issues.csv?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
-  -Credential $cred -AllowUnencryptedAuthentication
+# 管理者でログインしたセッションを作る（画面・CSV は Basic 認証を受け付けず、匿名で開いてしまうため）
+$page = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable s -UseBasicParsing
+$token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$([uri]::EscapeDataString('{Username}'))&password=$([uri]::EscapeDataString('{Password}'))"
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+$response = Invoke-WebRequest -Uri '{BaseUrl}/projects/{ProjectIdentifier}/issues.csv?set_filter=1&c[]=id&c[]=subject&c[]=children_count&sort=children_count:desc' `
+  -WebSession $s -UseBasicParsing
 
 $csv = $response.Content
 $lines = $csv -split "`n"
@@ -635,7 +1044,7 @@ Write-Host "last_field_is_numeric: $isNumeric"
 
 **期待結果:**
 - `has_header: True`（CSV ヘッダーに「子チケット数」または「Children Count」が含まれる）
-- `last_field_is_numeric: True`（先頭データ行の children_count 列が純粋な数値）
+- `last_field: '2'`、`last_field_is_numeric: True`（先頭データ行の children_count 列が純粋な数値）
 
 ---
 

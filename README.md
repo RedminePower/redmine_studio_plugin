@@ -26,13 +26,14 @@
   - **Issues Bulk Write API** - 複数チケットの作成/更新を 1 リクエストで完結させる
   - **Issues With Extras API** - Issue 取得に Redmine Studio 用の追加フィールドを含めて返す
   - **Time Entry Summaries API** - 作業時間を「人×作業日×プロジェクト」ごとに要約し、変わった区切りを見分けられるようにする
+  - **Server Logs API** - Redmine のログのファイルの一覧と、ファイルの範囲のバイトを返す（システム管理者だけ）
   - **Wiki Preview API** - Wiki テキストを HTML に変換
 
 ## 対応 Redmine
 
-- V5.x (V5.1.11 にて動作確認済み)
-- V6.x (V6.1.1 にて動作確認済み)
-- V7.x (V7.0.1 にて動作確認済み)
+- V5.x (V5.0.14 + Ruby 2.5 / 2.6、V5.1.11 + Ruby 3.2 にて動作確認済み)
+- V6.x (V6.1.1 + Ruby 3.4 にて動作確認済み)
+- V7.x (V7.0.1 + Ruby 4.0 にて動作確認済み)
 
 ## インストール
 
@@ -247,6 +248,7 @@ Redmine Studio が内部で使用する API 群です。各 API の詳細はリ�
 | Issues Bulk Write API | 複数チケットの作成/更新を 1 リクエストで実行 | [docs/issues_bulk_write_api.md](docs/issues_bulk_write_api.md) |
 | Issues With Extras API | Issue 取得に Redmine Studio 用の追加フィールドを含めて返す | [docs/issues_with_extras_api.md](docs/issues_with_extras_api.md) |
 | Time Entry Summaries API | 作業時間を「人×作業日×プロジェクト」ごとに要約して返す | [docs/time_entry_summaries_api.md](docs/time_entry_summaries_api.md) |
+| Server Logs API | ログのファイルの一覧と、ファイルの範囲のバイトを返す（システム管理者だけ） | [docs/server_logs_api.md](docs/server_logs_api.md) |
 | Wiki Preview API | Wiki テキストを HTML に変換 | [docs/wiki_preview_api.md](docs/wiki_preview_api.md) |
 
 ## アンインストール

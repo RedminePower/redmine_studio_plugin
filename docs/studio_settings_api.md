@@ -9,6 +9,7 @@ Redmine Studio の汎用設定を管理する API。
 | `GET /studio_settings.json` | 設定一覧の取得 |
 | `GET /studio_settings/:id.json` | 設定詳細の取得 |
 | `POST /studio_settings.json` | 設定の作成 |
+| `POST /studio_settings/versions.json` | 版だけをまとめて取得 |
 | `PUT /studio_settings/:id.json` | 設定の更新 |
 | `DELETE /studio_settings/:id.json` | 設定の削除 |
 | `GET /studio_settings/:id/users.json` | ユーザー割り当て一覧 |
@@ -40,18 +41,40 @@ GET /studio_settings.xml    → XML 形式で返却
 
 ## アクセス制御（可視性）
 
-`scope_type` により可視性が決まる。全エンドポイントでログインが必須。
+`scope_type` により可視性が決まる。全エンドポイントでログインが必須。`scope_type` は `global`・`project`・`user` のいずれか（それ以外の値は 422。大文字小文字も区別する）。
 
-| scope_type | 閲覧・編集できるユーザー |
-|-----------|------------------------|
-| `global` | 全ログインユーザー |
-| `project` | そのプロジェクトのメンバー |
-| （管理者） | すべての設定（scope を問わない） |
+| scope_type | 読めるユーザー | 書けるユーザー（更新・削除・割り当て・履歴の操作） |
+|-----------|---------------|-----------------------------------------------|
+| `global` | 全ログインユーザー | 全ログインユーザー |
+| `project` | そのプロジェクトのメンバー | そのプロジェクトのメンバー |
+| `user` | 持ち主を見られるユーザー（持ち主本人を含む） | 持ち主（`scope_id` のユーザー）本人 |
+| （管理者） | すべての設定（scope を問わない） | すべての設定（scope を問わない） |
 
-- `GET /studio_settings`（一覧）は可視な設定のみを返す（`project` スコープで非メンバーのものは含まれない）。
-- 個別の設定・履歴・ユーザー割り当てへの操作（取得・作成・更新・削除・復元）で、`project` スコープの設定に非メンバーがアクセスした場合は **403 Forbidden** を返す。
-- `POST /studio_settings` で `project` スコープを指定して作成できるのは、そのプロジェクトのメンバー（または管理者）のみ。`global` は全ログインユーザーが作成できる。
+- `GET /studio_settings`（一覧）は可視な設定のみを返す（`project` スコープで非メンバーのものは含まれない）。`user` スコープの設定は、持ち主を見られる（Redmine のロールの「表示できるユーザー」に従う）ユーザーだけに見え、見られない持ち主の設定は一覧に出ない（1 件取得は 403）。持ち主を見られる人は、一覧でまとめて読める。ロック中・未有効化の持ち主の設定は、管理者だけが読める（Redmine では有効なユーザーしか見られないため）。`user` スコープの payload には、他の人に見られて困る値（パスワード・トークンなど）を入れないこと。
+- 個別の設定・履歴・ユーザー割り当てへの操作（取得・作成・更新・削除・復元）で、読めない・書けない設定にアクセスした場合は **403 Forbidden** を返す。
+- `project` スコープの設定を作成できるのは、そのプロジェクトのメンバー（または管理者）のみ。範囲（`scope_type`、`project` ならその `scope_id`）を更新で変えられるのは管理者だけ（それ以外は 403。変えると、前の範囲の版の中身が新しい範囲の人に見えるため）。範囲を変えたいときは、新しい範囲で作り直す。`scope_id` は実在するプロジェクトの ID が必須（無い・いない ID は、管理者なら 422、管理者でなければ 403）。`global` は全ログインユーザーが作成できる。`user` スコープは下記「本人の設定（user スコープ）」を参照。
 - `GET /users/:id/studio_settings` は、`:id` が自分自身か管理者の場合のみ許可（それ以外は 403）。
+- ユーザーを割り当てられるのは、割り当てる人から見える（Redmine のロールの「表示できるユーザー」に従う）有効なユーザーだけ（グループ・匿名・ロック中・未承認は不可）。割り当てる人が管理者なら、有効なユーザーはだれでも割り当てられる。見えないユーザーは、いないユーザーと同じ 422 で断る。`project` スコープの設定は、そのプロジェクトのメンバーにだけ割り当てられる（それ以外は 422。管理者はどの設定も開けるので、メンバーでなくても割り当てられる）。
+- 返事にある利用者の欄（割り当ての `user`・`assigned_by`、設定の `created_by`・`updated_by`・`deleted_by`、履歴の `changed_by`）は、見る人から見えないユーザーなら `id` だけを返し、`name` を省く（設定・履歴・割り当ての返事と一覧、`include=assignments`、`GET /users/:id/studio_settings` のすべて）。管理者には全員の名前を返す。
+
+### 本人の設定（user スコープ）
+
+ユーザーごとに 1 つずつ持つ設定。`scope_id` が持ち主のユーザー ID。
+
+| 操作 | 振る舞い |
+|------|----------|
+| 作成 | `scope_id` を省くと自分の設定になる。他のユーザーの分を作れるのは管理者だけ（それ以外は 403）。持ち主は実在するユーザーであること（いなければ 422）。同じ持ち主・同じ `schema_type` の設定が既にあれば、作らずに **409 Conflict** で今ある設定を返す |
+| 更新 | `expected_version` が必須（下記「版」）。`scope_type` を `user` から／へ変えることはできない（422）。`scope_id` と `schema_type` は送っても無視する（ただし形が違えば 422） |
+| 削除 | 常に物理削除（`force` を問わない）。削除後は同じ `schema_type` で作り直せる |
+| 履歴 | 残さない（履歴一覧は常に 0 件） |
+| ユーザー割り当て | 割り当てない。置換・追加は 422 |
+| 持ち主の削除 | Redmine でユーザーを削除すると、そのユーザーの本人の設定も物理削除される |
+
+### 版（version）
+
+すべての設定は `version` を持つ。作成時に 1 で、書き込み（更新・論理削除・復元）が成功するたびに 1 進む（中身が変わらない更新でも進む）。履歴の `version`（履歴の通し番号）とは別の値。
+
+`PUT /studio_settings/:id` で `studio_setting` の中に `expected_version` を添えると、今の `version` と比べ、違えば書き込まずに **409 Conflict** で今の設定を返す。`user` スコープでは `expected_version` が必須、それ以外のスコープでは任意（添えなければ比べずに書き込む）。
 
 ---
 
@@ -65,6 +88,7 @@ GET /studio_settings.xml    → XML 形式で返却
 
 | パラメータ | 説明 |
 |-----------|------|
+| `ids` | ID でフィルタ（カンマ区切り。例: `ids=1,2,3`） |
 | `schema_type` | スキーマタイプでフィルタ |
 | `scope_type` | スコープタイプでフィルタ |
 | `scope_id` | スコープ ID でフィルタ |
@@ -85,6 +109,7 @@ GET /studio_settings.xml    → XML 形式で返却
       "scope_type": "global",
       "scope_id": null,
       "schema_version": 0,
+      "version": 1,
       "created_on": "2026-02-19T...",
       "created_by": { "id": 1, "name": "Admin" },
       "updated_on": "2026-02-19T...",
@@ -123,6 +148,7 @@ GET /studio_settings.xml    → XML 形式で返却
     "scope_type": "global",
     "scope_id": null,
     "schema_version": 0,
+    "version": 1,
     "payload": "{\"key\":\"value\"}",
     "created_on": "2026-02-19T...",
     "created_by": { "id": 1, "name": "Admin" },
@@ -185,6 +211,7 @@ GET /studio_settings.xml    → XML 形式で返却
     "scope_type": "global",
     "scope_id": null,
     "schema_version": 0,
+    "version": 1,
     "payload": "{\"key\":\"value\"}",
     "created_on": "2026-02-19T...",
     "created_by": { "id": 1, "name": "Admin" },
@@ -194,6 +221,8 @@ GET /studio_settings.xml    → XML 形式で返却
   }
 }
 ```
+
+`user` スコープで、同じ持ち主・同じ `schema_type` の設定が既にある場合は 409 Conflict。本文は今ある設定（`GET /studio_settings/:id` と同じ形・payload 込み）。
 
 ---
 
@@ -207,10 +236,19 @@ GET /studio_settings.xml    → XML 形式で返却
 {
   "studio_setting": {
     "name": "更新後の設定名",
-    "payload": "{\"updated\":true}"
+    "payload": "{\"updated\":true}",
+    "expected_version": 3
   }
 }
 ```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `expected_version` | `user` スコープでは ○ | 最後に読んだ `version`。`studio_setting` の中に置く（外に置いたものは見ない）。整数でない値は 422 |
+
+- 範囲（`scope_type`、`project` ならその `scope_id`）を変えられるのは管理者だけ（それ以外は 403）。今と同じ値を送るのは、変えたことにならない（読んだ設定を丸ごと送り返してよい）
+- `expected_version` が今の `version` と違う場合は 409 Conflict。本文は今の設定（`GET /studio_settings/:id` と同じ形・payload 込み）。受け取った側は、その内容に変更を重ね直して、その `version` を添えて送り直す
+- 409 の本文は他のエラー（`{ "errors": [...] }`）と形が違う。途中の中継サーバーなどで本文が読めない形に差し替わった場合は、`GET /studio_settings/:id` で取り直す
 
 レスポンス:
 
@@ -223,6 +261,7 @@ GET /studio_settings.xml    → XML 形式で返却
     "scope_type": "global",
     "scope_id": null,
     "schema_version": 0,
+    "version": 4,
     "payload": "{\"updated\":true}",
     "created_on": "2026-02-19T...",
     "created_by": { "id": 1, "name": "Admin" },
@@ -245,7 +284,61 @@ GET /studio_settings.xml    → XML 形式で返却
 |-----------|------|
 | `force` | `1` で物理削除（デフォルトは論理削除） |
 
+`user` スコープの設定は、`force` を問わず物理削除。
+
+この API を使わなくても、次のときは設定が物理削除される（論理削除したものも含む）:
+
+- Redmine でユーザーを削除したとき: そのユーザーの `user` スコープの設定
+- Redmine でプロジェクトを削除したとき: そのプロジェクトの `project` スコープの設定（子プロジェクトが一緒に消えるときは、その分も）
+
 レスポンス: 204 No Content
+
+---
+
+### POST /studio_settings/versions
+
+自分の本人の設定（`own`）と、ID で指定した設定（`ids`）の `version` だけをまとめて返す。payload は返さない。変わった設定だけを `GET /studio_settings/:id` で読み直すために使う。
+
+リクエスト:
+
+```json
+{
+  "own": ["work_settings"],
+  "ids": [12, 34]
+}
+```
+
+| パラメータ | 説明 |
+|-----------|------|
+| `own` | `schema_type` の配列。自分の `user` スコープの設定のうち、削除済みでないものを返す |
+| `ids` | 設定 ID（整数）の配列。読める・削除済みでない設定を返す（スコープは問わない） |
+
+- `own`・`ids` は配列で送る。どちらか一方だけでもよい。空の配列は 200（空の結果）
+- `own` も `ids` も無い・配列でない・`ids` に整数でない値がある場合は 422
+- 求めたのに返らないものは「無い（削除された・読めない）」と読んでよい
+- リクエストは `studio_setting_versions` で包んでもよい（`{ "studio_setting_versions": { "own": [...], "ids": [...] } }`）。XML は一番外側の要素が 1 つ要るので包んで送り、配列には `type="array"` を付ける（無いと 422）
+
+```xml
+<studio_setting_versions>
+  <own type="array"><schema_type>work_settings</schema_type></own>
+  <ids type="array"><id>12</id><id>34</id></ids>
+</studio_setting_versions>
+```
+
+レスポンス:
+
+```json
+{
+  "studio_setting_versions": {
+    "own": [
+      { "id": 5, "schema_type": "work_settings", "version": 3 }
+    ],
+    "team": [
+      { "id": 12, "version": 7 }
+    ]
+  }
+}
+```
 
 ---
 
@@ -285,7 +378,7 @@ GET /studio_settings.xml    → XML 形式で返却
 
 ### PUT /studio_settings/:id/users
 
-ユーザー割り当てを置換（既存の割り当てを全て削除し、新しい割り当てを作成）。
+ユーザー割り当てを置換（`user_ids` に無いユーザーの割り当てを削除し、新しいユーザーの割り当てを作成）。`user_ids` に入っている、既に割り当て済みのユーザーは、そのまま残す（割り当てられる相手かを確かめ直さない。ロック中になった人などを含む今の一覧を、そのまま送り返せる）。残った割り当ての `id`・`assigned_on`・`assigned_by` は前のまま。新しいユーザーに割り当てられない人がいれば、何も変えずに 422（理由は最初に断られた 1 人分だけ返る）。`user` スコープの設定には割り当てられない（422）。ほかの依頼と同時に届いて書き込みがぶつかったときは、読み直して 1 度だけやり直す。それでもぶつかったときは、何も変えずに 409（本文は `{ "errors": [...] }`）を返すので、送り直す。
 
 リクエスト:
 
@@ -322,7 +415,7 @@ GET /studio_settings.xml    → XML 形式で返却
 
 ### POST /studio_settings/:id/users/:user_id
 
-ユーザーを割り当てに追加。既に存在する場合は既存の割り当てを返す。
+ユーザーを割り当てに追加（201）。既に割り当て済みなら、何もせず今ある割り当てを返す（200。同じ依頼がほぼ同時に届いた場合も、先に書かれた割り当てを 200 で返す）。割り当てられない相手（見えない・いない・有効でない、`project` スコープでメンバーでない）は 422。`user` スコープの設定には割り当てられない（422）。
 
 レスポンス (201 Created):
 
@@ -352,7 +445,7 @@ GET /studio_settings.xml    → XML 形式で返却
 
 ### GET /users/:id/studio_settings
 
-指定したユーザーに割り当てられた設定の一覧を取得。論理削除された設定は除外。
+指定したユーザーに割り当てられた設定の一覧を取得。論理削除された設定と、そのユーザーが読めない設定（割り当てた後にプロジェクトから外れた・設定の範囲が変わったなど）は除外。
 
 クエリパラメータ:
 
@@ -384,7 +477,7 @@ GET /studio_settings.xml    → XML 形式で返却
 
 ## 履歴
 
-設定の変更履歴を管理する。設定の作成・更新・削除時に自動的に履歴が作成される。
+設定の変更履歴を管理する。設定の作成・更新・削除時に自動的に履歴が作成される（`user` スコープの設定は履歴を残さない）。履歴の `version` は履歴の通し番号で、設定の `version` とは別の値。
 
 ### change_type の種類
 
@@ -541,6 +634,7 @@ GET /studio_settings.xml    → XML 形式で返却
     "scope_type": "global",
     "scope_id": null,
     "schema_version": 0,
+    "version": 5,
     "payload": "{\"key\":\"value\"}",
     "created_on": "2026-03-01T10:00:00Z",
     "created_by": { "id": 1, "name": "Admin" },
@@ -566,6 +660,8 @@ GET /studio_settings.xml    → XML 形式で返却
 権限のないスコープの設定にアクセスした場合に返す。以下の場合に 403 が返される:
 
 - `project` スコープの設定を、そのプロジェクトの非メンバーが取得・作成・更新・削除・復元・ユーザー割り当て操作した
+- 管理者でない人が、更新で設定の範囲を変えようとした（`scope_type` を変える、`project` の設定をほかのプロジェクトへ付け替える）
+- `user` スコープの設定を、持ち主以外かつ非管理者が更新・削除・復元・ユーザー割り当て操作した、または他のユーザーの分を作成しようとした
 - `GET /users/:id/studio_settings` を、自分以外かつ非管理者が要求した
 
 ### 404 Not Found
@@ -578,10 +674,19 @@ GET /studio_settings.xml    → XML 形式で返却
 - 指定された割り当てが存在しない
 - 指定されたバージョンの履歴が存在しない
 
+### 409 Conflict
+
+本文は `{ "errors": [...] }` ではなく、今の設定（`GET /studio_settings/:id` と同じ形・payload 込み）。以下の場合に返される:
+
+- `POST /studio_settings` で、同じ持ち主・同じ `schema_type` の `user` スコープの設定が既にある
+- `PUT /studio_settings/:id` で、`expected_version` が今の `version` と違う
+
+ただし `PUT /studio_settings/:id/users` の 409（ほかの依頼と書き込みがぶつかった。何も変えていないので送り直す）は、ほかのエラーと同じ `{ "errors": [...] }` の形。
+
 ### 422 Unprocessable Entity
 
 ```json
-{ "errors": ["Name can't be blank", "Schema type can't be blank", "Scope type can't be blank"] }
+{ "errors": ["Name cannot be blank", "Schema type cannot be blank", "Scope type cannot be blank"] }
 ```
 
 ```json
@@ -591,3 +696,42 @@ GET /studio_settings.xml    → XML 形式で返却
 ```json
 { "errors": ["user_ids must be an array"] }
 ```
+
+送った値の形と長さに関するもの（作成・更新・削除・復元）。形の誤りは、あればすべて並べて返す。長さと、プロジェクト・ユーザーの実在は、形が正しいときに確かめて返す:
+
+| メッセージ | 発生する場合 |
+|-----------|-------------|
+| `studio_setting is required` | 作成・更新で `studio_setting` が無い・空 |
+| `studio_setting must be an object` | `studio_setting` が項目をまとめたもの（JSON のオブジェクト、子要素を持つ XML の要素）でない（文字列・配列など） |
+| `name must be a string`（`schema_type`・`scope_type`・`payload` も同じ） | その項目が文字列でない。`payload` は JSON を文字列にして送る（オブジェクトのままは不可） |
+| `scope_id must be an integer`（`schema_version` も同じ） | その項目が整数として読めない、または -2147483648〜2147483647 の外 |
+| `version must be an integer` | 復元で `version` が無い・整数として読めない |
+| `comment must be a string` | `comment` が文字列でない（`comment` を使わない削除〔`force=1`・`user` スコープ〕でも確かめる） |
+| `comment is too long (maximum is 255 characters)` | `comment` が 255 文字を超える |
+| `Name is too long (maximum is 255 characters)`（`Schema type` も同じ） | `name`・`schema_type` が 255 文字を超える |
+| `Scope cannot be blank` | `project` スコープの作成・管理者の付け替えで `scope_id` が無い（作成で管理者でなければ 403） |
+| `Scope must be an existing project` | `project` スコープの作成・管理者の付け替えで、`scope_id` のプロジェクトが無い（作成で管理者でなければ 403） |
+| `Scope must be an existing user` | `user` スコープで、`scope_id` のユーザーが無い（グループ・匿名も不可） |
+
+`Name is too long …` など、モデルの検証で出るメッセージ（項目名で始まるもの）は、利用者の言語で返る（例: 日本語なら「名称 は255文字以内で入力してください」）。ほかのメッセージは英語のまま。
+
+ユーザー割り当てに関するもの（`User …` はモデルの検証のメッセージなので、利用者の言語で返る。例: 日本語なら「ユーザー には実在するユーザーを指定してください: 5」）:
+
+| メッセージ | 発生する場合 |
+|-----------|-------------|
+| `user_ids must be an array` | 置換で `user_ids` が配列でない |
+| `User does not exist: <ID>` | 割り当てる相手が、いない・割り当てる人から見えない・有効でない（グループ・匿名・ロック中・未承認） |
+| `User is not a member of the project: <ID>` | `project` スコープの設定に、そのプロジェクトのメンバーでない人を割り当てようとした |
+| `User has already been taken` | 置換で、同じユーザーを 2 回送った |
+
+本人の設定と版に関するもの:
+
+| メッセージ | 発生する場合 |
+|-----------|-------------|
+| `expected_version is required` | `user` スコープの更新で `expected_version` が無い |
+| `expected_version must be an integer` | `expected_version` が整数として読めない |
+| `scope_type cannot be changed to or from user` | `scope_type` を `user` から／へ変えようとした |
+| `A user setting cannot be assigned to users` | `user` スコープの設定にユーザーを割り当てようとした |
+| `own or ids is required` | `POST /studio_settings/versions` に `own` も `ids` も無い |
+| `own must be an array of schema_type` | `own` が文字列の配列でない |
+| `ids must be an array of integers` | `ids` が整数の配列でない |

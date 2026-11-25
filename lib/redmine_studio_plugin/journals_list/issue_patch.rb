@@ -62,11 +62,11 @@ module RedmineStudioPlugin
             changes_by_journal[journal_id][prop_key] = { old: old_value, new: value }
           end
 
-          # ステータスとユーザーの名前を一括取得
+          # ステータスと担当者（ユーザー・グループ）の名前を一括取得
           status_ids = attr_changes.flat_map { |_, pk, ov, v| pk == 'status_id' ? [ov, v] : [] }.compact.uniq
-          user_ids = attr_changes.flat_map { |_, pk, ov, v| pk == 'assigned_to_id' ? [ov, v] : [] }.compact.uniq
+          assignee_ids = attr_changes.flat_map { |_, pk, ov, v| pk == 'assigned_to_id' ? [ov, v] : [] }.compact.uniq
           status_names = IssueStatus.where(id: status_ids).pluck(:id, :name).to_h
-          user_names = User.where(id: user_ids).map { |u| [u.id, u.name] }.to_h
+          principals = Principal.where(id: assignee_ids).index_by(&:id)
 
           issues.each do |issue|
             issue_journals = journals_by_issue[issue.id] || []
@@ -100,7 +100,7 @@ module RedmineStudioPlugin
               # コメント付きジャーナルに到達したら、前のコメントに累積値を確定
               if comment_journal_ids.include?(jid) && last_comment_journal
                 set_cumulative_values(last_comment_journal, running_status_id, running_assigned_to_id,
-                  status_names, user_names, note_numbers, issue.id)
+                  status_names, principals, note_numbers, issue.id)
               end
 
               changes = changes_by_journal[jid]
@@ -122,7 +122,7 @@ module RedmineStudioPlugin
             # 最後のコメントには現在の累積値を設定
             if last_comment_journal
               set_cumulative_values(last_comment_journal, running_status_id, running_assigned_to_id,
-                status_names, user_names, note_numbers, issue.id)
+                status_names, principals, note_numbers, issue.id)
             end
 
             issue.visible_journals_with_notes = issue_journals
@@ -131,13 +131,18 @@ module RedmineStudioPlugin
 
         private
 
-        def set_cumulative_values(journal, status_id, assigned_to_id, status_names, user_names, note_numbers, issue_id)
+        def set_cumulative_values(journal, status_id, assigned_to_id, status_names, principals, note_numbers, issue_id)
           journal.instance_variable_set(:@note_number, note_numbers.dig(issue_id, journal.id))
           journal.instance_variable_set(:@cumulative_status_name,
             status_names[status_id] || IssueStatus.find_by(id: status_id)&.name || '')
-          journal.instance_variable_set(:@cumulative_assigned_to_id, assigned_to_id)
-          journal.instance_variable_set(:@cumulative_assigned_to_name,
-            assigned_to_id ? (user_names[assigned_to_id] || User.find_by(id: assigned_to_id)&.name || '') : '')
+          set_cumulative_assigned_to(journal,
+            assigned_to_id && (principals[assigned_to_id] || Principal.find_by(id: assigned_to_id)))
+        end
+
+        # その時点の担当者（ユーザー・グループ）。削除したグループは見つからないので、名前は空になる
+        def set_cumulative_assigned_to(journal, principal)
+          journal.instance_variable_set(:@cumulative_assigned_to, principal)
+          journal.instance_variable_set(:@cumulative_assigned_to_name, principal&.name || '')
         end
       end
 
@@ -192,9 +197,7 @@ module RedmineStudioPlugin
             last_comment_journal.instance_variable_set(:@note_number, last_comment_note_number)
             last_comment_journal.instance_variable_set(:@cumulative_status_name,
               IssueStatus.find_by(id: running_status_id)&.name || '')
-            last_comment_journal.instance_variable_set(:@cumulative_assigned_to_id, running_assigned_to_id)
-            last_comment_journal.instance_variable_set(:@cumulative_assigned_to_name,
-              running_assigned_to_id ? (User.find_by(id: running_assigned_to_id)&.name || '') : '')
+            set_own_cumulative_assigned_to(last_comment_journal, running_assigned_to_id)
           end
 
           changes = changes_by_journal[jid]
@@ -219,12 +222,17 @@ module RedmineStudioPlugin
           last_comment_journal.instance_variable_set(:@note_number, last_comment_note_number)
           last_comment_journal.instance_variable_set(:@cumulative_status_name,
             IssueStatus.find_by(id: running_status_id)&.name || '')
-          last_comment_journal.instance_variable_set(:@cumulative_assigned_to_id, running_assigned_to_id)
-          last_comment_journal.instance_variable_set(:@cumulative_assigned_to_name,
-            running_assigned_to_id ? (User.find_by(id: running_assigned_to_id)&.name || '') : '')
+          set_own_cumulative_assigned_to(last_comment_journal, running_assigned_to_id)
         end
 
         journals
+      end
+
+      # その時点の担当者（ユーザー・グループ）。削除したグループは見つからないので、名前は空になる
+      def set_own_cumulative_assigned_to(journal, assigned_to_id)
+        principal = assigned_to_id && Principal.find_by(id: assigned_to_id)
+        journal.instance_variable_set(:@cumulative_assigned_to, principal)
+        journal.instance_variable_set(:@cumulative_assigned_to_name, principal&.name || '')
       end
     end
   end

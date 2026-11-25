@@ -120,6 +120,23 @@ namespace :redmine_studio_plugin do
     puts '  Each run writes its result to log/auto_close.log ("Completed" on success).'
   end
 
+  # 旧プラグインの設定（YAML）を読む。設定として読めないものは空として扱う
+  def redmine_studio_plugin_load_legacy_settings(text)
+    # 設定画面から保存した値は ActiveSupport::HashWithIndifferentAccess として入っている
+    permitted = [Symbol, ActiveSupport::HashWithIndifferentAccess]
+    loaded =
+      if Gem::Version.new(Psych::VERSION) >= Gem::Version.new('3.1.0')
+        YAML.safe_load(text, permitted_classes: permitted)
+      else
+        # Ruby 2.5 に付属の psych（3.0 系）は permitted_classes: を受け付けないため、位置引数で渡す
+        YAML.safe_load(text, permitted)
+      end
+    loaded.is_a?(Hash) ? loaded : {}
+  rescue Psych::Exception, ArgumentError
+    # 文法の誤り・許可していないクラス・値の変換の失敗
+    {}
+  end
+
   # Subtask List Accordion の設定移行
   def migrate_subtask_list_accordion_settings
     # 旧プラグインが削除されている場合、動的メソッドは使えないため DB から直接読み取る
@@ -131,7 +148,7 @@ namespace :redmine_studio_plugin do
       return
     end
 
-    legacy_settings = YAML.safe_load(legacy_record[:value], permitted_classes: [Symbol]) rescue {}
+    legacy_settings = redmine_studio_plugin_load_legacy_settings(legacy_record[:value])
 
     if legacy_settings.blank?
       puts '  redmine_subtask_list_accordion: No settings to migrate (empty settings).'

@@ -50,7 +50,10 @@ The following 5 fields are added to the standard issue response.
 ```
 
 - `count`: number of times the assignee was changed
-- `items`: assignee transitions (initial assignee → new assignee at each change; element count = `count` + 1). No assignee is `id: 0, name: ""`; a deleted/invalid user is `id: <original id>, name: ""`. An issue with no change history has `count: 0` and a single `items` entry for the current assignee
+- `items`: assignee transitions (initial assignee → new assignee at each change; element count = `count` + 1). An issue with no change history has `count: 0` and a single `items` entry for the current assignee
+  - When the assignee is a group, the group name is returned
+  - No assignee is `id: 0, name: ""`; a deleted group is `id: <original id>, name: ""`
+  - A deleted user is returned as the anonymous user, because Redmine replaces the assignee in the history with the anonymous user
 - Formatting (labeling, truncation) is the client's responsibility
 
 ### `children_count`

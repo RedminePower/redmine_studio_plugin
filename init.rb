@@ -10,6 +10,13 @@ config_path = File.join(plugin_root, 'config', 'integrated_plugins.yml')
 config = YAML.load_file(config_path)
 integrated_plugins = config['integrated_plugins'] || []
 
+# Server Logs API (パッチを当てないので、競合があっても読み込む)
+require_relative 'lib/redmine_studio_plugin/server_logs/log_directory'
+require_relative 'lib/redmine_studio_plugin/server_logs/read_slots'
+require_relative 'lib/redmine_studio_plugin/server_logs/range_reader'
+require_relative 'lib/redmine_studio_plugin/server_logs/app_server_info'
+require_relative 'lib/redmine_studio_plugin/server_logs/admin_access'
+
 # Check for conflicting plugins (integrated plugins that still exist)
 plugins_dir = Rails.root.join('plugins')
 conflicting_plugins = integrated_plugins.select do |plugin|
@@ -32,7 +39,7 @@ if conflicting_plugins.any?
     description "WARNING: Setup is not complete. " \
                 "Run 'bundle exec rake redmine_studio_plugin:install RAILS_ENV=production'. " \
                 "Until then, integrated features are disabled to prevent conflicts."
-    version '2.3.0'
+    version '2.4.0'
     url 'https://github.com/RedminePower/redmine_studio_plugin'
     author_url 'https://www.redmine-power.com/'
   end
@@ -42,7 +49,7 @@ else
     name 'Redmine Studio plugin'
     author 'Redmine Power'
     description 'Provides features for Redmine Studio (Windows client application provided by Redmine Power).'
-    version '2.3.0'
+    version '2.4.0'
     url 'https://github.com/RedminePower/redmine_studio_plugin'
     author_url 'https://www.redmine-power.com/'
 
@@ -101,6 +108,9 @@ else
   require_relative 'lib/redmine_studio_plugin/status_background/hooks'
 
   # Load Wiki Lists macros
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/visible_lookup'
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/macro_error'
+  require_relative 'lib/redmine_studio_plugin/wiki_lists/nesting_guard'
   require_relative 'lib/redmine_studio_plugin/wiki_lists/wiki_list'
   require_relative 'lib/redmine_studio_plugin/wiki_lists/issue_name_link'
   require_relative 'lib/redmine_studio_plugin/wiki_lists/ref_issues/parser'
@@ -128,6 +138,10 @@ else
 
   # Load Spent Hours By User (API 専用。HTML 一覧カラムではないため query_column 等は無し)
   require_relative 'lib/redmine_studio_plugin/spent_hours_by_user/issue_patch'
+
+  # Load Studio Settings (利用者・プロジェクトを消したときの設定の後片付け)
+  require_relative 'lib/redmine_studio_plugin/studio_settings/user_patch'
+  require_relative 'lib/redmine_studio_plugin/studio_settings/project_patch'
 
   # Load OAuth Client (サインイン用アプリの自己修復登録・スコープ定義)
   require_relative 'lib/redmine_studio_plugin/oauth_client/scope_provider'
@@ -166,6 +180,10 @@ else
 
   # Spent Hours By User patch
   Issue.include RedmineStudioPlugin::SpentHoursByUser::IssuePatch
+
+  # Studio Settings patches
+  User.include RedmineStudioPlugin::StudioSettings::UserPatch
+  Project.include RedmineStudioPlugin::StudioSettings::ProjectPatch
 
   # Register columns (QueryColumn が利用可能になった後にロード)
   require_relative 'lib/redmine_studio_plugin/journals_list/query_column'

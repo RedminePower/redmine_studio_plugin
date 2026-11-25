@@ -62,7 +62,7 @@ foreach ($plugin in $conflictingPlugins) {
 
 ### フェーズ 3: HTTP テスト
 
-1. [2-1] ～ [2-5] を実行
+1. 2 章の用意を流し、[2-1] ～ [2-5] を実行し、後片付けを流す（データはその場で作って消す）
 
 ### フェーズ 4: ブラウザテスト
 
@@ -119,10 +119,11 @@ docker exec {Container} rails runner plugins/redmine_studio_plugin/test/features
 **確認方法:**
 ```ruby
 permissions = Redmine::AccessControl.permissions.select { |p| p.project_module == :reply_button }
+puts permissions.any? ? 'PASS' : 'FAIL'
 ```
 
 **期待結果:**
-- `permissions.any?` が true
+- `permissions.any?` が true（`PASS`）
 
 ---
 
@@ -130,11 +131,11 @@ permissions = Redmine::AccessControl.permissions.select { |p| p.project_module =
 
 **確認方法:**
 ```ruby
-defined?(RedmineStudioPlugin::ReplyButton::Hooks)
+puts defined?(RedmineStudioPlugin::ReplyButton::Hooks) ? 'PASS' : 'FAIL'
 ```
 
 **期待結果:**
-- 定義されている（nil ではない）
+- 定義されている（nil ではない。`PASS`）
 
 ---
 
@@ -143,118 +144,189 @@ defined?(RedmineStudioPlugin::ReplyButton::Hooks)
 **確認方法:**
 ```ruby
 view_path = Rails.root.join('plugins', 'redmine_studio_plugin', 'app', 'views', 'issues', 'reply_button', '_reply.html.erb')
-File.exist?(view_path)
+puts File.exist?(view_path) ? 'PASS' : 'FAIL'
 ```
 
 **期待結果:**
-- ファイルが存在する
+- ファイルが存在する（`PASS`）
 
 ---
 
 ### [1-4] 元プラグインで有効だったプロジェクト → 設定が引き継がれている
 
+元プラグインとモジュール名（`reply_button`）が同じなので、元プラグインで有効にしたプロジェクトの記録（`enabled_modules` の行）がそのまま効く。
+元プラグインが残す記録と同じ行をその場で作ったプロジェクトに直接入れ、有効として読まれることを確かめる（終わったら消す）。
+
 **確認方法:**
 ```ruby
-project = Project.find_by_identifier('test-plugin')
-project.module_enabled?(:reply_button)
+User.current = User.find(1)
+sfx = SecureRandom.hex(3)
+project = nil
+begin
+  project = Project.new(name: "RB14_#{sfx}", identifier: "rb14-#{sfx}", is_public: false)
+  project.enabled_module_names = %w[issue_tracking]
+  project.save!
+  # 元プラグインが残す記録と同じ形（モジュール名だけの行）を直接入れる
+  EnabledModule.insert_all([{ project_id: project.id, name: 'reply_button' }])
+  registered = Redmine::AccessControl.available_project_modules.include?(:reply_button)
+  ok = registered && Project.find(project.id).module_enabled?(:reply_button)
+  puts ok ? 'PASS' : "FAIL: registered=#{registered} enabled=#{Project.find(project.id).module_enabled?(:reply_button).inspect}"
+ensure
+  Project.find_by(id: project.id)&.destroy if project&.id
+end
 ```
 
 **期待結果:**
-- モジュールが有効
-
-**スキップ条件:**
-- test-plugin プロジェクトが存在しない場合
+- `PASS`（モジュール `reply_button` が登録されていて、元プラグインの記録を持つプロジェクトで有効として読まれる）
 
 ---
 
 ## 2. HTTP テスト
 
-**実行方法:**
-```powershell
-pwsh -File "...\http_test.ps1" -BaseUrl "{BaseUrl}"
-```
+**実行方法:** 下の用意で、reply_button が有効なプロジェクトと無効なプロジェクトにチケットを 1 つずつ作り、コメントの並び順が「新しい順」と「古い順」の利用者を 1 人ずつ作る（終わったら後片付けで消す）。
+各試験は、用意で作った利用者でセッション認証（下の認証方法）してチケット画面の HTML を取る。用意の JSON の名前（`{OnIssueId}` など）を各試験のブロックに入れて流す。
 
 **認証方法:**
 1. `/login` ページから CSRF トークンを取得（`csrf-token" content="([^"]+)"` パターン）
 2. POST `/login` でセッション確立
 
-### [2-1] モジュール有効のチケット画面 → rsp-icon-reply が HTML に存在
+**用意（HTTP テストの前に 1 回）:**
 
-**テスト対象チケットの取得:**
 ```ruby
-Issue.joins(:project)
-     .joins('INNER JOIN enabled_modules ON enabled_modules.project_id = projects.id')
-     .where(enabled_modules: { name: 'reply_button' })
-     .first
+Project.where('identifier LIKE ?', 'rb-spec-%').order(id: :desc).each(&:destroy)
+User.where('login LIKE ?', 'rb_spec_%').each(&:destroy)
+Role.where('name LIKE ?', 'RB_Spec_%').each(&:destroy)
+sfx = SecureRandom.hex(3)
+admin = User.find(1)
+tracker = Tracker.sorted.first
+# 編集欄（Reply ボタンを出すところ）が出るように、注記の追加と編集の権限を持たせる
+role = Role.create!(name: "RB_Spec_Role_#{sfx}", permissions: [:view_issues, :add_issue_notes, :edit_issues])
+pw = "Pw-#{sfx}-x9Z"
+mk_user = ->(sorting) {
+  u = User.new(login: "rb_spec_#{sorting}_#{sfx}", firstname: 'RB', lastname: sorting, mail: "rb_spec_#{sorting}_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+  u.password = u.password_confirmation = pw
+  u.save!
+  u.pref.comments_sorting = sorting
+  u.pref.save!
+  u
+}
+asc = mk_user.call('asc')
+desc = mk_user.call('desc')
+mk_issue = ->(name, modules) {
+  prj = Project.new(name: "RB_Spec_#{name}_#{sfx}", identifier: "rb-spec-#{name}-#{sfx}", is_public: false)
+  prj.enabled_module_names = modules
+  prj.trackers = [tracker]
+  prj.save!
+  [asc, desc].each { |u| Member.create!(principal: u, project: prj, roles: [role]) }
+  Issue.create!(project: prj, tracker: tracker, subject: "RB_Spec_#{name}_#{sfx}", author: admin)
+}
+on = mk_issue.call('on', %w[issue_tracking reply_button])
+off = mk_issue.call('off', %w[issue_tracking])
+puts({ OnIssueId: on.id, OffIssueId: off.id, AscLogin: asc.login, DescLogin: desc.login, UserPassword: pw }.to_json)
 ```
 
-**確認方法:**
-- GET `/issues/{id}` のレスポンス HTML
+**後片付け（HTTP テストのあとに 1 回）:**
+
+```ruby
+Project.where('identifier LIKE ?', 'rb-spec-%').order(id: :desc).each(&:destroy)
+User.where('login LIKE ?', 'rb_spec_%').each(&:destroy)
+Role.where('name LIKE ?', 'RB_Spec_%').each(&:destroy)
+puts 'cleanup: ok'
+```
+
+### [2-1] モジュール有効のチケット画面 → rsp-icon-reply が HTML に存在
+
+**確認方法:** reply_button が有効なプロジェクトのチケット（`{OnIssueId}`）の画面の HTML
+
+```powershell
+$p = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable ws
+$tok = [regex]::Match($p.Content, 'csrf-token" content="([^"]+)"').Groups[1].Value
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $ws -Body @{ authenticity_token = $tok; username = '{AscLogin}'; password = '{UserPassword}' } | Out-Null
+$html = (Invoke-WebRequest -Uri '{BaseUrl}/issues/{OnIssueId}' -WebSession $ws).Content
+"[2-1] " + $(if ($html.Contains('rsp-icon-reply')) { 'PASS' } else { 'FAIL' })
+```
 
 **期待結果:**
-- HTML に `rsp-icon-reply` が含まれる
+- `[2-1] PASS`（HTML に `rsp-icon-reply` が含まれる）
 
 ---
 
 ### [2-2] モジュール無効のチケット画面 → rsp-icon-reply が存在しない
 
-**テスト対象チケットの取得:**
-```ruby
-Issue.joins(:project)
-     .where.not(projects: { id: EnabledModule.where(name: 'reply_button').select(:project_id) })
-     .first
+**確認方法:** reply_button が無効なプロジェクトのチケット（`{OffIssueId}`）の画面の HTML。編集欄が出ていることも確かめる（出ていないと、ボタンが無いことを確かめられない）
+
+```powershell
+$p = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable ws
+$tok = [regex]::Match($p.Content, 'csrf-token" content="([^"]+)"').Groups[1].Value
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $ws -Body @{ authenticity_token = $tok; username = '{AscLogin}'; password = '{UserPassword}' } | Out-Null
+$html = (Invoke-WebRequest -Uri '{BaseUrl}/issues/{OffIssueId}' -WebSession $ws).Content
+"[2-2] " + $(if ($html.Contains('id="issue_notes"') -and -not $html.Contains('rsp-icon-reply')) { 'PASS' } else { 'FAIL' })
 ```
 
-**確認方法:**
-- GET `/issues/{id}` のレスポンス HTML
-
 **期待結果:**
-- HTML に `rsp-icon-reply` が含まれない
+- `[2-2] PASS`（編集欄はあり、HTML に `rsp-icon-reply` が含まれない）
 
 ---
 
 ### [2-3] JavaScript ファイルが読み込まれている
 
-**確認方法:**
-- GET `/issues/{id}` のレスポンス HTML（モジュール有効プロジェクト）
+**確認方法:** モジュール有効プロジェクトのチケット（`{OnIssueId}`）の画面の HTML
+
+```powershell
+$p = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable ws
+$tok = [regex]::Match($p.Content, 'csrf-token" content="([^"]+)"').Groups[1].Value
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $ws -Body @{ authenticity_token = $tok; username = '{AscLogin}'; password = '{UserPassword}' } | Out-Null
+$html = (Invoke-WebRequest -Uri '{BaseUrl}/issues/{OnIssueId}' -WebSession $ws).Content
+# プラグインが出す script ブロック（rsp-icon-reply を含む <script> 要素）だけを見る
+$own = @([regex]::Matches($html, '(?s)<script[^>]*>.*?</script>') | Where-Object { $_.Value.Contains('rsp-icon-reply') } | ForEach-Object { $_.Value })
+# コアの showAndScrollTo の裸呼び出し（rsp の付かない呼び出し）が無いこと
+$bare = @($own | Where-Object { $_ -cmatch '(?<![A-Za-z])showAndScrollTo\(' }).Count
+"[2-3] " + $(if ($own.Count -gt 0 -and $html.Contains('rspShowAndScrollTo') -and $bare -eq 0) { 'PASS' } else { "FAIL: blocks=$($own.Count) bare=$bare" })
+```
 
 **期待結果:**
-- HTML に `rsp-icon-reply` と `rspShowAndScrollTo` の両方が含まれる
-- プラグインが出力する script ブロック（`rsp-icon-reply` を含む `<script>` 要素）内に、コア関数 `showAndScrollTo` の裸呼び出し（`rsp` プレフィックスなし）が含まれない
+- `[2-3] PASS`
+  - HTML に `rsp-icon-reply` と `rspShowAndScrollTo` の両方が含まれる
+  - プラグインが出力する script ブロック（`rsp-icon-reply` を含む `<script>` 要素）内に、コア関数 `showAndScrollTo` の裸呼び出し（`rsp` プレフィックスなし）が含まれない
   - ※ ページ全体にはコア自身の「編集」リンク（`onclick="showAndScrollTo(...)"`）が含まれるため、確認はプラグインの script ブロックにスコープする
 
 ---
 
 ### [2-4] コメント逆順設定 ON → reverseOrder = true が出力
 
-**事前設定:**
-```ruby
-User.find_by_login('{Username}').pref.update(comments_sorting: 'desc')
+**確認方法:** コメントの並び順が「新しい順」（`comments_sorting: 'desc'`）の利用者（`{DescLogin}`）でセッション認証し、`{OnIssueId}` の画面の HTML を取る
+
+```powershell
+$p = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable ws
+$tok = [regex]::Match($p.Content, 'csrf-token" content="([^"]+)"').Groups[1].Value
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $ws -Body @{ authenticity_token = $tok; username = '{DescLogin}'; password = '{UserPassword}' } | Out-Null
+$html = (Invoke-WebRequest -Uri '{BaseUrl}/issues/{OnIssueId}' -WebSession $ws).Content
+"[2-4] " + $(if ($html.Contains('var reverseOrder = true')) { 'PASS' } else { 'FAIL' })
 ```
 
-**確認方法:**
-- セッション認証でログイン後、GET `/issues/{id}` のレスポンス HTML を取得
-
 **期待結果:**
-- HTML に `var reverseOrder = true` が含まれる
+- `[2-4] PASS`（HTML に `var reverseOrder = true` が含まれる）
 
 **備考:**
 - API キー認証ではユーザー設定（comments_sorting）が適用されないため、セッション認証が必須
+- 並び順は用意で作った利用者に持たせるので、ほかの利用者の設定は変えない
 
 ---
 
 ### [2-5] コメント逆順設定 OFF → reverseOrder = false が出力
 
-**事前設定:**
-```ruby
-User.find_by_login('{Username}').pref.update(comments_sorting: 'asc')
+**確認方法:** コメントの並び順が「古い順」（`comments_sorting: 'asc'`）の利用者（`{AscLogin}`）でセッション認証し、`{OnIssueId}` の画面の HTML を取る
+
+```powershell
+$p = Invoke-WebRequest -Uri '{BaseUrl}/login' -SessionVariable ws
+$tok = [regex]::Match($p.Content, 'csrf-token" content="([^"]+)"').Groups[1].Value
+Invoke-WebRequest -Uri '{BaseUrl}/login' -Method Post -WebSession $ws -Body @{ authenticity_token = $tok; username = '{AscLogin}'; password = '{UserPassword}' } | Out-Null
+$html = (Invoke-WebRequest -Uri '{BaseUrl}/issues/{OnIssueId}' -WebSession $ws).Content
+"[2-5] " + $(if ($html.Contains('var reverseOrder = false')) { 'PASS' } else { 'FAIL' })
 ```
 
-**確認方法:**
-- セッション認証でログイン後、GET `/issues/{id}` のレスポンス HTML を取得
-
 **期待結果:**
-- HTML に `var reverseOrder = false` が含まれる
+- `[2-5] PASS`（HTML に `var reverseOrder = false` が含まれる）
 
 **備考:**
 - API キー認証ではユーザー設定（comments_sorting）が適用されないため、セッション認証が必須

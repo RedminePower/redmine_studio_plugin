@@ -25,6 +25,7 @@
 | `features/oauth_client_api/TEST_SPEC.md` | OAuth クライアント情報 API・ブラウザサインイン支援（前段 Basic ゲート下のトークン取得パッチ含む）テスト |
 | `features/status_background/TEST_SPEC.md` | Status Background（ステータスによるチケットの背景色）テスト |
 | `features/time_entry_summaries/TEST_SPEC.md` | Time Entry Summaries API（作業時間の要約）テスト |
+| `features/server_logs_api/TEST_SPEC.md` | Server Logs API（ログのファイルの一覧・範囲のバイト）と Info API の追加項目テスト |
 
 ## テストの種類
 
@@ -38,7 +39,20 @@ HTTP テストは PowerShell 7 以上で流す（`-SkipHttpErrorCheck` など、
 
 ## 環境パラメータ
 
-本テストは Redmine **5.x / 6.x / 7.x** の 3 メジャーバージョンで実施する。どのパッチ版で動かすか、接続先アドレス・ポート・サブディレクトリの有無・コンテナ名・認証情報は**実行環境ごとに異なる**ため、このリポジトリには書かない。各 TEST_SPEC は下記のプレースホルダのみを使い、具体値は実行する環境の設定から注入する。
+### 対象の Redmine と Ruby
+
+本テストは Redmine **5.x / 6.x / 7.x** の 3 メジャーバージョンで実施する。加えて、**5.x は、対応するいちばん古い Ruby（`CONTRIBUTING.md`「対応する Ruby」。今は Redmine 5.0 が動く Ruby 2.5）で動かした Redmine でも流す**。Redmine の公式の Docker イメージは新しい Ruby で動くため、5.x の環境だけでは、古い Ruby でだけ起きる不具合（新しい Ruby で増えたメソッドを呼んで落ちるなど）に気づけない。リリースの前の定型テストでは、この環境を `5.x-oldest-ruby` として、`5.x`・`6.x`・`7.x` と並べて記録する。
+
+この環境は公式のイメージには無いので、公式の Redmine 5.0 のイメージから Redmine の中身を写し、いちばん古い Ruby の公式イメージの上で gem を入れ直して作る（古い Ruby で入らない gem は、`Gemfile.local` で版を固定する）。本物の cron での自動クローズの確かめと、Puma・Thin の両方での確かめは、この環境では省き、`5.x` で行う。
+
+| 環境の名前 | Redmine | Ruby |
+|---|---|---|
+| `5.x` | 5.x | 公式イメージの Ruby |
+| `5.x-oldest-ruby` | 5.0 | 対応するいちばん古い Ruby |
+| `6.x` | 6.x | 公式イメージの Ruby |
+| `7.x` | 7.x | 公式イメージの Ruby |
+
+どのパッチ版で動かすか、接続先アドレス・ポート・サブディレクトリの有無・コンテナ名・認証情報は**実行環境ごとに異なる**ため、このリポジトリには書かない。各 TEST_SPEC は下記のプレースホルダのみを使い、具体値は実行する環境の設定から注入する。
 
 | プレースホルダ | 意味 |
 |---------------|------|
@@ -54,7 +68,7 @@ HTTP テストは PowerShell 7 以上で流す（`-SkipHttpErrorCheck` など、
 
 ### 具体値の置き場所
 
-具体値は `test/env.local.json` に書く。このファイルは `.gitignore` 済みでリポジトリには入らない。キーはプレースホルダ名と同じで、メジャーバージョンごとに値を持つ（5.x・7.x も同じ形で並べる）。
+具体値は `test/env.local.json` に書く。このファイルは `.gitignore` 済みでリポジトリには入らない。キーはプレースホルダ名と同じで、環境の名前ごとに値を持つ（`5.x`・`5.x-oldest-ruby`・`7.x` も同じ形で並べる）。
 
 ```json
 {
@@ -161,3 +175,4 @@ Claude に以下のように依頼してください:
 - `cache_bundle のテストを実行してください`
 - `oauth_client_api のテストを実行してください`
 - `time_entry_summaries のテストを実行してください`
+- `server_logs_api のテストを実行してください`

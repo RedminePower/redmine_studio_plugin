@@ -93,6 +93,12 @@ You can add display names and widths to column specifications:
   {{wiki_list(-p=other_project, +title, +project)}}
   ```
 
+### Notes
+
+- A wiki_list written in the text extracted from a page is not displayed (to prevent it from calling itself repeatedly, which would make the page fail to open)
+- Specifying the same option (`-p`, `-w`) twice is an error
+- `-c` can be used only in wiki pages
+
 ## issue_name_link Macro
 
 Generates a link from an issue's subject. This is useful when you want to create links using the subject instead of issue numbers.
@@ -140,6 +146,7 @@ Generates a link from an issue's subject. This is useful when you want to create
 - Issue subjects are searched by exact match
 - If multiple issues have the same subject, the link will point to the first one found
 - The project identifier can also be specified using the project name
+- Projects and issues that the viewer of the page cannot see give the same error as ones that do not exist
 
 ## ref_issues Macro
 
@@ -175,6 +182,9 @@ Displays a list of issues matching specified conditions. You can use custom quer
 | `-c` | Display count only |
 | `-0` | Display nothing if count is 0 |
 
+- `-t=` and `-l=` accept an issue attribute name (such as `status_id` or `subject`; column names such as `status` cannot be used) or a custom field (`cf_number` or the custom field name). Issues without a value for that custom field are shown as empty
+- Specifying the same option twice is an error (`-p`, `-n`, `-o`, `-g`; only one of `-i` and `-q`, and only one of `-t` and `-l`)
+
 ### Filter Conditions (-f Option)
 
 You can add filter conditions using the `-f:field=value` format.
@@ -191,6 +201,16 @@ You can add filter conditions using the `-f:field=value` format.
 | `version` | Target version name |
 | `project` | Project name |
 | `cf_number` | Custom field ID |
+| `treated` | Issues the specified person created or updated in the specified period (see below) |
+
+**treated:**
+
+Write it as `-f:treated PERSON START|END` (e.g. `-f:treated [current_user] [7days_ago]|[0days_ago]`).
+
+- Specify the person by login name or user ID. A value of digits only is treated as a login name if such a user exists, otherwise as a user ID
+- A user the viewer cannot see gives the same error as a nonexistent user
+- Specify dates as `YYYY-MM-DD` or `[Ndays_ago]`. Both the start and end dates are included (a negative value such as `[-1days_ago]` means a future date)
+- History entries with private notes the viewer cannot see are not counted (same as the core "Updated by" filter)
 
 **Operators:**
 
@@ -207,6 +227,16 @@ You can specify an operator between the field and value.
 | `*` | Any value |
 | `!*` | No value |
 
+**Notes:**
+
+- Specifying the same field twice is an error (for example `-s` twice, or `-f:status` and `-f:status_id`). Put multiple values in one option, separated by `|`
+- If you specify a field that the custom query (`-i`, `-q`) also uses, the macro's condition takes precedence
+- A value that does not fit the field (for example a non-numeric value for a numeric field) is an error
+- Numeric fields (`id`, `parent_id`, numeric custom fields, etc.) accept multiple values separated by `|`. Date and decimal fields accept only one value (two for `><`); more values are an error
+- `~` (contains) and `-s`, `-d`, `-w` find issues that contain any of the words separated by `|`. Each word is searched as a whole, without splitting it at spaces ("contains" in the Redmine issue list splits the text at spaces and finds issues that contain all the words). Empty words are ignored
+- `~` (contains) and `-s`, `-d`, `-w` search `%` and `_` as plain characters (the same as "contains" in the Redmine issue list). The search is not case-sensitive
+- `-f:subjectdescription` (subject and description) can be used only with `~` (contains)
+
 ### Special Value References
 
 You can use the following special references in filter values:
@@ -215,7 +245,7 @@ You can use the following special references in filter values:
 |-----------|-------------|
 | `[current_user]` | Current user's login name |
 | `[current_user_id]` | Current user's ID |
-| `[current_project_id]` | Current project's ID |
+| `[current_project_id]` | Current project's ID (only inside a project) |
 | `[Ndays_ago]` | Date N days ago (e.g., `[7days_ago]`) |
 | `[attribute_name]` | When used in an issue, the value of that issue's attribute |
 
@@ -329,11 +359,15 @@ You can specify up to 1000 issues using the `-n` option.
 
 When used together with `-o`, the display count is counted from the top of the sorted order. Also, the count shown in each `-g` group heading is the count for the whole group, so when the display count is limited, it may not match the number of rows displayed.
 
+### Notes
+
+- A ref_issues written inside a list (in the description column, etc.) is not displayed (a list inside a list is hard to read, and this prevents it from calling itself repeatedly, which would make the page fail to open)
+
 ## Notes
 
-Since these wiki macros can display issue information using arbitrary search conditions, **it is recommended to use them only in environments where only trusted users have access**.
+Every macro shows content according to the permissions of the person viewing the page. Issues and wiki pages that the viewer cannot see are not shown.
+Projects, issues, users, versions, categories and other items named in a macro also give the same error as nonexistent ones when the viewer cannot see them (so that their existence cannot be inferred from the output).
+The same applies to custom fields: a custom field the viewer cannot see shows no value with `-t=`, `-l=` or `[cf_N]`, and is treated like a nonexistent custom field.
+Text written in a macro (display names, widths and so on) and names shown in a list (project names, page aliases and so on) are not interpreted as HTML and are shown as plain text.
 
-Users with wiki editing permissions may be able to access the following information:
-- Issue information from other projects
-- Wiki page content from other projects
-- Custom field values
+These wiki macros can display lists of issues and other items using arbitrary search conditions chosen by the writer, and some conditions may put load on the server. **It is recommended to use them only in environments where only trusted users have access**.

@@ -63,12 +63,12 @@ foreach ($plugin in $conflictingPlugins) {
 
 ### フェーズ 3: HTTP テスト
 
-1. [2-1] ～ [2-3] を実行
+1. [2-1] ～ [2-4] を実行
 
 ### フェーズ 4: ブラウザテスト
 
 1. セットアップスクリプトを実行
-2. [3-1] ～ [3-4] を対話形式で実行
+2. [3-1] ～ [3-5] を対話形式で実行
 
 ### フェーズ 5: 事後処理（復元）
 
@@ -169,7 +169,7 @@ $loginPage = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable session -U
 $csrfMatch = [regex]::Match($loginPage.Content, 'name="authenticity_token" value="([^"]+)"')
 $csrfToken = $csrfMatch.Groups[1].Value
 $body = "authenticity_token=$([System.Web.HttpUtility]::UrlEncode($csrfToken))&username={Username}&password={Password}"
-Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded"
+Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded" | Out-Null
 $response = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/1" -WebSession $session
 $response.email
 ```
@@ -183,7 +183,13 @@ $response.email
 
 **確認方法:**
 ```powershell
-# [2-1] と同じセッションを使用
+# [2-1] と同じ手順でログインする（試験は 1 つずつでも流せるように）
+$BaseUrl = "{BaseUrl}"
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$loginPage = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable session -UseBasicParsing
+$csrfToken = [regex]::Match($loginPage.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+$body = "authenticity_token=$([System.Web.HttpUtility]::UrlEncode($csrfToken))&username={Username}&password={Password}"
+Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $session -UseBasicParsing -ContentType "application/x-www-form-urlencoded" | Out-Null
 $response = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/99999" -WebSession $session
 $response.email -eq $null
 ```
@@ -194,11 +200,80 @@ $response.email -eq $null
 
 **確認方法:**
 ```powershell
-$response = Invoke-WebRequest -Uri "$BaseUrl/teams_button/user_email/1" -MaximumRedirection 0 -ErrorAction SilentlyContinue
-$response.StatusCode
+# リダイレクトを止めると例外になる版がある（PowerShell 7）ので、例外のときは例外から状態コードを読む
+try { (Invoke-WebRequest -Uri "{BaseUrl}/teams_button/user_email/1" -MaximumRedirection 0 -ErrorAction Stop).StatusCode } catch { [int]$_.Exception.Response.StatusCode }
 ```
 
 **期待結果:** 302（ログインページへリダイレクト）
+
+### [2-4] 返すのは頼んだ人から見える有効な利用者だけ・隠している人は管理者にだけ返す
+
+頼んだ人から見えない人・ロック中の人・いない人は、同じ返事（`email` が null）にする。
+メールアドレスを隠している人は、本体の利用者の API と同じく管理者にだけ返し、ほかの人には `reason: "hidden"` を付けて返さない。
+
+用意（`rails runner`）：同じ非公開プロジェクトのメンバー（viewer・shown・hidden〔隠している〕・locked〔ロック中〕）と、どのプロジェクトにもいない outsider、管理者 tbadmin を作る。
+viewer のロールは「メンバーのみ見える」（`members_of_visible_projects`）。最後の行に、作った利用者の id・ログイン名・メールアドレスとパスワードを JSON で出す。
+
+```ruby
+sfx = SecureRandom.hex(3)
+pw = "Pw-#{sfx}-x9Z"
+mk_user = ->(name, admin: false, hide: false) {
+  u = User.new(login: "tb_#{name}_#{sfx}", firstname: 'TB', lastname: name, mail: "tb_#{name}_#{sfx}@example.com", status: User::STATUS_ACTIVE)
+  u.admin = admin
+  u.password = u.password_confirmation = pw
+  u.pref.hide_mail = hide
+  u.save!
+  u.pref.save!
+  u
+}
+project = Project.create!(name: "TB_#{sfx}", identifier: "tb-#{sfx}", is_public: false)
+role = Role.create!(name: "TB_Role_#{sfx}", permissions: [:view_issues], users_visibility: 'members_of_visible_projects')
+users = { viewer: mk_user.call('viewer'), shown: mk_user.call('shown'), hidden: mk_user.call('hidden', hide: true),
+          locked: mk_user.call('locked'), outsider: mk_user.call('outsider'), tbadmin: mk_user.call('tbadmin', admin: true) }
+users.values_at(:viewer, :shown, :hidden, :locked).each { |u| Member.create!(principal: u, project: project, roles: [role]) }
+users[:locked].update_column(:status, User::STATUS_LOCKED)
+puts({ suffix: sfx, password: pw }.merge(users.transform_values { |u| { id: u.id, login: u.login, mail: u.mail } }).to_json)
+```
+
+**確認方法:**（確かめが途中で落ちても、`finally` で必ず後片付けをする）
+```powershell
+$BaseUrl = "{BaseUrl}"
+$Container = '{Container}'
+$d = '<用意の最後の行の JSON>' | ConvertFrom-Json
+function Login($login) {
+    $s = $null
+    $page = Invoke-WebRequest -Uri "$BaseUrl/login" -SessionVariable s -UseBasicParsing
+    $token = [regex]::Match($page.Content, 'name="authenticity_token" value="([^"]+)"').Groups[1].Value
+    $body = "authenticity_token=$([uri]::EscapeDataString([Net.WebUtility]::HtmlDecode($token)))&username=$login&password=$([uri]::EscapeDataString($d.password))"
+    Invoke-WebRequest -Uri "$BaseUrl/login" -Method Post -Body $body -WebSession $s -UseBasicParsing -ContentType 'application/x-www-form-urlencoded' | Out-Null
+    $s
+}
+# 返事を、hidden（隠している）・nil（email が null）・メールアドレスのどれかにする
+function Ask($s, $id) {
+    $r = Invoke-RestMethod -Uri "$BaseUrl/teams_button/user_email/$id" -WebSession $s
+    if ($r.reason -eq 'hidden') { 'hidden' } elseif ($null -eq $r.email) { 'nil' } else { $r.email }
+}
+# 生の返事（JSON の文字そのまま）
+function Raw($s, $id) { (Invoke-WebRequest -Uri "$BaseUrl/teams_button/user_email/$id" -WebSession $s -UseBasicParsing).Content }
+try {
+    $v = Login $d.viewer.login
+    $a = Login $d.tbadmin.login
+    "viewer: shown=$((Ask $v $d.shown.id) -eq $d.shown.mail) hidden=$(Ask $v $d.hidden.id) locked=$(Ask $v $d.locked.id) outsider=$(Ask $v $d.outsider.id) none=$(Ask $v 999999)"
+    "admin: hidden=$((Ask $a $d.hidden.id) -eq $d.hidden.mail) outsider=$((Ask $a $d.outsider.id) -eq $d.outsider.mail) locked=$(Ask $a $d.locked.id)"
+    "raw: locked=$(Raw $v $d.locked.id) outsider=$(Raw $v $d.outsider.id) none=$(Raw $v 999999)"
+} finally {
+    # 後片付け。suffix が 6 桁の 16 進でなければ止める（空のまま LIKE で探すと、ほかの利用者に当たる）
+    if ($d.suffix -notmatch '^[0-9a-f]{6}$') { throw "suffix が正しくない: '$($d.suffix)'" }
+    $cleanup = "sfx = '$($d.suffix)'; User.where('login LIKE ?', ""tb_%_#{sfx}"").each(&:destroy); Project.where(identifier: ""tb-#{sfx}"").each(&:destroy); Role.where(name: ""TB_Role_#{sfx}"").each(&:destroy); puts 'cleaned'"
+    docker exec -u redmine -w /usr/src/redmine $Container bundle exec rails runner $cleanup 2>$null | Select-Object -Last 1
+}
+```
+
+**期待結果:**
+- `viewer: shown=True hidden=hidden locked=nil outsider=nil none=nil`（見えない人・ロック中の人・いない人は同じ返事）
+- `admin: hidden=True outsider=True locked=nil`（管理者には、隠している人・プロジェクトの外の人も返す。ロック中の人は返さない）
+- `raw: locked={"email":null} outsider={"email":null} none={"email":null}`（見えない人・ロック中の人・いない人の返事が、文字まで同じ）
+- 最後に `cleaned`
 
 ---
 
@@ -242,6 +317,9 @@ $response.StatusCode
 | login | firstname | lastname | パスワード |
 |-------|-----------|----------|-----------|
 | testuser | Test | User | password123 |
+| teamsviewer | Teams | Viewer | password123 |
+
+teamsviewer は teams-test のメンバー（管理者でない。[3-5] で使う）。
 
 **チケット:**
 
@@ -286,6 +364,17 @@ $response.StatusCode
 2. 「グループ担当テスト」チケットを開く
 
 **確認:** グループ名の横に Teams アイコンが表示されない
+
+### [3-5] メールアドレスを隠している人のボタンを押したとき
+
+**前提:** testuser の個人設定で「メールアドレスを隠す」をオンにしておく（終わったらオフに戻す）。
+
+**手順:**
+1. teamsviewer でログイン
+2. 「Teams有効テスト」チケットを開く
+3. testuser の横の Teams アイコンをクリック
+
+**確認:** 「このユーザーはメールアドレスを公開していないため、Teams チャットを開けません。」と知らせが出て、Teams は開かない（admin でログインした場合は、今までどおり Teams が開く）
 
 ---
 

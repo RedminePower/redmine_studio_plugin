@@ -14,8 +14,10 @@
                         dataType: 'json'
                     })
                     .done(function(response) {
-                        if (response.email === null) {
-                            alert('<%= l(:error_email_not_found) %>' + ' (Id:' + userId + ')');
+                        if (response.reason === 'hidden') {
+                            alert('<%= raw j(l(:error_email_hidden)) %>');
+                        } else if (response.email === null) {
+                            alert('<%= raw j(l(:error_email_not_found)) %>' + ' (Id:' + userId + ')');
                         } else {
                             var teamsUrl =
                                 'https://teams.microsoft.com/l/chat/0/0?users=' + response.email +
@@ -27,7 +29,7 @@
                         }
                     })
                     .fail(function() {
-                        alert('<%= l(:error_communication_failed) %>' + ' (Id:' + userId + ')');
+                        alert('<%= raw j(l(:error_communication_failed)) %>' + ' (Id:' + userId + ')');
                     });
 
                     return false;
